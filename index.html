@@ -1,0 +1,98 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projeção de Estoque — Só Aço Industrial</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+          font-family: 'Inter', sans-serif; 
+          color: #1a1a1a;
+        }
+        .dark body {
+          color: #f1f1f1;
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #808080; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #2E2D2C; }
+        .dark ::-webkit-scrollbar-track { background: #2E2D2C; }
+        .dark ::-webkit-scrollbar-thumb { background: #808080; }
+        
+        /* Cabeçalhos e Colunas Sticky - Garantir opacidade e alinhamento */
+        .sticky-header { position: sticky; top: 0; z-index: 50; }
+        .sticky-col { position: sticky; left: 0; z-index: 45; }
+        .sticky-col-2 { position: sticky; left: 120px; z-index: 45; }
+        
+        /* Drag and Drop Visuals */
+        .dragging { opacity: 0.5; transform: scale(0.98); cursor: grabbing; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        .drop-target { border: 2px dashed #1E22AA !important; background-color: rgba(30, 34, 170, 0.05) !important; }
+
+        /* Animação Surgir (Entrada) */
+        @keyframes surgir {
+          from { 
+            opacity: 0; 
+            transform: translateY(20px) scale(0.98); 
+          }
+          to { 
+            opacity: 1; 
+            transform: translateY(0) scale(1); 
+          }
+        }
+        .animate-surgir {
+          animation: surgir 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        /* Animação Flutuar (Contínua) */
+        @keyframes flutuar {
+          0% { transform: translateY(0px); }
+          50% { transform: translateY(-8px); }
+          100% { transform: translateY(0px); }
+        }
+        .animate-flutuar {
+          animation: flutuar 5s ease-in-out infinite;
+        }
+
+        /* Prevenindo seleção de texto em botões e headers */
+        th, button { user-select: none; }
+
+        /* Estilos de texto para modo claro */
+        .text-main { color: #1a1a1a; }
+        .dark .text-main { color: #f1f1f1; }
+    </style>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#041126', /* Azul marinho profundo ajustado conforme a logo */
+                        secondary: '#1E22AA',
+                        highlight: '#FFAD00',
+                        neutral: '#808080',
+                        darkBg: '#2E2D2C'
+                    }
+                }
+            }
+        }
+    </script>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.574.0",
+    "recharts": "https://esm.sh/recharts@^3.7.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "xlsx": "https://esm.sh/xlsx@^0.18.5"
+  }
+}
+</script>
+</head>
+<body class="bg-gray-50 text-main dark:bg-[#1a1a1a] dark:text-gray-100 transition-colors duration-200">
+    <div id="root"></div>
+</body>
+</html>

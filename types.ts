@@ -1,0 +1,57 @@
+
+export type UserProfile = 'ADMIN' | 'PCP' | 'CONSULTA';
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  name: string;
+  password: string;
+  profile: UserProfile;
+}
+
+export interface Order {
+  codigoRomaneio: string;
+  observacoesRomaneio: string;
+  dataEmissaoRomaneio: string;
+  numeroPedido: string;
+  cliente: string;
+  dataEmissaoPedido: string;
+  codigoProduto: string;
+  descricao: string;
+  um: string;
+  qtdPedida: number;
+  qtdVinculada: number;
+  tipoProduto: string;
+  precoUnitario: number;
+  dataEntrega: string;
+  municipio: string;
+  uf: string;
+  metodoEntrega: string;
+  requisicaoLoja: boolean;
+}
+
+export interface StockItem {
+  idProduto: number;
+  codigo: string;
+  idTipoProduto: number;
+  setorEstoquePadrao: string;
+  descricao: string;
+  setorEstoque: string;
+  saldoSetorFinal: number;
+}
+
+export interface Route {
+  id: string;
+  name: string;
+  date: string;
+  order: number;
+}
+
+export interface ProductConsolidated {
+  codigo: string;
+  descricao: string;
+  estoqueAtual: number;
+  totalPedido: number;
+  pendenteProducao: number;
+  routeData: Record<string, { pedido: number; falta: number }>;
+}
