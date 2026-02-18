@@ -28,6 +28,12 @@ export interface Order {
   uf: string;
   metodoEntrega: string;
   requisicaoLoja: boolean;
+  // Novos campos para lógica G. Teresina
+  localEntregaDif: number;
+  municipioCliente: string;
+  ufCliente: string;
+  municipioEntrega: string;
+  ufEntrega: string;
 }
 
 export interface StockItem {

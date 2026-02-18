@@ -27,21 +27,35 @@ interface Props {
   onFilterRoutes: (routeNames: string[]) => void;
 }
 
+const ROUTE_G_TERESINA = "Entrega G.Teresina";
+
 const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilterRoutes }) => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   
-  // Estado para largura da coluna de descrição
   const [descriptionWidth, setDescriptionWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
   const resizeRef = useRef<number>(0);
 
   const sortedRoutes = useMemo(() => [...routes].sort((a, b) => a.order - b.order), [routes]);
   
-  const filteredRoutesList = sortedRoutes.filter(r => 
+  // Lista unificada para o filtro (Incluindo a rota fixa G.Teresina)
+  const allFilterableRoutes = useMemo(() => {
+    return [
+      { id: 'fixed-gt', name: ROUTE_G_TERESINA, order: 0 },
+      ...sortedRoutes
+    ];
+  }, [sortedRoutes]);
+
+  const filteredRoutesOptions = allFilterableRoutes.filter(r => 
     r.name.toLowerCase().includes(filterSearch.toLowerCase())
   );
+
+  const isRouteVisible = (name: string) => {
+    if (selectedRoutes.length === 0) return true;
+    return selectedRoutes.includes(name);
+  };
 
   const routesToDisplay = useMemo(() => 
     selectedRoutes.length > 0 
@@ -58,7 +72,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
   };
 
   const handleSort = (columnKey: string, isCtrl: boolean) => {
-    if (isResizing) return; // Evita ordenar enquanto redimensiona
+    if (isResizing) return;
     setSortCriteria(prev => {
       const existingIndex = prev.findIndex(s => s.column === columnKey);
       
@@ -83,7 +97,6 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
     });
   };
 
-  // Lógica de Redimensionamento
   const startResizing = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -165,7 +178,6 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
 
   return (
     <div className="space-y-4 h-full flex flex-col">
-      {/* Filtro de Rotas */}
       <div className="flex items-center gap-4 bg-white dark:bg-[#252525] p-2 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm shrink-0">
         <div className="relative">
           <button 
@@ -173,7 +185,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
             className="flex items-center gap-2 bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-[#333] transition-colors"
           >
             <Filter className="w-3.5 h-3.5 text-secondary" />
-            <span>Colunas de Rotas ({selectedRoutes.length || sortedRoutes.length})</span>
+            <span>Colunas de Rotas ({selectedRoutes.length || allFilterableRoutes.length})</span>
             <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isFilterOpen ? 'rotate-180' : ''}`} />
           </button>
 
@@ -192,7 +204,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                 </div>
               </div>
               <div className="max-h-60 overflow-auto p-1">
-                {filteredRoutesList.map(route => (
+                {filteredRoutesOptions.map(route => (
                   <label key={route.id} className="flex items-center gap-2 p-1.5 hover:bg-gray-50 dark:hover:bg-[#2a2a2a] rounded cursor-pointer transition-colors">
                     <input 
                       type="checkbox"
@@ -200,7 +212,9 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                       onChange={() => toggleRoute(route.name)}
                       className="rounded border-gray-300 text-secondary focus:ring-secondary h-3.5 w-3.5"
                     />
-                    <span className="text-[11px] truncate text-gray-900 dark:text-gray-100">{route.name}</span>
+                    <span className={`text-[11px] truncate ${route.name === ROUTE_G_TERESINA ? 'font-bold text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-gray-100'}`}>
+                      {route.name}
+                    </span>
                   </label>
                 ))}
               </div>
@@ -220,9 +234,9 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
 
         <div className="flex flex-wrap gap-1.5 max-h-12 overflow-y-auto pr-2 flex-1 items-center">
           {selectedRoutes.map(name => (
-            <span key={name} className="flex items-center gap-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-md text-[9px] font-bold">
+            <span key={name} className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold ${name === ROUTE_G_TERESINA ? 'bg-blue-600 text-white' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'}`}>
               {name}
-              <button onClick={() => toggleRoute(name)}><X className="w-2.5 h-2.5 hover:text-red-500" /></button>
+              <button onClick={() => toggleRoute(name)}><X className="w-2.5 h-2.5 hover:opacity-70" /></button>
             </span>
           ))}
           {selectedRoutes.length === 0 && (
@@ -231,7 +245,6 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
         </div>
       </div>
 
-      {/* Tabela de Projeção */}
       <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0">
         <div className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-250px)]">
           <table className="w-full text-left text-sm border-separate border-spacing-0 min-w-max">
@@ -255,8 +268,6 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                     <span className="truncate">Descrição</span>
                     {renderSortIndicator('descricao')}
                   </div>
-                  
-                  {/* Resizer Handle */}
                   <div 
                     onMouseDown={startResizing}
                     className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-highlight/50 transition-colors z-[90] flex items-center justify-center"
@@ -292,6 +303,30 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                     {renderSortIndicator('pendenteProducao')}
                   </div>
                 </th>
+
+                {/* Coluna FIXA: Entrega G.Teresina (Condicional ao Filtro) */}
+                {isRouteVisible(ROUTE_G_TERESINA) && (
+                  <th className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
+                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">Rota Fixa</div>
+                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 h-[24px] flex items-center justify-center overflow-hidden">
+                      Entrega G.Teresina
+                    </div>
+                    <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_G_TERESINA}:pedido`, e.ctrlKey); }}
+                        className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
+                      >
+                        P {renderSortIndicator(`route:${ROUTE_G_TERESINA}:pedido`)}
+                      </div>
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_G_TERESINA}:falta`, e.ctrlKey); }}
+                        className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
+                      >
+                        F {renderSortIndicator(`route:${ROUTE_G_TERESINA}:falta`)}
+                      </div>
+                    </div>
+                  </th>
+                )}
                 
                 {routesToDisplay.map(route => (
                   <th key={route.id} className="px-2 py-1 text-center bg-secondary border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
@@ -318,53 +353,69 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
               </tr>
             </thead>
             <tbody className="text-gray-900 dark:text-gray-100">
-              {sortedData.map((item, idx) => (
-                <tr key={item.codigo} className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group`}>
-                  <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                    {item.codigo}
-                  </td>
-                  <td 
-                    style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
-                    className="px-3 py-1.5 text-[11px] sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate"
-                  >
-                    {item.descricao}
-                  </td>
-                  
-                  <td className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${item.estoqueAtual < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                    {item.estoqueAtual}
-                  </td>
-                  
-                  <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
-                    {item.totalPedido}
-                  </td>
+              {sortedData.map((item, idx) => {
+                const gtData = item.routeData[ROUTE_G_TERESINA] || { pedido: 0, falta: 0 };
+                
+                return (
+                  <tr key={item.codigo} className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group`}>
+                    <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                      {item.codigo}
+                    </td>
+                    <td 
+                      style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
+                      className="px-3 py-1.5 text-[11px] sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate"
+                    >
+                      {item.descricao}
+                    </td>
+                    
+                    <td className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${item.estoqueAtual < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
+                      {item.estoqueAtual}
+                    </td>
+                    
+                    <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
+                      {item.totalPedido}
+                    </td>
 
-                  <td className={`px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${item.pendenteProducao > 0 ? 'text-highlight' : 'text-green-600 dark:text-green-400'}`}>
-                    {item.pendenteProducao > 0 ? (
-                      <div className="flex items-center justify-center gap-1">
-                        {item.pendenteProducao}
-                        <TrendingDown className="w-2.5 h-2.5" />
-                      </div>
-                    ) : '0'}
-                  </td>
+                    <td className={`px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${item.pendenteProducao < 0 ? 'text-highlight' : 'text-green-600 dark:text-green-400'}`}>
+                      {item.pendenteProducao < 0 ? (
+                        <div className="flex items-center justify-center gap-1">
+                          {item.pendenteProducao}
+                          <TrendingDown className="w-2.5 h-2.5" />
+                        </div>
+                      ) : '0'}
+                    </td>
 
-                  {routesToDisplay.map(route => {
-                    const rd = item.routeData[route.name] || { pedido: 0, falta: 0 };
-                    return (
-                      <React.Fragment key={route.id}>
-                        <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-medium text-[11px]">
-                          {rd.pedido || '-'}
+                    {/* Renderização da Rota Fixa Entrega G.Teresina (Condicional) */}
+                    {isRouteVisible(ROUTE_G_TERESINA) && (
+                      <React.Fragment>
+                        <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-blue-400 font-bold text-[11px]">
+                          {gtData.pedido || '-'}
                         </td>
-                        <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${rd.falta > 0 ? 'bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-600'}`}>
-                          {rd.falta || '-'}
+                        <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${gtData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
+                          {gtData.falta || '-'}
                         </td>
                       </React.Fragment>
-                    );
-                  })}
-                </tr>
-              ))}
+                    )}
+
+                    {routesToDisplay.map(route => {
+                      const rd = item.routeData[route.name] || { pedido: 0, falta: 0 };
+                      return (
+                        <React.Fragment key={route.id}>
+                          <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-medium text-[11px]">
+                            {rd.pedido || '-'}
+                          </td>
+                          <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
+                            {rd.falta || '-'}
+                          </td>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
               {sortedData.length === 0 && (
                 <tr>
-                  <td colSpan={5 + routesToDisplay.length * 2} className="px-4 py-16 text-center text-neutral">
+                  <td colSpan={7 + routesToDisplay.length * 2} className="px-4 py-16 text-center text-neutral">
                     <div className="flex flex-col items-center gap-2">
                       <AlertTriangle className="w-10 h-10 opacity-20" />
                       <p className="text-gray-500 dark:text-gray-400 text-sm">Nenhum dado encontrado para exibição.</p>
@@ -380,7 +431,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
       <div className="bg-white dark:bg-[#252525] p-2 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-3 text-[10px] text-neutral italic shrink-0">
         <Info className="w-3.5 h-3.5 text-secondary" />
         <span>
-          <strong>Dica Operacional:</strong> Arraste o canto direito da coluna <strong>Descrição</strong> para expandir e visualizar nomes longos. Use <strong>CTRL + Clique</strong> para ordenação múltipla.
+          <strong>Dica Operacional:</strong> Use o filtro <strong>Colunas de Rotas</strong> para alternar a exibição da <strong>Entrega G.Teresina</strong> e outras carradas dinâmicas.
         </span>
       </div>
     </div>

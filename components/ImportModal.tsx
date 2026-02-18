@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Upload, CheckCircle, FileText, Package, Database, Info, AlertCircle } from 'lucide-react';
+import { X, Upload, CheckCircle, FileText, Package, Database, Info, AlertCircle, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, StockItem } from '../types';
 
@@ -35,12 +35,9 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
         }
 
         if (activeType === 'ROMANEIO') {
-          const mappedOrders: Order[] = json.map((row, index) => {
-            // Helper to get value regardless of spaces/underscores
+          const mappedOrders: Order[] = json.map((row) => {
             const get = (keys: string[]) => {
-              for (const k of keys) {
-                if (row[k] !== undefined) return row[k];
-              }
+              for (const k of keys) if (row[k] !== undefined) return row[k];
               return '';
             };
 
@@ -61,13 +58,19 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
               dataEntrega: String(get(['Data de Entrega', 'Data_de_Entrega']) || ''),
               municipio: String(get(['Municipio']) || ''),
               uf: String(get(['UF']) || ''),
-              metodoEntrega: String(get(['Método de entrega', 'Metodo_de_entrega']) || ''),
-              requisicaoLoja: String(get(['Requisicao de Loja do grupo ?'])).toLowerCase().includes('sim')
+              metodoEntrega: String(get(['Metodo_de_entrega', 'Método de entrega', 'Metodo Entrega']) || ''),
+              requisicaoLoja: String(get(['Requisicao de Loja do grupo ?'])).toLowerCase().includes('sim'),
+              // Novos mapeamentos de localização
+              localEntregaDif: Number(get(['localEntregaDifEnderecoDestinatario', 'Local Entrega Dif']) || 0),
+              municipioCliente: String(get(['Municipio_Cliente', 'Municipio Cliente']) || ''),
+              ufCliente: String(get(['UF_Cliente', 'UF Cliente']) || ''),
+              municipioEntrega: String(get(['Municipio_Entrega', 'Municipio Entrega']) || ''),
+              ufEntrega: String(get(['UF_Entrega', 'UF Entrega']) || '')
             };
           });
 
           onImportOrders(mappedOrders);
-          setSuccessMsg(`${mappedOrders.length} registros de pedidos importados!`);
+          setSuccessMsg(`Sincronização concluída: ${mappedOrders.length} pedidos ativos.`);
         } else {
           const mappedStock: StockItem[] = json.map(row => ({
             idProduto: Number(row['idProduto'] || 0),
@@ -80,7 +83,7 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
           }));
 
           onImportStock(mappedStock);
-          setSuccessMsg(`${mappedStock.length} itens de estoque atualizados!`);
+          setSuccessMsg(`Estoque atualizado: ${mappedStock.length} saldos sincronizados.`);
         }
 
         setTimeout(() => {
@@ -94,11 +97,7 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
       }
     };
 
-    reader.onerror = () => {
-      setErrorMsg("Erro na leitura do arquivo.");
-      setLoading(false);
-    };
-
+    reader.onerror = () => { setErrorMsg("Erro na leitura do arquivo."); setLoading(false); };
     reader.readAsArrayBuffer(file);
   };
 
@@ -127,25 +126,11 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
 
         <div className="p-8">
           <div className="flex gap-2 mb-8 bg-gray-100 dark:bg-[#1a1a1a] p-1 rounded-xl">
-            <button 
-              disabled={loading}
-              onClick={() => setActiveType('ROMANEIO')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${
-                activeType === 'ROMANEIO' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              Romaneio / Pedidos
+            <button disabled={loading} onClick={() => setActiveType('ROMANEIO')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${activeType === 'ROMANEIO' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+              <FileText className="w-4 h-4" /> Romaneio / Pedidos
             </button>
-            <button 
-              disabled={loading}
-              onClick={() => setActiveType('ESTOQUE')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${
-                activeType === 'ESTOQUE' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'
-              }`}
-            >
-              <Database className="w-4 h-4" />
-              Estoque Atual
+            <button disabled={loading} onClick={() => setActiveType('ESTOQUE')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${activeType === 'ESTOQUE' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+              <Database className="w-4 h-4" /> Estoque Atual
             </button>
           </div>
 
@@ -153,30 +138,23 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all cursor-pointer relative ${
-              dragging ? 'border-secondary bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-neutral'
-            } ${loading ? 'opacity-50 cursor-wait' : ''}`}
+            className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all cursor-pointer relative ${dragging ? 'border-secondary bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-neutral'} ${loading ? 'opacity-50 cursor-wait' : ''}`}
           >
             {loading ? (
               <div className="flex flex-col items-center gap-3">
                 <div className="w-10 h-10 border-4 border-secondary border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-sm font-medium">Processando arquivo...</p>
+                <p className="text-sm font-medium">Sincronizando banco de dados...</p>
               </div>
             ) : successMsg ? (
               <div className="flex flex-col items-center gap-3 text-green-500 animate-in zoom-in duration-300">
                 <CheckCircle className="w-16 h-16" />
-                <p className="font-bold">{successMsg}</p>
+                <p className="font-bold text-sm">{successMsg}</p>
               </div>
             ) : errorMsg ? (
               <div className="flex flex-col items-center gap-3 text-red-500 animate-in shake">
                 <AlertCircle className="w-12 h-12" />
                 <p className="text-xs font-bold leading-tight">{errorMsg}</p>
-                <button 
-                  onClick={() => setErrorMsg('')}
-                  className="mt-2 text-[10px] underline uppercase tracking-widest"
-                >
-                  Tentar novamente
-                </button>
+                <button onClick={() => setErrorMsg('')} className="mt-2 text-[10px] underline uppercase tracking-widest">Tentar novamente</button>
               </div>
             ) : (
               <>
@@ -184,27 +162,19 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
                   <Upload className="w-8 h-8 text-neutral" />
                 </div>
                 <h3 className="font-bold text-lg mb-2">Arraste seu arquivo aqui</h3>
-                <p className="text-sm text-neutral mb-4">ou clique para selecionar do computador</p>
-                <input 
-                  type="file" 
-                  disabled={loading}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                  accept=".xlsx, .xls, .csv"
-                  onChange={(e) => e.target.files && parseFile(e.target.files[0])}
-                />
+                <p className="text-sm text-neutral mb-4">ou clique para selecionar</p>
+                <input type="file" disabled={loading} className="absolute inset-0 opacity-0 cursor-pointer" accept=".xlsx, .xls, .csv" onChange={(e) => e.target.files && parseFile(e.target.files[0])} />
                 <div className="flex items-center justify-center gap-4 text-[10px] text-neutral font-bold tracking-widest uppercase">
-                  <span>Excel (.XLSX)</span>
-                  <span className="w-1 h-1 rounded-full bg-neutral"></span>
-                  <span>CSV</span>
+                  <span>Excel</span><span className="w-1 h-1 rounded-full bg-neutral"></span><span>CSV</span>
                 </div>
               </>
             )}
           </div>
 
-          <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex gap-3 border border-blue-100 dark:border-blue-800">
-            <Info className="w-5 h-5 text-blue-500 shrink-0" />
-            <div className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
-              <strong>Importação Inteligente:</strong> O sistema mapeia automaticamente colunas como <em>"Codigo Romaneio"</em> e <em>"Qtd Pedida"</em>. Não é necessário renomear cabeçalhos.
+          <div className="mt-6 p-4 bg-orange-50 dark:bg-orange-900/10 rounded-xl flex gap-3 border border-orange-100 dark:border-orange-800">
+            <RefreshCw className="w-5 h-5 text-orange-500 shrink-0" />
+            <div className="text-[11px] text-orange-700 dark:text-orange-300 leading-relaxed">
+              <strong>Atenção (Modo Sincronização):</strong> Ao importar, o sistema substituirá os dados atuais pelos deste arquivo. Pedidos que não constarem no arquivo serão removidos do sistema.
             </div>
           </div>
         </div>
