@@ -1,24 +1,26 @@
+
 {
-  "name": "copy-of-copy-of-projeção-de-estoque-—-só-aço-industrial",
+  "name": "so-aco-industrial-projeção",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "lucide-react": "^0.574.0",
     "recharts": "^3.7.0",
-    "react": "^19.2.4",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
   }
 }
