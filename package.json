@@ -1,6 +1,6 @@
 
 {
-  "name": "so-aco-industrial-projeção",
+  "name": "so-aco-industrial-projecao",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -17,6 +17,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/node": "^22.13.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
