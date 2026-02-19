@@ -1,9 +1,10 @@
 
 import React, { useMemo, useState } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, XAxis, YAxis, Bar } from 'recharts';
 import { Order } from '../types';
 import { Search, Filter, Download, Truck, ShoppingCart, BarChart3, X, MapPin } from 'lucide-react';
 import { isEligibleForGTeresina, getHorizonInfo, parseOrderDate, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS } from '../utils';
+import * as XLSX from 'xlsx';
 
 interface Props {
   orders: Order[];
@@ -18,7 +19,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
     status: ''
   });
 
-  const { chartData, uniqueTotal, uniqueInRoute, uniquePending, uniqueRoutesCount, uniqueGTTotal, uniqueGTHorizon, horizonLabel } = useMemo(() => {
+  const { chartData, uniqueTotal, uniqueInRoute, uniquePending, uniqueRoutesCount, uniqueGTTotal, uniqueGTHorizon, horizonLabel, deliveryTypeChartData } = useMemo(() => {
     const allUniquePedidos = Array.from(new Set(orders.map(o => o.numeroPedido)));
     const totalUnique = allUniquePedidos.length;
 
@@ -53,6 +54,32 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
       return false;
     }).map(o => o.numeroPedido)).size;
 
+    // Indicadores Só Móveis
+    const soMoveisOrders = orders.filter(o => o.requisicaoLoja === true);
+    const uniqueSoMoveisTotal = new Set(soMoveisOrders.map(o => o.numeroPedido)).size;
+
+    // Chart de Modalidades de Entrega
+    const deliveryTypeCounts = new Map<string, number>();
+    orders.forEach(order => {
+      const isGT = isEligibleForGTeresina(order);
+      const isSoMoveis = order.requisicaoLoja === true;
+      let type = 'Outras Rotas';
+      if (isSoMoveis) {
+        type = ROUTE_SO_MOVEIS;
+      } else if (isGT) {
+        type = ROUTE_G_TERESINA;
+      } else if (order.observacoesRomaneio && order.observacoesRomaneio.trim() !== '' && order.observacoesRomaneio !== '&nbsp;') {
+        type = 'Rotas Manuais';
+      }
+      deliveryTypeCounts.set(type, (deliveryTypeCounts.get(type) || 0) + 1);
+    });
+
+    const deliveryTypeChartData = Array.from(deliveryTypeCounts.entries()).map(([name, value]) => ({
+      name,
+      value,
+      color: name === ROUTE_G_TERESINA ? '#1E22AA' : name === ROUTE_SO_MOVEIS ? '#059669' : name === 'Rotas Manuais' ? '#3B82F6' : '#9CA3AF'
+    }));
+
     return {
       uniqueTotal: totalUnique,
       uniqueInRoute: inRouteCount,
@@ -61,12 +88,45 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
       uniqueGTTotal,
       uniqueGTHorizon,
       horizonLabel: horizon.label,
+      deliveryTypeChartData,
       chartData: [
         { name: 'Em Rota', value: inRouteCount, color: '#1E22AA' },
         { name: 'Sem Rota', value: pendingCount, color: '#FFAD00' },
       ]
     };
   }, [orders]);
+
+  const handleExportCSV = () => {
+    const headers = [
+      "Pedido", "Cliente", "Produto", "Qtd", "Tipo de Entrega", "Status"
+    ];
+    const dataToExport = filteredOrders.map(order => {
+      const isGT = isEligibleForGTeresina(order);
+      const isSoMoveis = order.requisicaoLoja === true;
+      let deliveryType = (order.observacoesRomaneio || '-');
+      if (isSoMoveis) {
+        deliveryType = ROUTE_SO_MOVEIS;
+      } else if (isGT) {
+        deliveryType = ROUTE_G_TERESINA;
+      }
+      const hasRoute = (order.codigoRomaneio && order.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis;
+      const statusText = hasRoute ? 'VINCULADO' : 'SEM ROTA';
+
+      return [
+        order.numeroPedido,
+        order.cliente,
+        order.codigoProduto,
+        order.qtdPedida,
+        deliveryType,
+        statusText
+      ];
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataToExport]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Pedidos Filtrados");
+    XLSX.writeFile(wb, "pedidos_filtrados.csv");
+  };
 
   const filteredOrders = useMemo(() => {
     return orders.filter(o => {
@@ -126,7 +186,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Chart */}
+        {/* Chart de Status */} 
         <div className="bg-white dark:bg-[#252525] p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
           <h3 className="font-bold mb-4 flex items-center gap-2 text-gray-900 dark:text-gray-100">
             <BarChart3 className="w-4 h-4 text-secondary" />
@@ -146,7 +206,28 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const data = payload[0].payload;
+                    if (data.name === 'Em Rota') {
+                      return (
+                        <div className="bg-white dark:bg-[#2a2a2a] p-2 border border-gray-200 dark:border-gray-700 rounded shadow-md text-xs">
+                          <p className="font-bold text-blue-700 dark:text-blue-300">{data.name}</p>
+                          <p>Pedidos vinculados: <span className="font-bold">{uniqueInRoute}</span></p>
+                          <p>Rotas criadas: <span className="font-bold">{uniqueRoutesCount}</span></p>
+                        </div>
+                      );
+                    } else if (data.name === 'Sem Rota') {
+                      return (
+                        <div className="bg-white dark:bg-[#2a2a2a] p-2 border border-gray-200 dark:border-gray-700 rounded shadow-md text-xs">
+                          <p className="font-bold text-yellow-700 dark:text-yellow-500">{data.name}</p>
+                          <p>Pedidos não vinculados: <span className="font-bold">{uniquePending}</span></p>
+                        </div>
+                      );
+                    }
+                  }
+                  return null;
+                }} />
                 <Legend verticalAlign="bottom" height={36}/>
               </PieChart>
             </ResponsiveContainer>
@@ -171,7 +252,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
                   <X className="w-3.5 h-3.5" /> LIMPAR FILTROS
                 </button>
               )}
-              <button className="text-[11px] font-bold flex items-center gap-2 bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-4 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-[#333] transition-colors shadow-sm active:scale-95">
+              <button onClick={handleExportCSV} className="text-[11px] font-bold flex items-center gap-2 bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-4 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-[#333] transition-colors shadow-sm active:scale-95">
                 <Download className="w-3.5 h-3.5" /> CSV
               </button>
             </div>
