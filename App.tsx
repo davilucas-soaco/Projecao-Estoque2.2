@@ -13,6 +13,7 @@ import {
   Users
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, Route, ProductConsolidated, UserAccount } from './types';
+import { normalizeText, isEligibleForGTeresina, getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS } from './utils';
 import ProjectionTable from './components/ProjectionTable';
 import SequenceTable from './components/SequenceTable';
 import OrdersView from './components/OrdersView';
@@ -26,19 +27,6 @@ const STORAGE_KEYS = {
   STOCK: 'sa_industrial_stock_v2',
   ROUTES: 'sa_industrial_routes_v2',
   USER_SESSION: 'sa_industrial_user_session_v2'
-};
-
-const ROUTE_G_TERESINA = "Entrega G.Teresina";
-const CIDADES_G_TERESINA = ['TERESINA', 'TIMON', 'DEMERVAL', 'JOSE DE FREITAS', 'NAZARIA'];
-
-// Função utilitária para normalizar strings (Remover acentos e padronizar)
-const normalizeText = (str: string | undefined | null): string => {
-  if (!str) return "";
-  return str
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // Remove acentos
-    .toUpperCase()
-    .trim();
 };
 
 const App: React.FC = () => {
@@ -156,32 +144,41 @@ const App: React.FC = () => {
     alert('Sistema restaurado com sucesso!');
   };
 
-  // Função auxiliar para validar elegibilidade Grande Teresina (Robusta)
-  const isEligibleForGTeresina = (order: Order): boolean => {
-    const metodoNorm = normalizeText(order.metodoEntrega);
-    if (metodoNorm !== normalizeText("Entrega Pelo Grupo Só Aço")) return false;
-
-    // Determina o município real com base na flag localEntregaDif
-    const municipioReal = order.localEntregaDif === 1 
-      ? normalizeText(order.municipioEntrega)
-      : normalizeText(order.municipioCliente);
-
-    // Se o município estiver vazio, usa o campo genérico de Município do pedido como fallback
-    const finalMunicipio = municipioReal || normalizeText(order.municipio);
-
-    return CIDADES_G_TERESINA.some(cidade => finalMunicipio.includes(cidade));
-  };
-
   const consolidatedData = useMemo(() => {
     const productMap = new Map<string, ProductConsolidated>();
+    const horizon = getHorizonInfo();
+    const horizonDate = horizon.end;
+
+    const parseOrderDateLocal = (dateStr: string) => {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) return d;
+      const parts = dateStr.split('/');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      }
+      return null;
+    };
     
     orders.forEach(order => {
       const isGT = isEligibleForGTeresina(order);
+      const isSoMoveis = order.requisicaoLoja === true;
+      
+      // Validação do Horizonte para G.Teresina e Só Móveis
+      let isInHorizon = false;
+      if (isGT || isSoMoveis) {
+        const dEntrega = parseOrderDateLocal(order.dataEntrega);
+        if (dEntrega) {
+          dEntrega.setHours(0, 0, 0, 0);
+          isInHorizon = dEntrega <= horizonDate;
+        }
+      }
+
       const isLinked = order.codigoRomaneio && order.codigoRomaneio.trim() !== '' && order.codigoRomaneio !== '&nbsp;';
       
-      // MUDANÇA CRUCIAL: Se for G.Teresina, processa mesmo sem romaneio vinculado.
-      // Se não for G.Teresina, exige romaneio para aparecer na tabela de projeção.
-      if (!isGT && !isLinked) return;
+      // Se for G.Teresina ou Só Móveis, só processa se estiver dentro do horizonte de 13 dias.
+      // Se não for nenhum dos dois, exige romaneio vinculado.
+      if (((isGT || isSoMoveis) && !isInHorizon) || (!isGT && !isSoMoveis && !isLinked)) return;
 
       if (!productMap.has(order.codigoProduto)) {
         productMap.set(order.codigoProduto, {
@@ -196,8 +193,13 @@ const App: React.FC = () => {
       const prod = productMap.get(order.codigoProduto)!;
       prod.totalPedido += order.qtdVinculada || order.qtdPedida; // Se solto, usa qtdPedida como fallback
       
-      // Decisão de Rota: Prioridade para G.Teresina fixa
-      const routeName = isGT ? ROUTE_G_TERESINA : order.observacoesRomaneio;
+      // Decisão de Rota: Prioridade para Só Móveis, depois G.Teresina fixa (SE estiver no horizonte)
+      let routeName = order.observacoesRomaneio;
+      if (isSoMoveis) {
+        routeName = ROUTE_SO_MOVEIS;
+      } else if (isGT) {
+        routeName = ROUTE_G_TERESINA;
+      }
       
       if (routeName && routeName !== '&nbsp;') {
         if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0 };
@@ -216,7 +218,22 @@ const App: React.FC = () => {
       let runningBalance = Math.max(0, prod.estoqueAtual);
       let totalFalta = 0;
 
-      // 1. Prioridade Máxima: Entrega G.Teresina (Fixed)
+      // 1. Prioridade Máxima: Só Móveis
+      const soMoveisData = prod.routeData[ROUTE_SO_MOVEIS];
+      if (soMoveisData) {
+        const needed = soMoveisData.pedido;
+        if (runningBalance >= needed) {
+          soMoveisData.falta = 0;
+          runningBalance -= needed;
+        } else {
+          const missing = needed - runningBalance;
+          soMoveisData.falta = -missing;
+          totalFalta += soMoveisData.falta;
+          runningBalance = 0;
+        }
+      }
+
+      // 2. Prioridade: Entrega G.Teresina (Fixed)
       const gTeresinaData = prod.routeData[ROUTE_G_TERESINA];
       if (gTeresinaData) {
         const needed = gTeresinaData.pedido;
@@ -231,7 +248,7 @@ const App: React.FC = () => {
         }
       }
       
-      // 2. Sequência Manual (Carrada/Rotas)
+      // 3. Sequência Manual (Carrada/Rotas)
       sortedRoutes.forEach(route => {
         const rd = prod.routeData[route.name];
         if (rd) {
@@ -267,7 +284,34 @@ const App: React.FC = () => {
   }, [consolidatedData, selectedRouteNames]);
 
   const uniqueOrdersCount = useMemo(() => new Set(orders.map(o => o.numeroPedido)).size, [orders]);
-  const uniqueOrdersInRouteCount = useMemo(() => new Set(orders.filter(o => (o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;') || isEligibleForGTeresina(o)).map(o => o.numeroPedido)).size, [orders]);
+  const uniqueOrdersInRouteCount = useMemo(() => {
+    const horizon = getHorizonInfo();
+    const horizonDate = horizon.end;
+    const parseOrderDateLocal = (dateStr: string) => {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) return d;
+      const parts = dateStr.split('/');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      }
+      return null;
+    };
+
+    return new Set(orders.filter(o => {
+      const isGT = isEligibleForGTeresina(o);
+      const isSoMoveis = o.requisicaoLoja === true;
+      let isInHorizon = false;
+      if (isGT || isSoMoveis) {
+        const dEntrega = parseOrderDateLocal(o.dataEntrega);
+        if (dEntrega) {
+          dEntrega.setHours(0, 0, 0, 0);
+          isInHorizon = dEntrega <= horizonDate;
+        }
+      }
+      return (o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;') || isInHorizon;
+    }).map(o => o.numeroPedido)).size;
+  }, [orders, isEligibleForGTeresina]);
 
   if (!currentUser) return <Login onLogin={handleLogin} users={users} />;
 
@@ -333,7 +377,7 @@ const App: React.FC = () => {
       </nav>
 
       <main className="flex-1 p-6 overflow-auto">
-        {activeTab === 'PROJECAO' && ( <ProjectionTable data={displayData} routes={routes} onRoutesReorder={setRoutes} selectedRoutes={selectedRouteNames} onFilterRoutes={setSelectedRouteNames} /> )}
+        {activeTab === 'PROJECAO' && ( <ProjectionTable data={displayData} routes={routes} onRoutesReorder={setRoutes} selectedRoutes={selectedRouteNames} onFilterRoutes={setSelectedRouteNames} horizonLabel={getHorizonInfo().label} /> )}
         {activeTab === 'SEQUENCIA' && ( <SequenceTable routes={routes} orders={orders} onReorder={setRoutes} isAdmin={currentUser.profile !== 'CONSULTA'} /> )}
         {activeTab === 'ROMANEIO' && ( <OrdersView orders={orders} /> )}
         {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={users} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} /> )}

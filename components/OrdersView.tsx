@@ -2,7 +2,8 @@
 import React, { useMemo, useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Order } from '../types';
-import { Search, Filter, Download, Truck, ShoppingCart, BarChart3, X } from 'lucide-react';
+import { Search, Filter, Download, Truck, ShoppingCart, BarChart3, X, MapPin } from 'lucide-react';
+import { isEligibleForGTeresina, getHorizonInfo, parseOrderDate, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS } from '../utils';
 
 interface Props {
   orders: Order[];
@@ -17,9 +18,12 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
     status: ''
   });
 
-  const { chartData, uniqueTotal, uniqueInRoute, uniquePending, uniqueRoutesCount } = useMemo(() => {
+  const { chartData, uniqueTotal, uniqueInRoute, uniquePending, uniqueRoutesCount, uniqueGTTotal, uniqueGTHorizon, horizonLabel } = useMemo(() => {
     const allUniquePedidos = Array.from(new Set(orders.map(o => o.numeroPedido)));
     const totalUnique = allUniquePedidos.length;
+
+    const horizon = getHorizonInfo();
+    const horizonDate = horizon.end;
 
     const uniqueInRouteSet = new Set(
       orders
@@ -36,11 +40,27 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
         .filter(n => n && n.trim() !== '' && n !== '&nbsp;')
     );
 
+    // Indicadores G.Teresina
+    const gtOrders = orders.filter(o => isEligibleForGTeresina(o));
+    const uniqueGTTotal = new Set(gtOrders.map(o => o.numeroPedido)).size;
+    
+    const uniqueGTHorizon = new Set(gtOrders.filter(o => {
+      const dEntrega = parseOrderDate(o.dataEntrega);
+      if (dEntrega) {
+        dEntrega.setHours(0, 0, 0, 0);
+        return dEntrega <= horizonDate;
+      }
+      return false;
+    }).map(o => o.numeroPedido)).size;
+
     return {
       uniqueTotal: totalUnique,
       uniqueInRoute: inRouteCount,
       uniquePending: pendingCount,
       uniqueRoutesCount: uniqueRoutesSet.size,
+      uniqueGTTotal,
+      uniqueGTHorizon,
+      horizonLabel: horizon.label,
       chartData: [
         { name: 'Em Rota', value: inRouteCount, color: '#1E22AA' },
         { name: 'Sem Rota', value: pendingCount, color: '#FFAD00' },
@@ -50,12 +70,22 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
 
   const filteredOrders = useMemo(() => {
     return orders.filter(o => {
+      const isGT = isEligibleForGTeresina(o);
+      const isSoMoveis = o.requisicaoLoja === true;
+      
+      let deliveryType = (o.observacoesRomaneio || '');
+      if (isSoMoveis) {
+        deliveryType = ROUTE_SO_MOVEIS;
+      } else if (isGT) {
+        deliveryType = ROUTE_G_TERESINA;
+      }
+
       const matchPedido = o.numeroPedido.toLowerCase().includes(filters.pedido.toLowerCase());
       const matchCliente = o.cliente.toLowerCase().includes(filters.cliente.toLowerCase());
       const matchProduto = o.codigoProduto.toLowerCase().includes(filters.produto.toLowerCase());
-      const matchRota = (o.observacoesRomaneio || '').toLowerCase().includes(filters.rota.toLowerCase());
+      const matchRota = deliveryType.toLowerCase().includes(filters.rota.toLowerCase());
       
-      const hasRoute = o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;';
+      const hasRoute = (o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis;
       const statusText = hasRoute ? 'vinculado' : 'sem rota';
       const matchStatus = filters.status === '' || statusText === filters.status;
 
@@ -72,13 +102,20 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
   return (
     <div className="space-y-6">
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <KpiCard icon={<ShoppingCart className="text-secondary" />} label="Total Pedidos Únicos" value={uniqueTotal} />
         <KpiCard 
           icon={<Truck className="text-blue-500" />} 
           label="Pedidos em Rota" 
           value={uniqueInRoute} 
           subValue={uniqueRoutesCount}
+        />
+        <KpiCard 
+          icon={<MapPin className="text-blue-600" />} 
+          label="Entrega G.Teresina" 
+          value={uniqueGTTotal} 
+          subLabel={`No ${horizonLabel}`}
+          subValue={uniqueGTHorizon}
         />
         <KpiCard icon={<div className="w-2 h-2 rounded-full bg-highlight" />} label="Pendente Rota (Sem Rota)" value={uniquePending} />
         <KpiCard 
@@ -145,7 +182,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
             <FilterInput placeholder="Filtro Pedido" value={filters.pedido} onChange={(v) => setFilters(f => ({...f, pedido: v}))} />
             <FilterInput placeholder="Filtro Cliente" value={filters.cliente} onChange={(v) => setFilters(f => ({...f, cliente: v}))} />
             <FilterInput placeholder="Filtro Produto" value={filters.produto} onChange={(v) => setFilters(f => ({...f, produto: v}))} />
-            <FilterInput placeholder="Filtro Rota" value={filters.rota} onChange={(v) => setFilters(f => ({...f, rota: v}))} />
+            <FilterInput placeholder="Filtro Entrega" value={filters.rota} onChange={(v) => setFilters(f => ({...f, rota: v}))} />
             <select 
               value={filters.status}
               onChange={(e) => setFilters(f => ({...f, status: e.target.value}))}
@@ -165,25 +202,43 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
                   <th className="px-4 py-3 font-bold">Cliente</th>
                   <th className="px-4 py-3 font-bold">Produto</th>
                   <th className="px-4 py-3 font-bold text-center">Qtd</th>
-                  <th className="px-4 py-3 font-bold">Rota</th>
+                  <th className="px-4 py-3 font-bold">Tipos de entrega</th>
                   <th className="px-4 py-3 font-bold">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
-                {filteredOrders.map((order, i) => (
-                  <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
-                    <td className="px-4 py-3 font-medium font-mono">{order.numeroPedido}</td>
-                    <td className="px-4 py-3 truncate max-w-[150px]">{order.cliente}</td>
-                    <td className="px-4 py-3 font-mono">{order.codigoProduto}</td>
-                    <td className="px-4 py-3 text-center">{order.qtdPedida}</td>
-                    <td className="px-4 py-3 text-[10px] text-neutral italic">{order.observacoesRomaneio}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${order.codigoRomaneio && order.codigoRomaneio !== '&nbsp;' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-500'}`}>
-                        {order.codigoRomaneio && order.codigoRomaneio !== '&nbsp;' ? 'VINCULADO' : 'SEM ROTA'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {filteredOrders.map((order, i) => {
+                  const isGT = isEligibleForGTeresina(order);
+                  const isSoMoveis = order.requisicaoLoja === true;
+                  
+                  let deliveryType = (order.observacoesRomaneio || '-');
+                  if (isSoMoveis) {
+                    deliveryType = ROUTE_SO_MOVEIS;
+                  } else if (isGT) {
+                    deliveryType = ROUTE_G_TERESINA;
+                  }
+
+                  const hasRoute = (order.codigoRomaneio && order.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis;
+
+                  return (
+                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+                      <td className="px-4 py-3 font-medium font-mono">{order.numeroPedido}</td>
+                      <td className="px-4 py-3 truncate max-w-[150px]">{order.cliente}</td>
+                      <td className="px-4 py-3 font-mono">{order.codigoProduto}</td>
+                      <td className="px-4 py-3 text-center">{order.qtdPedida}</td>
+                      <td className="px-4 py-3 text-[10px] font-bold">
+                        <span className={isSoMoveis ? 'text-emerald-600 dark:text-emerald-400' : isGT ? 'text-blue-600 dark:text-blue-400' : 'text-neutral italic font-normal'}>
+                          {deliveryType}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${hasRoute ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-500'}`}>
+                          {hasRoute ? 'VINCULADO' : 'SEM ROTA'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {filteredOrders.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-12 text-center text-neutral italic">Nenhum item corresponde aos filtros.</td>
@@ -208,7 +263,7 @@ const FilterInput: React.FC<{ placeholder: string; value: string; onChange: (v: 
   />
 );
 
-const KpiCard: React.FC<{ icon: React.ReactNode; label: string; value: string | number; subValue?: string | number }> = ({ icon, label, value, subValue }) => (
+const KpiCard: React.FC<{ icon: React.ReactNode; label: string; value: string | number; subValue?: string | number; subLabel?: string }> = ({ icon, label, value, subValue, subLabel }) => (
   <div className="bg-white dark:bg-[#252525] p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex items-center gap-4 group hover:border-secondary transition-all">
     <div className="p-3 bg-gray-50 dark:bg-[#2a2a2a] rounded-lg group-hover:bg-blue-50 dark:group-hover:bg-blue-900/10 transition-colors">
       {icon}
@@ -218,7 +273,7 @@ const KpiCard: React.FC<{ icon: React.ReactNode; label: string; value: string | 
       <p className="text-xl font-black text-gray-900 dark:text-gray-100">{value}</p>
       {subValue !== undefined && (
         <p className="text-[10px] text-neutral mt-0.5 leading-none">
-          Total de rotas: <span className="font-bold">{subValue}</span>
+          {subLabel || 'Total de rotas'}: <span className="font-bold">{subValue}</span>
         </p>
       )}
     </div>

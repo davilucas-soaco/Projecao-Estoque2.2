@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProductConsolidated, Route } from '../types';
+import { ROUTE_G_TERESINA, ROUTE_SO_MOVEIS } from '../utils';
 import { 
   AlertTriangle, 
   TrendingDown, 
@@ -25,11 +26,10 @@ interface Props {
   onRoutesReorder: (routes: Route[]) => void;
   selectedRoutes: string[];
   onFilterRoutes: (routeNames: string[]) => void;
+  horizonLabel?: string;
 }
 
-const ROUTE_G_TERESINA = "Entrega G.Teresina";
-
-const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilterRoutes }) => {
+const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilterRoutes, horizonLabel }) => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
@@ -40,9 +40,10 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
 
   const sortedRoutes = useMemo(() => [...routes].sort((a, b) => a.order - b.order), [routes]);
   
-  // Lista unificada para o filtro (Incluindo a rota fixa G.Teresina)
+  // Lista unificada para o filtro (Incluindo a rota fixa G.Teresina e Só Móveis)
   const allFilterableRoutes = useMemo(() => {
     return [
+      { id: 'fixed-sm', name: ROUTE_SO_MOVEIS, order: -1 },
       { id: 'fixed-gt', name: ROUTE_G_TERESINA, order: 0 },
       ...sortedRoutes
     ];
@@ -304,10 +305,34 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                   </div>
                 </th>
 
+                {/* Coluna FIXA: Só Móveis (Condicional ao Filtro) */}
+                {isRouteVisible(ROUTE_SO_MOVEIS) && (
+                  <th className="px-2 py-1 text-center bg-emerald-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
+                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">{horizonLabel || "Rota Fixa"}</div>
+                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 h-[24px] flex items-center justify-center overflow-hidden">
+                      Só Móveis
+                    </div>
+                    <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_SO_MOVEIS}:pedido`, e.ctrlKey); }}
+                        className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
+                      >
+                        P {renderSortIndicator(`route:${ROUTE_SO_MOVEIS}:pedido`)}
+                      </div>
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_SO_MOVEIS}:falta`, e.ctrlKey); }}
+                        className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
+                      >
+                        F {renderSortIndicator(`route:${ROUTE_SO_MOVEIS}:falta`)}
+                      </div>
+                    </div>
+                  </th>
+                )}
+
                 {/* Coluna FIXA: Entrega G.Teresina (Condicional ao Filtro) */}
                 {isRouteVisible(ROUTE_G_TERESINA) && (
                   <th className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
-                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">Rota Fixa</div>
+                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">{horizonLabel || "Rota Fixa"}</div>
                     <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 h-[24px] flex items-center justify-center overflow-hidden">
                       Entrega G.Teresina
                     </div>
@@ -355,6 +380,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
             <tbody className="text-gray-900 dark:text-gray-100">
               {sortedData.map((item, idx) => {
                 const gtData = item.routeData[ROUTE_G_TERESINA] || { pedido: 0, falta: 0 };
+                const smData = item.routeData[ROUTE_SO_MOVEIS] || { pedido: 0, falta: 0 };
                 
                 return (
                   <tr key={item.codigo} className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group`}>
@@ -375,7 +401,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                     <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
                       {item.totalPedido}
                     </td>
-
+ 
                     <td className={`px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${item.pendenteProducao < 0 ? 'text-highlight' : 'text-green-600 dark:text-green-400'}`}>
                       {item.pendenteProducao < 0 ? (
                         <div className="flex items-center justify-center gap-1">
@@ -384,6 +410,18 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                         </div>
                       ) : '0'}
                     </td>
+
+                    {/* Renderização da Rota Fixa Só Móveis (Condicional) */}
+                    {isRouteVisible(ROUTE_SO_MOVEIS) && (
+                      <React.Fragment>
+                        <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-emerald-600 dark:text-emerald-400 font-bold text-[11px]">
+                          {smData.pedido || '-'}
+                        </td>
+                        <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${smData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
+                          {smData.falta || '-'}
+                        </td>
+                      </React.Fragment>
+                    )}
 
                     {/* Renderização da Rota Fixa Entrega G.Teresina (Condicional) */}
                     {isRouteVisible(ROUTE_G_TERESINA) && (

@@ -59,7 +59,7 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
               municipio: String(get(['Municipio']) || ''),
               uf: String(get(['UF']) || ''),
               metodoEntrega: String(get(['Metodo_de_entrega', 'Método de entrega', 'Metodo Entrega']) || ''),
-              requisicaoLoja: String(get(['Requisicao de Loja do grupo ?'])).toLowerCase().includes('sim'),
+              requisicaoLoja: String(get(['Requisicao_de_Loja_do_grupo', 'Requisicao de Loja do grupo ?', 'Requisicao de Loja'])).toLowerCase().includes('sim'),
               // Novos mapeamentos de localização
               localEntregaDif: Number(get(['localEntregaDifEnderecoDestinatario', 'Local Entrega Dif']) || 0),
               municipioCliente: String(get(['Municipio_Cliente', 'Municipio Cliente']) || ''),
