@@ -59,6 +59,24 @@ Se for usar a MiniFicha no Supabase:
 
 Sem Supabase, os dados da Ficha de Estantes ficam apenas em localStorage.
 
+## Deploy (Vercel + API)
+
+O frontend pode ser deployado na **Vercel**; a API (estoque e romaneio) precisa rodar em outro serviço (ex.: **Railway**, **Render**, **Fly.io**), pois a Vercel não mantém um servidor Node sempre ativo da mesma forma.
+
+1. **Deploy da API** (em Railway, Render, etc.):
+   - Use a pasta `server/` (ou monorepo com raiz do projeto).
+   - Configure as variáveis: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `PORT`.
+   - Defina **`CORS_ORIGIN`** com a URL do frontend na Vercel, ex.: `https://seu-projeto.vercel.app` (ou várias URLs separadas por vírgula, ex.: `https://seu-app.vercel.app,http://localhost:5173`).
+   - Anote a URL pública da API (ex.: `https://sua-api.railway.app`).
+
+2. **Deploy do frontend na Vercel**:
+   - Em **Settings → Environment Variables** do projeto Vercel, defina:
+     - **`VITE_API_URL`** = URL pública da sua API (ex.: `https://sua-api.railway.app`), **não** `http://localhost:3000`.
+     - **`VITE_SUPABASE_URL`** e **`VITE_SUPABASE_ANON_KEY`** (se usar Supabase).
+   - Faça o deploy. O frontend passará a chamar a API deployada e o CORS permitirá a origem da Vercel.
+
+Se a API continuar em `localhost`, o frontend na Vercel não conseguirá acessá-la (e aparecerão erros de CORS / rede no console).
+
 ## Estrutura
 
 - `server/` — API Express, conexão MySQL, leitura das queries em `server/queries/*.sql`

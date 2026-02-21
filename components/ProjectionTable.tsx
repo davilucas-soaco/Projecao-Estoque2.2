@@ -452,7 +452,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                       </td>
                       
                       <td className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${item.estoqueAtual < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                        {item.isShelf ? '-' : (item.estoqueAtual === 0 ? '-' : item.estoqueAtual)}
+                        {item.isShelf ? '-' : item.estoqueAtual}
                       </td>
                       
                       <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
@@ -540,7 +540,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                             {comp.descricao}
                           </td>
                           <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400 border-l border-gray-100 dark:border-gray-800">
-                            {comp.estoqueAtual === 0 ? '-' : comp.estoqueAtual}
+                            {comp.estoqueAtual}
                           </td>
                           <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400">
                             {comp.totalPedido === 0 ? '-' : comp.totalPedido}

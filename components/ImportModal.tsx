@@ -131,7 +131,7 @@ const ImportModal: React.FC<Props> = ({
             <div className="p-2 bg-white/10 rounded-lg">
               <Upload className="w-5 h-5 text-highlight" />
             </div>
-            <h2 className="text-xl font-bold">Importar Dados</h2>
+            <h2 className="text-xl font-bold">Atualizações</h2>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
             <X className="w-5 h-5" />
@@ -149,19 +149,25 @@ const ImportModal: React.FC<Props> = ({
           </div>
 
           {activeType === 'SYNC' && (
-            <div className="mb-6 flex flex-col items-center gap-4 py-6">
-              <p className="text-sm text-neutral text-center">Atualize estoque e romaneio a partir do banco de dados.</p>
+            <div className="mb-6 flex flex-col items-center justify-center gap-6 py-8 px-4">
               <button
                 type="button"
                 onClick={() => { wasLoadingRef.current = false; onSyncServer?.(); setErrorMsg(''); }}
                 disabled={isSyncing}
-                className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${syncSuccess ? 'bg-green-500 text-white' : isSyncing ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed' : 'bg-secondary hover:bg-blue-700 text-white'}`}
-                title="Sincronizar"
+                className={`rounded-full flex items-center justify-center shadow-xl transition-all duration-300 ease-out min-w-[5rem] min-h-[5rem] w-24 h-24 sm:w-28 sm:h-28 ${syncSuccess ? 'bg-green-500 text-white scale-105' : isSyncing ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed' : 'bg-secondary hover:bg-blue-700 text-white hover:scale-105 active:scale-95'}`}
+                title="Sincronizar com o banco"
               >
-                <RefreshCw className={`w-7 h-7 ${isSyncing ? 'animate-spin' : ''}`} />
+                {syncSuccess ? (
+                  <CheckCircle className="w-12 h-12 sm:w-14 sm:h-14" aria-hidden />
+                ) : (
+                  <RefreshCw
+                    className={`w-10 h-10 sm:w-12 sm:h-12 ${isSyncing ? 'animate-spin' : ''}`}
+                    aria-hidden
+                  />
+                )}
               </button>
               {(ordersError || stockError) && (
-                <span className="text-[10px] text-red-600 dark:text-red-400 text-center">Erro: {(ordersError || stockError)?.message}</span>
+                <p className="text-[11px] text-red-600 dark:text-red-400 text-center max-w-xs">{(ordersError || stockError)?.message}</p>
               )}
             </div>
           )}
@@ -174,12 +180,6 @@ const ImportModal: React.FC<Props> = ({
               >
                 <Database className="w-3 h-3" /> Exportar Ficha Atual
               </button>
-            </div>
-          )}
-
-          {activeType === 'SYNC' && (
-            <div className="rounded-2xl p-6 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1a1a1a] min-h-[200px] flex items-center justify-center">
-              <span className="text-[11px] text-neutral">Selecione a guia &quot;Sincronizar com o banco&quot; e use o botão acima para atualizar.</span>
             </div>
           )}
 
@@ -228,11 +228,22 @@ const ImportModal: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="mt-6 p-4 bg-orange-50 dark:bg-orange-900/10 rounded-xl flex gap-3 border border-orange-100 dark:border-orange-800">
-            <RefreshCw className="w-5 h-5 text-orange-500 shrink-0" />
-            <div className="text-[11px] text-orange-700 dark:text-orange-300 leading-relaxed">
-              <strong>Ficha Estantes:</strong> Ao importar, o sistema enviará os dados para o Supabase (ou substituirá os locais). Inclua a coluna <em>desc_estante</em> no Excel para preencher a descrição da estante.
-            </div>
+          <div className="mt-6 p-4 bg-gray-100 dark:bg-[#1a1a1a] rounded-xl flex gap-3 border border-gray-200 dark:border-gray-700">
+            {activeType === 'FICHA' ? (
+              <>
+                <Package className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
+                <div className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
+                  <strong>Ficha Estantes:</strong> Arraste ou selecione um arquivo Excel/CSV com as colunas da mini ficha (codigo_estante, cod_coluna, desc_coluna, qtd_coluna, cod_bandeja, desc_bandeja, qtd_bandeja). Inclua <em>desc_estante</em> para preencher a descrição da estante no banco.
+                </div>
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
+                <div className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
+                  <strong>Sincronizar com o banco:</strong> Clique no botão circular acima para atualizar os dados de <em>estoque</em> e <em>romaneio</em> a partir da API. O ícone gira durante o carregamento e fica verde quando a sincronização for concluída.
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

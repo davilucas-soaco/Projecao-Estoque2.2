@@ -442,7 +442,7 @@ const App: React.FC = () => {
           </button>
           <button onClick={() => setIsImportModalOpen(true)} className="flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded font-semibold text-sm transition-all active:scale-95 shadow-lg">
             <Upload className="w-4 h-4" />
-            <span>Importar</span>
+            <span>Atualizações</span>
           </button>
           <div className="relative">
             <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 border-l border-white/20 pl-4 ml-2 hover:opacity-80 transition-opacity">

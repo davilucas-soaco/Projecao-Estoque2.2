@@ -23,9 +23,12 @@ const dbConfig = {
   database: process.env.DB_NAME || process.env.DB_DATABASE,
 };
 
-// CORS: restrito à origem do frontend em dev
+// CORS: aceita múltiplas origens separadas por vírgula (ex.: Vercel + localhost)
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()).filter(Boolean)
+  : ['http://localhost:5173'];
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
   optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
@@ -153,6 +156,7 @@ app.get('/api/orders', async (_req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
+// Escuta em 0.0.0.0 para aceitar conexões externas (Railway, Render, etc.)
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
