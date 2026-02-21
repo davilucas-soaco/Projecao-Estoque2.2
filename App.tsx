@@ -12,8 +12,8 @@ import {
   ChevronDown,
   Users
 } from 'lucide-react';
-import { UserProfile, Order, StockItem, Route, ProductConsolidated, UserAccount } from './types';
-import { normalizeText, isEligibleForGTeresina, getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS } from './utils';
+import { UserProfile, Order, StockItem, Route, ProductConsolidated, UserAccount, ShelfFicha } from './types';
+import { normalizeText, isEligibleForGTeresina, getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, isClienteVemBuscar, ROUTE_CLIENTE_BUSCA, isSoMoveis, isRotaNormal } from './utils';
 import ProjectionTable from './components/ProjectionTable';
 import SequenceTable from './components/SequenceTable';
 import OrdersView from './components/OrdersView';
@@ -26,6 +26,7 @@ const STORAGE_KEYS = {
   ORDERS: 'sa_industrial_orders_v2',
   STOCK: 'sa_industrial_stock_v2',
   ROUTES: 'sa_industrial_routes_v2',
+  SHELF_FICHA: 'sa_industrial_shelf_ficha_v2',
   USER_SESSION: 'sa_industrial_user_session_v2'
 };
 
@@ -69,10 +70,16 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
+  const [shelfFicha, setShelfFicha] = useState<ShelfFicha[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SHELF_FICHA);
+    return saved ? JSON.parse(saved) : [];
+  });
+
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); }, [users]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders)); }, [orders]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.STOCK, JSON.stringify(stock)); }, [stock]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.ROUTES, JSON.stringify(routes)); }, [routes]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SHELF_FICHA, JSON.stringify(shelfFicha)); }, [shelfFicha]);
 
   useEffect(() => {
     if (darkMode) document.documentElement.classList.add('dark');
@@ -100,7 +107,7 @@ const App: React.FC = () => {
     setOrders(newOrders);
     
     const routeNamesInNewData = Array.from(new Set(newOrders.map(o => {
-      if (isEligibleForGTeresina(o)) return null;
+      if (isSoMoveis(o) || isClienteVemBuscar(o) || isEligibleForGTeresina(o)) return null;
       return o.observacoesRomaneio;
     })))
     .filter((n): n is string => n !== null && n.trim() !== '' && n !== '&nbsp;');
@@ -126,8 +133,12 @@ const App: React.FC = () => {
     setStock(newStock); 
   };
 
+  const handleImportShelfFicha = (newFicha: ShelfFicha[]) => {
+    setShelfFicha(newFicha);
+  };
+
   const handleExportData = () => {
-    const backup = { users, orders, stock, routes, exportedAt: new Date().toISOString() };
+    const backup = { users, orders, stock, routes, shelfFicha, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -141,13 +152,22 @@ const App: React.FC = () => {
     if (json.orders) setOrders(json.orders);
     if (json.stock) setStock(json.stock);
     if (json.routes) setRoutes(json.routes);
+    if (json.shelfFicha) setShelfFicha(json.shelfFicha);
     alert('Sistema restaurado com sucesso!');
   };
 
   const consolidatedData = useMemo(() => {
     const productMap = new Map<string, ProductConsolidated>();
+    const shelfFichaMap = new Map<string, ShelfFicha>();
+    shelfFicha.forEach(f => {
+      if (f.codigoEstante) {
+        shelfFichaMap.set(f.codigoEstante.trim().toUpperCase(), f);
+      }
+    });
+
     const horizon = getHorizonInfo();
     const horizonDate = horizon.end;
+
 
     const parseOrderDateLocal = (dateStr: string) => {
       if (!dateStr) return null;
@@ -161,12 +181,14 @@ const App: React.FC = () => {
     };
     
     orders.forEach(order => {
+      const isSM = isSoMoveis(order);
+      const isCB = isClienteVemBuscar(order);
       const isGT = isEligibleForGTeresina(order);
-      const isSoMoveis = order.requisicaoLoja === true;
+      const isRN = isRotaNormal(order);
       
-      // Validação do Horizonte para G.Teresina e Só Móveis
+      // Validação do Horizonte para G.Teresina, Só Móveis e Cliente vem buscar
       let isInHorizon = false;
-      if (isGT || isSoMoveis) {
+      if (isGT || isSM || isCB) {
         const dEntrega = parseOrderDateLocal(order.dataEntrega);
         if (dEntrega) {
           dEntrega.setHours(0, 0, 0, 0);
@@ -174,100 +196,154 @@ const App: React.FC = () => {
         }
       }
 
-      const isLinked = order.codigoRomaneio && order.codigoRomaneio.trim() !== '' && order.codigoRomaneio !== '&nbsp;';
-      
-      // Se for G.Teresina ou Só Móveis, só processa se estiver dentro do horizonte de 13 dias.
-      // Se não for nenhum dos dois, exige romaneio vinculado.
-      if (((isGT || isSoMoveis) && !isInHorizon) || (!isGT && !isSoMoveis && !isLinked)) return;
+      // Se for rota fixa, só processa se estiver dentro do horizonte de 13 dias.
+      // Se não for rota fixa, exige romaneio vinculado (isRN já garante isso).
+      if (!isSM && !isCB && !isGT && !isRN) return;
+      if ((isSM || isCB || isGT) && !isInHorizon) return;
 
       if (!productMap.has(order.codigoProduto)) {
+        const normalizedCode = order.codigoProduto.trim().toUpperCase();
+        const ficha = shelfFichaMap.get(normalizedCode);
         productMap.set(order.codigoProduto, {
           codigo: order.codigoProduto,
           descricao: order.descricao,
           estoqueAtual: 0,
           totalPedido: 0,
           pendenteProducao: 0,
-          routeData: {}
+          routeData: {},
+          isShelf: !!ficha,
+          components: ficha ? [
+            { codigo: ficha.codColuna, descricao: ficha.descColuna, estoqueAtual: 0, totalPedido: 0, falta: 0, routeData: {} },
+            { codigo: ficha.codBandeja, descricao: ficha.descBandeja, estoqueAtual: 0, totalPedido: 0, falta: 0, routeData: {} }
+          ] : undefined
         });
       }
       const prod = productMap.get(order.codigoProduto)!;
-      prod.totalPedido += order.qtdVinculada || order.qtdPedida; // Se solto, usa qtdPedida como fallback
+      const orderQty = order.qtdVinculada || order.qtdPedida;
+      prod.totalPedido += orderQty;
       
-      // Decisão de Rota: Prioridade para Só Móveis, depois G.Teresina fixa (SE estiver no horizonte)
-      let routeName = order.observacoesRomaneio;
-      if (isSoMoveis) {
+      // Decisão de Rota seguindo a prioridade
+      let routeName = '';
+      if (isSM) {
         routeName = ROUTE_SO_MOVEIS;
+      } else if (isCB) {
+        routeName = ROUTE_CLIENTE_BUSCA;
       } else if (isGT) {
         routeName = ROUTE_G_TERESINA;
+      } else if (isRN) {
+        routeName = order.observacoesRomaneio;
       }
       
       if (routeName && routeName !== '&nbsp;') {
         if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0 };
-        prod.routeData[routeName].pedido += (order.qtdVinculada || order.qtdPedida);
+        prod.routeData[routeName].pedido += orderQty;
+
+        // Se for estante, replica para os componentes
+        if (prod.isShelf && prod.components) {
+          const normalizedCode = prod.codigo.trim().toUpperCase();
+          const ficha = shelfFichaMap.get(normalizedCode)!;
+          
+          // Coluna
+          const col = prod.components[0];
+          col.totalPedido += orderQty * ficha.qtdColuna;
+          if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0 };
+          col.routeData[routeName].pedido += orderQty * ficha.qtdColuna;
+
+          // Bandeja
+          const ban = prod.components[1];
+          ban.totalPedido += orderQty * ficha.qtdBandeja;
+          if (!ban.routeData[routeName]) ban.routeData[routeName] = { pedido: 0, falta: 0 };
+          ban.routeData[routeName].pedido += orderQty * ficha.qtdBandeja;
+        }
       }
     });
 
-    stock.forEach(s => {
-      const prod = productMap.get(s.codigo);
-      if (prod) prod.estoqueAtual = s.saldoSetorFinal;
+    // Mapeamento de estoque para produtos e componentes
+    const stockMap = new Map<string, number>();
+    stock.forEach(s => stockMap.set(s.codigo, s.saldoSetorFinal));
+
+    productMap.forEach(prod => {
+      if (!prod.isShelf) {
+        prod.estoqueAtual = stockMap.get(prod.codigo) || 0;
+      } else if (prod.components) {
+        prod.components.forEach(comp => {
+          comp.estoqueAtual = stockMap.get(comp.codigo) || 0;
+        });
+      }
     });
 
     const sortedRoutes = [...routes].sort((a, b) => a.order - b.order);
     
     productMap.forEach(prod => {
-      let runningBalance = Math.max(0, prod.estoqueAtual);
-      let totalFalta = 0;
+      if (!prod.isShelf) {
+        let runningBalance = Math.max(0, prod.estoqueAtual);
+        let totalFalta = 0;
 
-      // 1. Prioridade Máxima: Só Móveis
-      const soMoveisData = prod.routeData[ROUTE_SO_MOVEIS];
-      if (soMoveisData) {
-        const needed = soMoveisData.pedido;
-        if (runningBalance >= needed) {
-          soMoveisData.falta = 0;
-          runningBalance -= needed;
-        } else {
-          const missing = needed - runningBalance;
-          soMoveisData.falta = -missing;
-          totalFalta += soMoveisData.falta;
-          runningBalance = 0;
-        }
-      }
-
-      // 2. Prioridade: Entrega G.Teresina (Fixed)
-      const gTeresinaData = prod.routeData[ROUTE_G_TERESINA];
-      if (gTeresinaData) {
-        const needed = gTeresinaData.pedido;
-        if (runningBalance >= needed) {
-          gTeresinaData.falta = 0;
-          runningBalance -= needed;
-        } else {
-          const missing = needed - runningBalance;
-          gTeresinaData.falta = -missing;
-          totalFalta += gTeresinaData.falta;
-          runningBalance = 0;
-        }
-      }
-      
-      // 3. Sequência Manual (Carrada/Rotas)
-      sortedRoutes.forEach(route => {
-        const rd = prod.routeData[route.name];
-        if (rd) {
-          const needed = rd.pedido;
-          const availableBefore = runningBalance;
-          
-          if (availableBefore >= needed) {
-            rd.falta = 0;
-            runningBalance -= needed;
-          } else {
-            const missing = needed - availableBefore;
-            rd.falta = -missing;
-            totalFalta += rd.falta;
-            runningBalance = 0;
+        const processRoute = (routeName: string) => {
+          const rd = prod.routeData[routeName];
+          if (rd) {
+            const needed = rd.pedido;
+            if (runningBalance >= needed) {
+              rd.falta = 0;
+              runningBalance -= needed;
+            } else {
+              const missing = needed - runningBalance;
+              rd.falta = -missing;
+              totalFalta += rd.falta;
+              runningBalance = 0;
+            }
           }
-        }
-      });
-      
-      prod.pendenteProducao = totalFalta;
+        };
+
+        processRoute(ROUTE_SO_MOVEIS);
+        processRoute(ROUTE_G_TERESINA);
+        processRoute(ROUTE_CLIENTE_BUSCA);
+        sortedRoutes.forEach(r => processRoute(r.name));
+        
+        prod.pendenteProducao = totalFalta;
+      } else if (prod.components) {
+        // Processamento para componentes da estante
+        let shelfTotalFalta = 0;
+
+        prod.components.forEach(comp => {
+          let runningBalance = Math.max(0, comp.estoqueAtual);
+          let compTotalFalta = 0;
+
+          const processCompRoute = (routeName: string) => {
+            const rd = comp.routeData[routeName];
+            if (rd) {
+              const needed = rd.pedido;
+              if (runningBalance >= needed) {
+                rd.falta = 0;
+                runningBalance -= needed;
+              } else {
+                const missing = needed - runningBalance;
+                rd.falta = -missing;
+                compTotalFalta += rd.falta;
+                runningBalance = 0;
+              }
+              
+              // Atualiza a falta na rota principal do produto pai para visualização
+              if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0 };
+              // A falta do pai é a soma das faltas dos componentes? 
+              // O requisito diz: "exibir informações dos componentes"
+              // Vamos manter a falta do pai como 0 ou baseada no componente mais crítico?
+              // Geralmente se falta 1 componente, falta a estante.
+              prod.routeData[routeName].falta = Math.min(prod.routeData[routeName].falta || 0, rd.falta);
+            }
+          };
+
+          processCompRoute(ROUTE_SO_MOVEIS);
+          processCompRoute(ROUTE_G_TERESINA);
+          processCompRoute(ROUTE_CLIENTE_BUSCA);
+          sortedRoutes.forEach(r => processCompRoute(r.name));
+
+          comp.falta = compTotalFalta;
+          shelfTotalFalta = Math.min(shelfTotalFalta, compTotalFalta);
+        });
+
+        prod.pendenteProducao = shelfTotalFalta;
+      }
     });
 
     let result = Array.from(productMap.values());
@@ -276,7 +352,7 @@ const App: React.FC = () => {
       result = result.filter(p => p.codigo.toLowerCase().includes(lowerSearch) || p.descricao.toLowerCase().includes(lowerSearch));
     }
     return result;
-  }, [orders, stock, routes, searchTerm]);
+  }, [orders, stock, routes, shelfFicha, searchTerm]);
 
   const displayData = useMemo(() => {
     if (selectedRouteNames.length === 0) return consolidatedData;
@@ -299,17 +375,20 @@ const App: React.FC = () => {
     };
 
     return new Set(orders.filter(o => {
+      const isSM = isSoMoveis(o);
+      const isCB = isClienteVemBuscar(o);
       const isGT = isEligibleForGTeresina(o);
-      const isSoMoveis = o.requisicaoLoja === true;
+      const isRN = isRotaNormal(o);
+      
       let isInHorizon = false;
-      if (isGT || isSoMoveis) {
+      if (isGT || isSM || isCB) {
         const dEntrega = parseOrderDateLocal(o.dataEntrega);
         if (dEntrega) {
           dEntrega.setHours(0, 0, 0, 0);
           isInHorizon = dEntrega <= horizonDate;
         }
       }
-      return (o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;') || isInHorizon;
+      return isRN || isInHorizon;
     }).map(o => o.numeroPedido)).size;
   }, [orders, isEligibleForGTeresina]);
 
@@ -393,7 +472,15 @@ const App: React.FC = () => {
         <div><span>&copy; 2025 Só Aço Industrial</span></div>
       </footer>
 
-      {isImportModalOpen && ( <ImportModal onClose={() => setIsImportModalOpen(false)} onImportOrders={handleImportOrders} onImportStock={handleImportStock} /> )}
+      {isImportModalOpen && ( 
+        <ImportModal 
+          onClose={() => setIsImportModalOpen(false)} 
+          onImportOrders={handleImportOrders} 
+          onImportStock={handleImportStock} 
+          onImportShelfFicha={handleImportShelfFicha}
+          shelfFicha={shelfFicha}
+        /> 
+      )}
     </div>
   );
 };

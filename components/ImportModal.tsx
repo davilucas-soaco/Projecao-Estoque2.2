@@ -2,16 +2,18 @@
 import React, { useState } from 'react';
 import { X, Upload, CheckCircle, FileText, Package, Database, Info, AlertCircle, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Order, StockItem } from '../types';
+import { Order, StockItem, ShelfFicha } from '../types';
 
 interface Props {
   onClose: () => void;
   onImportOrders: (orders: Order[]) => void;
   onImportStock: (stock: StockItem[]) => void;
+  onImportShelfFicha: (ficha: ShelfFicha[]) => void;
+  shelfFicha: ShelfFicha[];
 }
 
-const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }) => {
-  const [activeType, setActiveType] = useState<'ROMANEIO' | 'ESTOQUE'>('ROMANEIO');
+const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock, onImportShelfFicha, shelfFicha }) => {
+  const [activeType, setActiveType] = useState<'ROMANEIO' | 'ESTOQUE' | 'FICHA'>('ROMANEIO');
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -65,13 +67,14 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
               municipioCliente: String(get(['Municipio_Cliente', 'Municipio Cliente']) || ''),
               ufCliente: String(get(['UF_Cliente', 'UF Cliente']) || ''),
               municipioEntrega: String(get(['Municipio_Entrega', 'Municipio Entrega']) || ''),
-              ufEntrega: String(get(['UF_Entrega', 'UF Entrega']) || '')
+              ufEntrega: String(get(['UF_Entrega', 'UF Entrega']) || ''),
+              endereco: String(get(['Endereco', 'Endereço', 'ENDERECO', 'ENDEREÇO']) || '')
             };
           });
 
           onImportOrders(mappedOrders);
           setSuccessMsg(`Sincronização concluída: ${mappedOrders.length} pedidos ativos.`);
-        } else {
+        } else if (activeType === 'ESTOQUE') {
           const mappedStock: StockItem[] = json.map(row => ({
             idProduto: Number(row['idProduto'] || 0),
             codigo: String(row['Codigo'] || row['codigo'] || ''),
@@ -84,6 +87,31 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
 
           onImportStock(mappedStock);
           setSuccessMsg(`Estoque atualizado: ${mappedStock.length} saldos sincronizados.`);
+        } else if (activeType === 'FICHA') {
+          const mappedFicha: ShelfFicha[] = json.map(row => {
+            const rowKeys = Object.keys(row);
+            const get = (keys: string[]) => {
+              for (const k of keys) {
+                const foundKey = rowKeys.find(rk => rk.trim().toLowerCase() === k.trim().toLowerCase());
+                if (foundKey && row[foundKey] !== undefined) return row[foundKey];
+              }
+              return '';
+            };
+            
+            return {
+              codigoEstante: String(get(['codigo_estante', 'codigoEstante', 'Codigo Estante', 'CODIGO_ESTANTE', 'codigo']) || '').trim(),
+              codColuna: String(get(['cod_coluna', 'codColuna', 'Cod Coluna', 'COD_COLUNA']) || '').trim(),
+              descColuna: String(get(['desc_coluna', 'descColuna', 'Desc Coluna', 'DESC_COLUNA']) || '').trim(),
+              qtdColuna: Number(get(['qtd_coluna', 'qtdColuna', 'Qtd Coluna', 'QTD_COLUNA']) || 0),
+              codBandeja: String(get(['cod_bandeja', 'codBandeja', 'Cod Bandeja', 'COD_BANDEJA']) || '').trim(),
+              descBandeja: String(get(['desc_bandeja', 'descBandeja', 'Desc Bandeja', 'DESC_BANDEJA']) || '').trim(),
+              qtdBandeja: Number(get(['qtd_bandeja', 'qtdBandeja', 'Qtd Bandeja', 'QTD_BANDEJA']) || 0)
+            };
+          }).filter(f => f.codigoEstante); // Remove linhas sem código de estante
+
+          console.log('Ficha importada:', mappedFicha); // Debug
+          onImportShelfFicha(mappedFicha);
+          setSuccessMsg(`Ficha Técnica atualizada: ${mappedFicha.length} estantes mapeadas.`);
         }
 
         setTimeout(() => {
@@ -109,6 +137,17 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
     if (file) parseFile(file);
   };
 
+  const handleExportFicha = () => {
+    if (shelfFicha.length === 0) {
+      alert("Não há dados de ficha técnica para exportar.");
+      return;
+    }
+    const ws = XLSX.utils.json_to_sheet(shelfFicha);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Ficha Técnica");
+    XLSX.writeFile(wb, "ficha_tecnica_estantes.xlsx");
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="bg-white dark:bg-[#252525] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -126,13 +165,27 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock }
 
         <div className="p-8">
           <div className="flex gap-2 mb-8 bg-gray-100 dark:bg-[#1a1a1a] p-1 rounded-xl">
-            <button disabled={loading} onClick={() => setActiveType('ROMANEIO')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${activeType === 'ROMANEIO' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
-              <FileText className="w-4 h-4" /> Romaneio / Pedidos
+            <button disabled={loading} onClick={() => setActiveType('ROMANEIO')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'ROMANEIO' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+              <FileText className="w-4 h-4" /> Romaneio
             </button>
-            <button disabled={loading} onClick={() => setActiveType('ESTOQUE')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${activeType === 'ESTOQUE' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
-              <Database className="w-4 h-4" /> Estoque Atual
+            <button disabled={loading} onClick={() => setActiveType('ESTOQUE')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'ESTOQUE' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+              <Database className="w-4 h-4" /> Estoque
+            </button>
+            <button disabled={loading} onClick={() => setActiveType('FICHA')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'FICHA' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+              <Package className="w-4 h-4" /> Ficha Estantes
             </button>
           </div>
+
+          {activeType === 'FICHA' && shelfFicha.length > 0 && (
+            <div className="mb-4 flex justify-end">
+              <button 
+                onClick={handleExportFicha}
+                className="text-[10px] font-bold flex items-center gap-2 bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-[#333] transition-colors shadow-sm"
+              >
+                <Database className="w-3 h-3" /> Exportar Ficha Atual
+              </button>
+            </div>
+          )}
 
           <div 
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}

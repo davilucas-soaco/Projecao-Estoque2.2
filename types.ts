@@ -34,6 +34,7 @@ export interface Order {
   ufCliente: string;
   municipioEntrega: string;
   ufEntrega: string;
+  endereco: string;
 }
 
 export interface StockItem {
@@ -53,6 +54,25 @@ export interface Route {
   order: number;
 }
 
+export interface ShelfFicha {
+  codigoEstante: string;
+  codColuna: string;
+  descColuna: string;
+  qtdColuna: number;
+  codBandeja: string;
+  descBandeja: string;
+  qtdBandeja: number;
+}
+
+export interface ComponentData {
+  codigo: string;
+  descricao: string;
+  estoqueAtual: number;
+  totalPedido: number;
+  falta: number;
+  routeData: Record<string, { pedido: number; falta: number }>;
+}
+
 export interface ProductConsolidated {
   codigo: string;
   descricao: string;
@@ -60,4 +80,6 @@ export interface ProductConsolidated {
   totalPedido: number;
   pendenteProducao: number;
   routeData: Record<string, { pedido: number; falta: number }>;
+  isShelf?: boolean;
+  components?: ComponentData[];
 }

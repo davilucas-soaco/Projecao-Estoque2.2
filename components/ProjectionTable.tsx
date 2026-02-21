@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProductConsolidated, Route } from '../types';
-import { ROUTE_G_TERESINA, ROUTE_SO_MOVEIS } from '../utils';
+import { ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, ROUTE_CLIENTE_BUSCA } from '../utils';
 import { 
   AlertTriangle, 
   TrendingDown, 
@@ -12,7 +12,10 @@ import {
   ArrowUp, 
   ArrowDown,
   Info,
-  GripVertical
+  GripVertical,
+  Plus,
+  Minus,
+  CornerDownRight
 } from 'lucide-react';
 
 interface SortCriterion {
@@ -36,7 +39,17 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
   
   const [descriptionWidth, setDescriptionWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
+  const [expandedShelves, setExpandedShelves] = useState<Set<string>>(new Set());
   const resizeRef = useRef<number>(0);
+
+  const toggleShelf = (codigo: string) => {
+    setExpandedShelves(prev => {
+      const next = new Set(prev);
+      if (next.has(codigo)) next.delete(codigo);
+      else next.add(codigo);
+      return next;
+    });
+  };
 
   const sortedRoutes = useMemo(() => [...routes].sort((a, b) => a.order - b.order), [routes]);
   
@@ -45,6 +58,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
     return [
       { id: 'fixed-sm', name: ROUTE_SO_MOVEIS, order: -1 },
       { id: 'fixed-gt', name: ROUTE_G_TERESINA, order: 0 },
+      { id: 'fixed-cb', name: ROUTE_CLIENTE_BUSCA, order: 1 },
       ...sortedRoutes
     ];
   }, [sortedRoutes]);
@@ -186,7 +200,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
             className="flex items-center gap-2 bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-[#333] transition-colors"
           >
             <Filter className="w-3.5 h-3.5 text-secondary" />
-            <span>Colunas de Rotas ({selectedRoutes.length || allFilterableRoutes.length})</span>
+            <span>Filtro de Colunas ({selectedRoutes.length || allFilterableRoutes.length})</span>
             <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isFilterOpen ? 'rotate-180' : ''}`} />
           </button>
 
@@ -225,7 +239,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                     onClick={() => onFilterRoutes([])}
                     className="w-full text-[9px] font-bold text-red-500 uppercase py-1.5 hover:underline"
                   >
-                    Exibir Todas as Rotas
+                    Exibir Todas as Colunas
                   </button>
                 </div>
               )}
@@ -241,7 +255,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
             </span>
           ))}
           {selectedRoutes.length === 0 && (
-            <span className="text-[11px] text-neutral italic">Todas as rotas visíveis</span>
+            <span className="text-[11px] text-neutral italic">Todas as colunas visíveis</span>
           )}
         </div>
       </div>
@@ -307,9 +321,9 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
 
                 {/* Coluna FIXA: Só Móveis (Condicional ao Filtro) */}
                 {isRouteVisible(ROUTE_SO_MOVEIS) && (
-                  <th className="px-2 py-1 text-center bg-emerald-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
+                  <th className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
                     <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">{horizonLabel || "Rota Fixa"}</div>
-                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 h-[24px] flex items-center justify-center overflow-hidden">
+                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
                       Só Móveis
                     </div>
                     <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
@@ -333,7 +347,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                 {isRouteVisible(ROUTE_G_TERESINA) && (
                   <th className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
                     <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">{horizonLabel || "Rota Fixa"}</div>
-                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 h-[24px] flex items-center justify-center overflow-hidden">
+                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
                       Entrega G.Teresina
                     </div>
                     <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
@@ -352,11 +366,34 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                     </div>
                   </th>
                 )}
+                {/* Coluna FIXA: Cliente vem buscar (Condicional ao Filtro) */}
+                {isRouteVisible(ROUTE_CLIENTE_BUSCA) && (
+                  <th className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
+                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">{horizonLabel || "Rota Fixa"}</div>
+                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
+                      Cliente vem buscar
+                    </div>
+                    <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_CLIENTE_BUSCA}:pedido`, e.ctrlKey); }}
+                        className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
+                      >
+                        P {renderSortIndicator(`route:${ROUTE_CLIENTE_BUSCA}:pedido`)}
+                      </div>
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_CLIENTE_BUSCA}:falta`, e.ctrlKey); }}
+                        className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
+                      >
+                        F {renderSortIndicator(`route:${ROUTE_CLIENTE_BUSCA}:falta`)}
+                      </div>
+                    </div>
+                  </th>
+                )}
                 
                 {routesToDisplay.map(route => (
-                  <th key={route.id} className="px-2 py-1 text-center bg-secondary border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
+                  <th key={route.id} className="px-2 py-3 text-center bg-secondary border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
                     <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">Rota {route.order}</div>
-                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 h-[24px] flex items-center justify-center overflow-hidden">
+                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
                       {route.name}
                     </div>
                     <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
@@ -381,79 +418,188 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
               {sortedData.map((item, idx) => {
                 const gtData = item.routeData[ROUTE_G_TERESINA] || { pedido: 0, falta: 0 };
                 const smData = item.routeData[ROUTE_SO_MOVEIS] || { pedido: 0, falta: 0 };
+                const cbData = item.routeData[ROUTE_CLIENTE_BUSCA] || { pedido: 0, falta: 0 };
+                const isExpanded = expandedShelves.has(item.codigo);
                 
                 return (
-                  <tr key={item.codigo} className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group`}>
-                    <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                      {item.codigo}
-                    </td>
-                    <td 
-                      style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
-                      className="px-3 py-1.5 text-[11px] sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate"
-                    >
-                      {item.descricao}
-                    </td>
-                    
-                    <td className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${item.estoqueAtual < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                      {item.estoqueAtual}
-                    </td>
-                    
-                    <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
-                      {item.totalPedido}
-                    </td>
- 
-                    <td className={`px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${item.pendenteProducao < 0 ? 'text-highlight' : 'text-green-600 dark:text-green-400'}`}>
-                      {item.pendenteProducao < 0 ? (
-                        <div className="flex items-center justify-center gap-1">
-                          {item.pendenteProducao}
-                          <TrendingDown className="w-2.5 h-2.5" />
+                  <React.Fragment key={item.codigo}>
+                    <tr className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group`}>
+                      <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                        <div className="flex items-center gap-2">
+                          {item.isShelf && (
+                            <button 
+                              onClick={() => toggleShelf(item.codigo)}
+                              className="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                            >
+                              {isExpanded ? <Minus className="w-3 h-3 text-secondary" /> : <Plus className="w-3 h-3 text-secondary" />}
+                            </button>
+                          )}
+                          {item.codigo}
                         </div>
-                      ) : '0'}
-                    </td>
+                      </td>
+                      <td 
+                        style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
+                        className="px-3 py-1.5 text-[11px] sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate"
+                      >
+                        {item.descricao}
+                      </td>
+                      
+                      <td className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${item.estoqueAtual < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
+                        {item.isShelf ? '-' : item.estoqueAtual}
+                      </td>
+                      
+                      <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
+                        {item.totalPedido}
+                      </td>
+  
+                      <td className={`px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${item.pendenteProducao < 0 ? 'text-highlight' : 'text-green-600 dark:text-green-400'}`}>
+                        {item.isShelf ? '-' : (item.pendenteProducao < 0 ? (
+                          <div className="flex items-center justify-center gap-1">
+                            {item.pendenteProducao}
+                            <TrendingDown className="w-2.5 h-2.5" />
+                          </div>
+                        ) : '0')}
+                      </td>
 
-                    {/* Renderização da Rota Fixa Só Móveis (Condicional) */}
-                    {isRouteVisible(ROUTE_SO_MOVEIS) && (
-                      <React.Fragment>
-                        <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-emerald-600 dark:text-emerald-400 font-bold text-[11px]">
-                          {smData.pedido || '-'}
-                        </td>
-                        <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${smData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                          {smData.falta || '-'}
-                        </td>
-                      </React.Fragment>
-                    )}
-
-                    {/* Renderização da Rota Fixa Entrega G.Teresina (Condicional) */}
-                    {isRouteVisible(ROUTE_G_TERESINA) && (
-                      <React.Fragment>
-                        <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-blue-400 font-bold text-[11px]">
-                          {gtData.pedido || '-'}
-                        </td>
-                        <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${gtData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                          {gtData.falta || '-'}
-                        </td>
-                      </React.Fragment>
-                    )}
-
-                    {routesToDisplay.map(route => {
-                      const rd = item.routeData[route.name] || { pedido: 0, falta: 0 };
-                      return (
-                        <React.Fragment key={route.id}>
-                          <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-medium text-[11px]">
-                            {rd.pedido || '-'}
+                      {/* Renderização da Rota Fixa Só Móveis (Condicional) */}
+                      {isRouteVisible(ROUTE_SO_MOVEIS) && (
+                        <React.Fragment>
+                          <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px]">
+                            {smData.pedido || '-'}
                           </td>
-                          <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                            {rd.falta || '-'}
+                          <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${smData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
+                            {item.isShelf ? '-' : (smData.falta || '-')}
                           </td>
                         </React.Fragment>
+                      )}
+
+                      {/* Renderização da Rota Fixa Entrega G.Teresina (Condicional) */}
+                      {isRouteVisible(ROUTE_G_TERESINA) && (
+                        <React.Fragment>
+                          <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-blue-400 font-bold text-[11px]">
+                            {gtData.pedido || '-'}
+                          </td>
+                          <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${gtData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
+                            {item.isShelf ? '-' : (gtData.falta || '-')}
+                          </td>
+                        </React.Fragment>
+                      )}
+
+                      {/* Renderização da Rota Fixa Cliente vem buscar (Condicional) */}
+                      {isRouteVisible(ROUTE_CLIENTE_BUSCA) && (
+                        <React.Fragment>
+                          <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-purple-400 font-bold text-[11px]">
+                            {cbData.pedido || '-'}
+                          </td>
+                          <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${cbData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
+                            {item.isShelf ? '-' : (cbData.falta || '-')}
+                          </td>
+                        </React.Fragment>
+                      )}
+
+                      {routesToDisplay.map(route => {
+                        const rd = item.routeData[route.name] || { pedido: 0, falta: 0 };
+                        return (
+                          <React.Fragment key={route.id}>
+                            <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-medium text-[11px]">
+                              {rd.pedido || '-'}
+                            </td>
+                            <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
+                              {item.isShelf ? '-' : (rd.falta || '-')}
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
+                    </tr>
+
+                    {/* Sublinhas dos Componentes */}
+                    {item.isShelf && isExpanded && item.components?.map((comp, cIdx) => {
+                      const cGtData = comp.routeData[ROUTE_G_TERESINA] || { pedido: 0, falta: 0 };
+                      const cSmData = comp.routeData[ROUTE_SO_MOVEIS] || { pedido: 0, falta: 0 };
+                      const cCbData = comp.routeData[ROUTE_CLIENTE_BUSCA] || { pedido: 0, falta: 0 };
+
+                      return (
+                        <tr key={`${item.codigo}-${comp.codigo}`} className="bg-gray-100/30 dark:bg-gray-800/20 border-l-4 border-secondary animate-in slide-in-from-top-1 duration-200">
+                          <td className="px-3 py-1 text-[10px] font-mono sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                            <div className="flex items-center gap-2 pl-4">
+                              <CornerDownRight className="w-3 h-3 text-neutral opacity-50" />
+                              {comp.codigo}
+                            </div>
+                          </td>
+                          <td 
+                            style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
+                            className="px-3 py-1 text-[10px] sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate italic text-neutral"
+                          >
+                            {comp.descricao}
+                          </td>
+                          <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400 border-l border-gray-100 dark:border-gray-800">
+                            {comp.estoqueAtual}
+                          </td>
+                          <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400">
+                            {comp.totalPedido}
+                          </td>
+                          <td className={`px-3 py-1 text-center font-bold text-[10px] border-r border-gray-100 dark:border-gray-800 ${comp.falta < 0 ? 'text-highlight' : 'text-green-600'}`}>
+                            {comp.falta || '0'}
+                          </td>
+
+                          {/* Componente: Só Móveis */}
+                          {isRouteVisible(ROUTE_SO_MOVEIS) && (
+                            <React.Fragment>
+                              <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
+                                {cSmData.pedido || '-'}
+                              </td>
+                              <td className={`px-2 py-1 text-center font-bold text-[10px] ${cSmData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
+                                {cSmData.falta || '-'}
+                              </td>
+                            </React.Fragment>
+                          )}
+
+                          {/* Componente: G.Teresina */}
+                          {isRouteVisible(ROUTE_G_TERESINA) && (
+                            <React.Fragment>
+                              <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
+                                {cGtData.pedido || '-'}
+                              </td>
+                              <td className={`px-2 py-1 text-center font-bold text-[10px] ${cGtData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
+                                {cGtData.falta || '-'}
+                              </td>
+                            </React.Fragment>
+                          )}
+
+                          {/* Componente: Cliente Vem Buscar */}
+                          {isRouteVisible(ROUTE_CLIENTE_BUSCA) && (
+                            <React.Fragment>
+                              <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
+                                {cCbData.pedido || '-'}
+                              </td>
+                              <td className={`px-2 py-1 text-center font-bold text-[10px] ${cCbData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
+                                {cCbData.falta || '-'}
+                              </td>
+                            </React.Fragment>
+                          )}
+
+                          {routesToDisplay.map(route => {
+                            const rd = comp.routeData[route.name] || { pedido: 0, falta: 0 };
+                            return (
+                              <React.Fragment key={route.id}>
+                                <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-gray-500 font-medium text-[10px]">
+                                  {rd.pedido || '-'}
+                                </td>
+                                <td className={`px-2 py-1 text-center font-bold text-[10px] ${rd.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
+                                  {rd.falta || '-'}
+                                </td>
+                              </React.Fragment>
+                            );
+                          })}
+                        </tr>
                       );
                     })}
-                  </tr>
+                  </React.Fragment>
                 );
               })}
               {sortedData.length === 0 && (
                 <tr>
-                  <td colSpan={7 + routesToDisplay.length * 2} className="px-4 py-16 text-center text-neutral">
+                  <td colSpan={7 + routesToDisplay.length * 2 + (isRouteVisible(ROUTE_CLIENTE_BUSCA) ? 2 : 0)} className="px-4 py-16 text-center text-neutral">
                     <div className="flex flex-col items-center gap-2">
                       <AlertTriangle className="w-10 h-10 opacity-20" />
                       <p className="text-gray-500 dark:text-gray-400 text-sm">Nenhum dado encontrado para exibição.</p>
@@ -469,7 +615,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
       <div className="bg-white dark:bg-[#252525] p-2 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-3 text-[10px] text-neutral italic shrink-0">
         <Info className="w-3.5 h-3.5 text-secondary" />
         <span>
-          <strong>Dica Operacional:</strong> Use o filtro <strong>Colunas de Rotas</strong> para alternar a exibição da <strong>Entrega G.Teresina</strong> e outras carradas dinâmicas.
+          <strong>Dica Operacional:</strong> Use o filtro <strong>Colunas </strong> para alternar a exibição da <strong>Entrega G.Teresina</strong> e outras carradas dinâmicas.
         </span>
       </div>
     </div>

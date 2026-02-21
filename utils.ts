@@ -3,7 +3,15 @@ import { Order } from './types';
 
 export const ROUTE_G_TERESINA = "Entrega G.Teresina";
 export const ROUTE_SO_MOVEIS = "Só Móveis";
-export const CIDADES_G_TERESINA = ['TERESINA', 'TIMON', 'DEMERVAL', 'JOSE DE FREITAS', 'NAZARIA'];
+export const ROUTE_CLIENTE_BUSCA = "Cliente vem buscar";
+export const CIDADES_G_TERESINA = [
+  { cidade: 'TERESINA', uf: 'PI' },
+  { cidade: 'TIMON', uf: 'MA' },
+  { cidade: 'DEMERVAL LOBÃO', uf: 'PI' },
+  { cidade: 'DEMERVAL', uf: 'PI' },
+  { cidade: 'JOSE DE FREITAS', uf: 'PI' },
+  { cidade: 'NAZARIA', uf: 'PI' }
+];
 
 export const normalizeText = (str: string | undefined | null): string => {
   if (!str) return "";
@@ -14,9 +22,27 @@ export const normalizeText = (str: string | undefined | null): string => {
     .trim();
 };
 
+// 1. Prioridade Máxima: Só Móveis
+export const isSoMoveis = (order: Order): boolean => {
+  return order.requisicaoLoja === true;
+};
+
+// 2. Segunda Prioridade: Cliente vem buscar
+export const isClienteVemBuscar = (order: Order): boolean => {
+  // Se for Só Móveis, não entra aqui (Prioridade 1 já tratou)
+  if (isSoMoveis(order)) return false;
+
+  const endNorm = normalizeText(order.endereco);
+  
+  // Verifica se contém as palavras-chave "COLETORA" e "SECUNDARIA" (independente da ordem ou prefixo)
+  // O normalizeText já remove acentos e converte para maiúsculas
+  return endNorm.includes("COLETORA") && endNorm.includes("SECUNDARIA");
+};
+
+// 3. Terceira Prioridade: Grande Teresina
 export const isEligibleForGTeresina = (order: Order): boolean => {
-  // Regra de Prioridade: Se for Requisição de Loja (Só Móveis), não é elegível para G.Teresina
-  if (order.requisicaoLoja === true) return false;
+  // Se for Só Móveis ou Cliente vem buscar, não entra aqui (Prioridades 1 e 2 já trataram)
+  if (isSoMoveis(order) || isClienteVemBuscar(order)) return false;
 
   const metodoNorm = normalizeText(order.metodoEntrega);
   if (metodoNorm !== normalizeText("Entrega Pelo Grupo Só Aço")) return false;
@@ -24,10 +50,18 @@ export const isEligibleForGTeresina = (order: Order): boolean => {
   const municipioReal = order.localEntregaDif === 1 
     ? normalizeText(order.municipioEntrega)
     : normalizeText(order.municipioCliente);
-
   const finalMunicipio = municipioReal || normalizeText(order.municipio);
+  const finalUf = order.localEntregaDif === 1 ? normalizeText(order.ufEntrega) : normalizeText(order.ufCliente) || normalizeText(order.uf);
 
-  return CIDADES_G_TERESINA.some(cidade => finalMunicipio.includes(cidade));
+  return CIDADES_G_TERESINA.some(
+    loc => normalizeText(loc.cidade) === finalMunicipio && normalizeText(loc.uf) === finalUf
+  );
+};
+
+// 4. Quarta Prioridade: Rotas Normais (Verificado no processamento pelo Codigo_Romaneio)
+export const isRotaNormal = (order: Order): boolean => {
+  if (isSoMoveis(order) || isClienteVemBuscar(order) || isEligibleForGTeresina(order)) return false;
+  return !!order.codigoRomaneio && order.codigoRomaneio.trim() !== "";
 };
 
 export const parseOrderDate = (dateStr: string) => {
