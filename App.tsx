@@ -404,7 +404,7 @@ const App: React.FC = () => {
               e.currentTarget.parentElement!.innerHTML = `
                 <div class="flex items-baseline gap-1 font-black italic select-none">
                   <span class="text-[#F4A900] text-2xl">SÓ</span>
-                  <span class="text-white text-2xl tracking-tighter">AÇO + 25</span>
+                  <span class="text-white text-2xl tracking-tighter">AÇO</span>
                 </div>
               `; 
             }} />
