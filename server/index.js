@@ -38,8 +38,7 @@ const corsOptions = {
   optionsSuccessStatus: 200,
   credentials: false,
 };
-app.options('*', cors(corsOptions)); // preflight para todas as rotas
-app.use(cors(corsOptions));
+app.use(cors(corsOptions)); // inclui preflight OPTIONS em todas as rotas
 app.use(express.json());
 
 // Rota de saúde: abrir http://localhost:3000 no navegador mostra que a API está no ar
