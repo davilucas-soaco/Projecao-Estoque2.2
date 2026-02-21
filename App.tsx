@@ -399,7 +399,15 @@ const App: React.FC = () => {
       <header className="bg-primary text-white p-4 shadow-lg sticky top-0 z-[60] flex justify-between items-center">
         <div className="flex items-center gap-4">
           <div className="relative h-10 flex items-center">
-            <img src="logo.png" alt="Só Aço Industrial" className="h-10 w-auto object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<div class="flex items-baseline gap-1 font-black italic"><span class="text-highlight text-2xl">SÓ</span><span class="text-white text-2xl tracking-tighter">AÇO</span></div>`; }} />
+            <img src="logo.png" alt="Só Aço Industrial" className="h-10 w-auto object-contain" onError={(e) => { 
+              e.currentTarget.style.display = 'none'; 
+              e.currentTarget.parentElement!.innerHTML = `
+                <div class="flex items-baseline gap-1 font-black italic select-none">
+                  <span class="text-[#F4A900] text-2xl">SÓ</span>
+                  <span class="text-white text-2xl tracking-tighter">AÇO + 25</span>
+                </div>
+              `; 
+            }} />
           </div>
           <div className="border-l border-white/20 pl-4">
             <h1 className="text-lg font-bold tracking-tight leading-none">Projeção de Estoque</h1>
@@ -465,7 +473,6 @@ const App: React.FC = () => {
       <footer className="bg-white dark:bg-[#252525] border-t border-gray-200 dark:border-gray-700 p-2 px-6 flex justify-between text-[11px] text-neutral">
         <div className="flex gap-4">
           <span>Pedidos Únicos: <b>{uniqueOrdersCount}</b></span>
-          <span>Pedidos em Rota: <b>{uniqueOrdersInRouteCount}</b></span>
           <span>Produtos: <b>{displayData.length}</b></span>
           <span>Rotas Ativas: <b>{routes.length}</b></span>
         </div>

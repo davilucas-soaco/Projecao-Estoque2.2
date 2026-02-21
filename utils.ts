@@ -34,9 +34,15 @@ export const isClienteVemBuscar = (order: Order): boolean => {
 
   const endNorm = normalizeText(order.endereco);
   
-  // Verifica se contém as palavras-chave "COLETORA" e "SECUNDARIA" (independente da ordem ou prefixo)
-  // O normalizeText já remove acentos e converte para maiúsculas
-  return endNorm.includes("COLETORA") && endNorm.includes("SECUNDARIA");
+  // Regex para "COLETORA" ou "COL"
+  const coletoraPattern = /(COL|COLETORA)/;
+  // Regex para "SECUNDARIA" ou "SEC"
+  const secundariaPattern = /(SEC|SECUNDARIA)/;
+
+  const hasColetoraLike = coletoraPattern.test(endNorm);
+  const hasSecundariaLike = secundariaPattern.test(endNorm);
+
+  return hasColetoraLike && hasSecundariaLike;
 };
 
 // 3. Terceira Prioridade: Grande Teresina

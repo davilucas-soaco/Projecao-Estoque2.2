@@ -203,8 +203,8 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
     const headers = [
       "Cód. Romaneio", "Obs. Romaneio", "Nº Pedido", "Cliente", "Cód. Produto", "Descrição", "U.M.", "Qtd. Pedida", "Qtd. Vinculada", "Preço Unit.", "Data Entrega", "Município", "UF", "Endereço", "Método Entrega", "Req. Loja", "Tipo Entrega", "Status"
     ];
-    // Ensure only valid orders are exported
-    const dataToExport = orders.filter(o => o.numeroPedido && o.numeroPedido.trim() !== '' && o.codigoProduto && o.codigoProduto.trim() !== '').map(order => {
+    
+    const dataToExport = filteredOrders.map(order => {
       const isGT = isEligibleForGTeresina(order);
       const isSoMoveis = order.requisicaoLoja === true;
       const isClienteBusca = isClienteVemBuscar(order);
@@ -216,7 +216,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
       } else if (isGT) {
         deliveryType = ROUTE_G_TERESINA;
       } else if (order.observacoesRomaneio && order.observacoesRomaneio.trim() !== '') {
-        deliveryType = 'Carrada';
+        deliveryType = `${order.observacoesRomaneio} (${order.codigoRomaneio})`;
       }
       const hasRoute = (order.codigoRomaneio && order.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
       const statusText = hasRoute ? 'VINCULADO' : 'SEM ROTA';
@@ -232,7 +232,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
         order.qtdPedida,
         order.qtdVinculada,
         order.precoUnitario,
-        order.dataEntrega,
+        formatDate(order.dataEntrega),
         order.municipio,
         order.uf,
         order.endereco,
@@ -263,7 +263,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
       } else if (isGT) {
         deliveryType = ROUTE_G_TERESINA;
       } else if (o.observacoesRomaneio && o.observacoesRomaneio.trim() !== '') {
-        deliveryType = 'Carrada';
+        deliveryType = `${o.observacoesRomaneio} (${o.codigoRomaneio})`;
       }
 
       // KPI Filter Logic
@@ -314,7 +314,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
               if (o.requisicaoLoja) return ROUTE_SO_MOVEIS;
               if (isClienteVemBuscar(o)) return ROUTE_CLIENTE_BUSCA;
               if (isEligibleForGTeresina(o)) return ROUTE_G_TERESINA;
-              if (o.observacoesRomaneio && o.observacoesRomaneio.trim() !== '') return 'Carrada';
+              if (o.observacoesRomaneio && o.observacoesRomaneio.trim() !== '') return `${o.observacoesRomaneio} (${o.codigoRomaneio})`;
               return '-';
             };
             valA = getDeliveryType(a);
@@ -531,7 +531,7 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
                   } else if (isGT) {
                     deliveryType = ROUTE_G_TERESINA;
                   } else if (order.observacoesRomaneio && order.observacoesRomaneio.trim() !== '') {
-                    deliveryType = 'Carrada';
+                    deliveryType = `${order.observacoesRomaneio} (${order.codigoRomaneio})`;
                   }
 
                   const hasRoute = (order.codigoRomaneio && order.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
@@ -556,8 +556,8 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
                       <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.endereco }}>{order.endereco}</td>
                       <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.metodoEntrega }}>{order.metodoEntrega}</td>
                       <td className="px-4 py-3 text-center text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.requisicaoLoja ? 'SIM' : 'NÃO'}</td>
-                      <td className="px-4 py-3 text-[10px] font-bold border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">
-                        <span className={isSoMoveis ? 'text-emerald-600 dark:text-emerald-400' : isClienteBusca ? 'text-purple-600 dark:text-purple-400' : isGT ? 'text-blue-600 dark:text-blue-400' : deliveryType === 'Carrada' ? 'text-blue-500' : 'text-neutral italic font-normal'}>
+                      <td className="px-4 py-3 text-[10px] font-bold border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.tipoEntrega }}>
+                        <span className={isSoMoveis ? 'text-emerald-600 dark:text-emerald-400' : isClienteBusca ? 'text-purple-600 dark:text-purple-400' : isGT ? 'text-blue-600 dark:text-blue-400' : order.observacoesRomaneio && order.observacoesRomaneio.trim() !== '' ? 'text-blue-500' : 'text-neutral italic font-normal'}>
                           {deliveryType}
                         </span>
                       </td>

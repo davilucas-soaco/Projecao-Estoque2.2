@@ -56,12 +56,20 @@ const Login: React.FC<Props> = ({ onLogin, users }) => {
             <div className="relative z-10 mb-2">
               <img 
                 src="logo.png" 
-                alt="Só Aço 25 Anos" 
+                alt="Só Aço + 25 Anos" 
                 className="w-48 h-auto object-contain drop-shadow-2xl"
                 onError={(e) => {
                   // Fallback caso a imagem não seja encontrada durante o desenvolvimento
                   e.currentTarget.style.display = 'none';
-                  e.currentTarget.parentElement!.innerHTML = '<div class="text-white font-black text-2xl tracking-tighter">SÓ AÇO <span class="text-highlight">25</span></div><div class="text-white/60 text-[8px] uppercase tracking-widest mt-1">Produzindo com excelência</div>';
+                  e.currentTarget.parentElement!.innerHTML = `
+                    <div class="flex flex-col items-center">
+                      <div class="flex items-baseline gap-1 font-black italic select-none">
+                        <span class="text-[#F4A900] text-4xl">SÓ</span>
+                        <span class="text-white text-4xl tracking-tighter">AÇO + 25</span>
+                      </div>
+                      <div class="text-white/60 text-[8px] uppercase tracking-widest mt-2">Produzindo com excelência</div>
+                    </div>
+                  `;
                 }}
               />
             </div>
@@ -133,7 +141,7 @@ const Login: React.FC<Props> = ({ onLogin, users }) => {
             </form>
 
             <div className="mt-8 text-center">
-              <p className="text-[10px] text-neutral dark:text-gray-500 uppercase font-black tracking-widest opacity-60">Só Aço Industrial — 25 Anos de Excelência</p>
+              <p className="text-[10px] text-neutral dark:text-gray-500 uppercase font-black tracking-widest opacity-60">Só Aço Industrial — + 25 Anos de Excelência</p>
             </div>
           </div>
         </div>
