@@ -48,8 +48,10 @@ function setCorsOnError(req, res) {
   if (origin && corsOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
 }
 
-// Rota de saúde (não usa DB) — Railway e navegador podem testar se a API está no ar
-app.get('/', (_req, res) => {
+const SERVE_CLIENT = process.env.SERVE_CLIENT === 'true' || process.env.SERVE_CLIENT === '1';
+
+// API info (sempre em /api para não conflitar com o SPA quando SERVE_CLIENT)
+app.get('/api', (_req, res) => {
   res.json({
     ok: true,
     message: 'API Projeção de Estoque',
@@ -59,6 +61,17 @@ app.get('/', (_req, res) => {
 app.get('/health', (_req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
 });
+
+// Quando só API: raiz retorna JSON (compatível com deploy só-backend)
+if (!SERVE_CLIENT) {
+  app.get('/', (_req, res) => {
+    res.json({
+      ok: true,
+      message: 'API Projeção de Estoque',
+      endpoints: { stock: 'GET /api/stock', orders: 'GET /api/orders' },
+    });
+  });
+}
 
 function getQueriesDir() {
   return path.join(__dirname, 'queries');
@@ -174,6 +187,16 @@ app.get('/api/orders', async (_req, res) => {
     res.status(500).json({ error: 'Erro ao buscar romaneio. Tente novamente.' });
   }
 });
+
+// Deploy "tudo em um": servir frontend (build Vite) no mesmo domínio — sem CORS
+if (SERVE_CLIENT) {
+  const distPath = path.join(__dirname, '..', 'dist');
+  app.use(express.static(distPath, { index: false }));
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
+    res.sendFile(path.join(distPath, 'index.html'), (err) => { if (err) next(err); });
+  });
+}
 
 // Tratador global: qualquer erro não capturado ainda envia CORS + 500
 app.use((err, _req, res, _next) => {

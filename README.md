@@ -55,9 +55,10 @@ Se for usar a MiniFicha no Supabase:
 
 1. Crie um projeto no [Supabase](https://supabase.com).
 2. No SQL Editor, execute o script em `docs/supabase-shelf-ficha.sql` para criar a tabela e as políticas RLS.
-3. Em Settings > API, copie a URL e a chave `anon` e defina `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` no `.env`.
+3. Para usar **romaneio e estoque** sem a API MySQL, execute também `docs/supabase-romaneio-estoque.sql` (cria as tabelas `romaneio` e `estoque`). Com isso, você pode importar Excel/CSV pelo modal Atualizações e os dados ficam no Supabase.
+4. Em Settings > API, copie a URL e a chave `anon` e defina `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` no `.env`.
 
-Sem Supabase, os dados da Ficha de Estantes ficam apenas em localStorage.
+Sem Supabase, os dados da Ficha de Estantes ficam apenas em localStorage. Romaneio e estoque continuam vindo da API (MySQL) se o Supabase não estiver configurado.
 
 ## Deploy (Vercel + API)
 
@@ -76,6 +77,28 @@ O frontend pode ser deployado na **Vercel**; a API (estoque e romaneio) precisa 
    - Faça o deploy. O frontend passará a chamar a API deployada e o CORS permitirá a origem da Vercel.
 
 Se a API continuar em `localhost`, o frontend na Vercel não conseguirá acessá-la (e aparecerão erros de CORS / rede no console).
+
+## Deploy único (recomendado — tudo no Railway)
+
+A forma **mais simples** de hospedar o sistema é subir **frontend + API no mesmo servidor**. Assim não há CORS, não é preciso configurar Vercel nem duas URLs.
+
+1. **No Railway:** crie um projeto a partir do repositório (raiz do projeto, não só a pasta `server/`).
+
+2. **Variáveis de ambiente** no Railway:
+   - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` (conexão MySQL)
+   - **`SERVE_CLIENT=true`** — faz o Express servir o frontend (pasta `dist`) na mesma URL
+   - **Não defina `VITE_API_URL`** (ou deixe vazio) — o frontend usará URLs relativas (`/api/stock`, `/api/orders`)
+   - Opcional: `CORS_ORIGIN` (só necessário se você ainda usar o front na Vercel em paralelo)
+
+3. **Build e Start:**
+   - **Build Command:** `npm install && npm run build`  
+     (gera a pasta `dist` com o React)
+   - **Start Command:** `npm start`  
+     (sobe o Node e, com `SERVE_CLIENT=true`, serve a API em `/api/*` e o app em `/`)
+
+4. Acesse a URL do Railway (ex.: `https://seu-projeto.up.railway.app`). A aplicação e a API estarão no mesmo domínio; os dados carregam sem CORS.
+
+**Requisito:** o MySQL precisa ser acessível a partir da rede da Railway (liberar firewall / IP ou usar um banco em nuvem que aceite conexões externas).
 
 ## Estrutura
 

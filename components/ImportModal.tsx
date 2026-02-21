@@ -1,30 +1,85 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Upload, CheckCircle, Package, Database, AlertCircle, RefreshCw } from 'lucide-react';
+import { X, Upload, CheckCircle, Package, Database, AlertCircle, RefreshCw, FileSpreadsheet, PackageCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { ShelfFicha } from '../types';
+import { ShelfFicha, Order, StockItem } from '../types';
+import { replaceRomaneio, replaceEstoque } from '../supabaseClient';
+
+type TabType = 'FICHA' | 'ROMANEIO' | 'ESTOQUE' | 'SYNC';
+
+function toNum(v: unknown): number {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number' && !Number.isNaN(v)) return v;
+  const n = Number(v);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+function parseDate(v: unknown): string {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && !Number.isNaN(v)) return new Date((v - 25569) * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+  if (v instanceof Date) return v.toISOString().slice(0, 19).replace('T', ' ');
+  const s = String(v).trim();
+  if (!s) return '';
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 19).replace('T', ' ');
+  const parts = s.split(/[/\-.]/);
+  if (parts.length >= 3) {
+    const y = parseInt(parts[2], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[0], 10);
+    const d2 = new Date(y, m, day);
+    if (!Number.isNaN(d2.getTime())) return d2.toISOString().slice(0, 19).replace('T', ' ');
+  }
+  return s;
+}
+
+function parseDateOnly(v: unknown): string {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && !Number.isNaN(v)) return new Date((v - 25569) * 86400 * 1000).toISOString().slice(0, 10);
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const s = String(v).trim();
+  if (!s) return '';
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  const parts = s.split(/[/\-.]/);
+  if (parts.length >= 3) {
+    const y = parseInt(parts[2], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[0], 10);
+    const d2 = new Date(y, m, day);
+    if (!Number.isNaN(d2.getTime())) return d2.toISOString().slice(0, 10);
+  }
+  return s;
+}
 
 interface Props {
   onClose: () => void;
   onImportShelfFicha: (ficha: ShelfFicha[]) => void;
   onSyncServer?: () => void;
+  onImportedRomaneio?: () => void;
+  onImportedEstoque?: () => void;
   shelfFicha: ShelfFicha[];
   isOrdersLoading?: boolean;
   isStockLoading?: boolean;
   ordersError?: Error | null;
   stockError?: Error | null;
+  /** Quando true, exibe abas de importação Romaneio e Estoque (Supabase). */
+  useSupabaseOrdersStock?: boolean;
 }
 
 const ImportModal: React.FC<Props> = ({
   onClose,
   onImportShelfFicha,
   onSyncServer,
+  onImportedRomaneio,
+  onImportedEstoque,
   shelfFicha,
   isOrdersLoading = false,
   isStockLoading = false,
   ordersError = null,
   stockError = null,
+  useSupabaseOrdersStock = false,
 }) => {
-  const [activeType, setActiveType] = useState<'FICHA' | 'SYNC'>('FICHA');
+  const [activeType, setActiveType] = useState<TabType>('FICHA');
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -89,10 +144,82 @@ const ImportModal: React.FC<Props> = ({
           setSuccessMsg(`Ficha Técnica atualizada: ${mappedFicha.length} estantes mapeadas.`);
         }
 
-        setTimeout(() => {
-          setSuccessMsg('');
-          onClose();
-        }, 2000);
+        if (activeType === 'ROMANEIO' && useSupabaseOrdersStock) {
+          const rowKeys = Object.keys(json[0] || {});
+          const getVal = (row: Record<string, unknown>, keys: string[]) => {
+            for (const k of keys) {
+              const found = rowKeys.find(rk => rk.trim().toLowerCase().replace(/\s/g, '_') === k.trim().toLowerCase());
+              if (found && row[found] !== undefined) return row[found];
+            }
+            return undefined;
+          };
+          const orders: Order[] = (json as Record<string, unknown>[]).map(row => {
+            const g = (keys: string[]) => getVal(row, keys);
+            const req = String(g(['Requisicao_de_Loja_do_grupo', 'Requisicao de Loja do grupo', 'requisicao_loja']) || '').toLowerCase();
+            return {
+              codigoRomaneio: String(g(['Codigo_Romaneio', 'Codigo Romaneio']) ?? '').trim(),
+              observacoesRomaneio: String(g(['observacoes_Romaneio', 'observacoes Romaneio']) ?? '').trim(),
+              dataEmissaoRomaneio: parseDate(g(['dataEmissao_Romaneio', 'data_emissao_romaneio', 'Data Emissao Romaneio'])),
+              numeroPedido: String(g(['N_Pedido', 'N Pedido', 'numero_pedido']) ?? '').trim(),
+              cliente: String(g(['Cliente', 'cliente']) ?? '').trim(),
+              dataEmissaoPedido: parseDateOnly(g(['Data_Emissao_Pedido', 'Data Emissao Pedido', 'data_emissao_pedido'])),
+              codigoProduto: String(g(['Cod_Produto', 'Cod Produto', 'cod_produto']) ?? '').trim(),
+              descricao: String(g(['descricao', 'Descricao']) ?? '').trim(),
+              um: String(g(['U.M', 'UM', 'um']) ?? '').trim(),
+              qtdPedida: toNum(g(['Qtd_Pedida', 'Qtd Pedida', 'qtd_pedida'])),
+              qtdVinculada: toNum(g(['Qtd_Vinculada_no_Romaneio', 'Qtd Vinculada no Romaneio', 'qtd_vinculada'])),
+              tipoProduto: String(g(['Tipo_de_produto_do_item_de_pedido_de_venda', 'Tipo de produto']) ?? '').trim(),
+              precoUnitario: toNum(g(['Preco_Unitario', 'Preco Unitario', 'preco_unitario'])),
+              dataEntrega: parseDate(g(['Data_de_Entrega', 'Data de Entrega', 'data_de_entrega'])),
+              municipio: String(g(['Municipio', 'municipio']) ?? '').trim(),
+              uf: String(g(['UF', 'uf']) ?? '').trim(),
+              endereco: String(g(['Endereco', 'Endereco', 'endereco']) ?? '').trim(),
+              metodoEntrega: String(g(['Metodo_de_entrega', 'Metodo de entrega', 'metodo_entrega']) ?? '').trim(),
+              requisicaoLoja: req.includes('sim'),
+              localEntregaDif: 0,
+              municipioCliente: String(g(['Municipio', 'municipio']) ?? '').trim(),
+              ufCliente: String(g(['UF', 'uf']) ?? '').trim(),
+              municipioEntrega: String(g(['Municipio', 'municipio']) ?? '').trim(),
+              ufEntrega: String(g(['UF', 'uf']) ?? '').trim(),
+            };
+          });
+          await replaceRomaneio(orders);
+          onImportedRomaneio?.();
+          setSuccessMsg(`Romaneio importado: ${orders.length} registros salvos no Supabase.`);
+        }
+
+        if (activeType === 'ESTOQUE' && useSupabaseOrdersStock) {
+          const rowKeys = Object.keys(json[0] || {});
+          const getVal = (row: Record<string, unknown>, keys: string[]) => {
+            for (const k of keys) {
+              const found = rowKeys.find(rk => rk.trim().toLowerCase().replace(/\s/g, '_') === k.trim().toLowerCase());
+              if (found && row[found] !== undefined) return row[found];
+            }
+            return undefined;
+          };
+          const stock: StockItem[] = (json as Record<string, unknown>[]).map(row => {
+            const g = (keys: string[]) => getVal(row, keys);
+            return {
+              idProduto: toNum(g(['idProduto', 'id_produto', 'Id Produto'])),
+              codigo: String(g(['Codigo', 'codigo', 'Codigo']) ?? '').trim(),
+              idTipoProduto: toNum(g(['idTipoProduto', 'id_tipo_produto', 'Id Tipo Produto'])),
+              setorEstoquePadrao: String(g(['SetorEstoquePadrao', 'Setor Estoque Padrao', 'setor_estoque_padrao']) ?? '').trim(),
+              descricao: String(g(['Descricao', 'descricao']) ?? '').trim(),
+              setorEstoque: String(g(['setorEstoque', 'setor_estoque', 'Setor Estoque']) ?? '').trim(),
+              saldoSetorFinal: toNum(g(['saldoSetorFinal', 'saldo_setor_final', 'Saldo Setor Final'])),
+            };
+          });
+          await replaceEstoque(stock);
+          onImportedEstoque?.();
+          setSuccessMsg(`Estoque importado: ${stock.length} registros salvos no Supabase.`);
+        }
+
+        if (activeType === 'FICHA' || activeType === 'ROMANEIO' || activeType === 'ESTOQUE') {
+          setTimeout(() => {
+            setSuccessMsg('');
+            onClose();
+          }, 2000);
+        }
       } catch (err: any) {
         setErrorMsg(`Erro ao processar: ${err.message}`);
       } finally {
@@ -139,12 +266,22 @@ const ImportModal: React.FC<Props> = ({
         </div>
 
         <div className="p-8">
-          <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-[#1a1a1a] p-1 rounded-xl">
-            <button disabled={loading} onClick={() => setActiveType('FICHA')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'FICHA' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
-              <Package className="w-4 h-4" /> Ficha Estantes
+          <div className="flex flex-wrap gap-2 mb-6 bg-gray-100 dark:bg-[#1a1a1a] p-1 rounded-xl">
+            <button disabled={loading} onClick={() => setActiveType('FICHA')} className={`flex-1 min-w-0 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'FICHA' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+              <Package className="w-4 h-4 shrink-0" /> Ficha Estantes
             </button>
-            <button disabled={loading} onClick={() => setActiveType('SYNC')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'SYNC' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
-              <RefreshCw className="w-4 h-4" /> Sincronizar com o banco
+            {useSupabaseOrdersStock && (
+              <>
+                <button disabled={loading} onClick={() => setActiveType('ROMANEIO')} className={`flex-1 min-w-0 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'ROMANEIO' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+                  <FileSpreadsheet className="w-4 h-4 shrink-0" /> Romaneio
+                </button>
+                <button disabled={loading} onClick={() => setActiveType('ESTOQUE')} className={`flex-1 min-w-0 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'ESTOQUE' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+                  <PackageCheck className="w-4 h-4 shrink-0" /> Estoque
+                </button>
+              </>
+            )}
+            <button disabled={loading} onClick={() => setActiveType('SYNC')} className={`flex-1 min-w-0 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'SYNC' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+              <RefreshCw className="w-4 h-4 shrink-0" /> Sincronizar
             </button>
           </div>
 
@@ -183,7 +320,7 @@ const ImportModal: React.FC<Props> = ({
             </div>
           )}
 
-          {activeType === 'FICHA' && (
+          {(activeType === 'FICHA' || (useSupabaseOrdersStock && (activeType === 'ROMANEIO' || activeType === 'ESTOQUE'))) && (
           <div 
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
@@ -193,7 +330,7 @@ const ImportModal: React.FC<Props> = ({
             {loading ? (
               <div className="flex flex-col items-center gap-3">
                 <div className="w-10 h-10 border-4 border-secondary border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-sm font-medium">Sincronizando banco de dados...</p>
+                <p className="text-sm font-medium">{activeType === 'FICHA' ? 'Sincronizando banco de dados...' : 'Importando e salvando no Supabase...'}</p>
               </div>
             ) : successMsg ? (
               <div className="flex flex-col items-center gap-3 text-green-500 animate-in zoom-in duration-300">
@@ -229,18 +366,35 @@ const ImportModal: React.FC<Props> = ({
           )}
 
           <div className="mt-6 p-4 bg-gray-100 dark:bg-[#1a1a1a] rounded-xl flex gap-3 border border-gray-200 dark:border-gray-700">
-            {activeType === 'FICHA' ? (
+            {activeType === 'FICHA' && (
               <>
                 <Package className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
                 <div className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
                   <strong>Ficha Estantes:</strong> Arraste ou selecione um arquivo Excel/CSV com as colunas da mini ficha (codigo_estante, cod_coluna, desc_coluna, qtd_coluna, cod_bandeja, desc_bandeja, qtd_bandeja). Inclua <em>desc_estante</em> para preencher a descrição da estante no banco.
                 </div>
               </>
-            ) : (
+            )}
+            {activeType === 'ROMANEIO' && (
+              <>
+                <FileSpreadsheet className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
+                <div className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
+                  <strong>Romaneio:</strong> Envie um Excel/CSV com as colunas do romaneio (Codigo_Romaneio, N_Pedido, Cliente, Cod_Produto, descricao, Qtd_Pedida, Qtd_Vinculada_no_Romaneio, Data_de_Entrega, etc.). Os dados substituirão os atuais no Supabase.
+                </div>
+              </>
+            )}
+            {activeType === 'ESTOQUE' && (
+              <>
+                <PackageCheck className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
+                <div className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
+                  <strong>Estoque:</strong> Envie um Excel/CSV com as colunas de estoque (idProduto, Codigo, Descricao, setorEstoque, saldoSetorFinal, etc.). Os dados substituirão os atuais no Supabase.
+                </div>
+              </>
+            )}
+            {activeType === 'SYNC' && (
               <>
                 <RefreshCw className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
                 <div className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
-                  <strong>Sincronizar com o banco:</strong> Clique no botão circular acima para atualizar os dados de <em>estoque</em> e <em>romaneio</em> a partir da API. O ícone gira durante o carregamento e fica verde quando a sincronização for concluída.
+                  <strong>Sincronizar:</strong> {useSupabaseOrdersStock ? 'Recarrega os dados de romaneio e estoque do Supabase.' : 'Clique no botão acima para atualizar estoque e romaneio a partir da API.'}
                 </div>
               </>
             )}

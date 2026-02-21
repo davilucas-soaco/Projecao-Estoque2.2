@@ -1,6 +1,10 @@
 import type { Order, StockItem } from './types';
+import { supabase, fetchRomaneio, fetchEstoque } from './supabaseClient';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// Vazio ou não definido = mesmo domínio (deploy único). Senão = URL do backend (ex.: Vercel + Railway).
+const API_BASE = (import.meta.env.VITE_API_URL === '' || import.meta.env.VITE_API_URL == null)
+  ? ''
+  : (import.meta.env.VITE_API_URL || 'http://localhost:3000');
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -20,12 +24,16 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+/** Se Supabase está configurado, lê estoque do Supabase; senão usa a API (MySQL). */
 export async function fetchStock(): Promise<StockItem[]> {
+  if (supabase) return fetchEstoque();
   const res = await fetch(`${API_BASE}/api/stock`);
   return handleResponse<StockItem[]>(res);
 }
 
+/** Se Supabase está configurado, lê romaneio do Supabase; senão usa a API (MySQL). */
 export async function fetchOrders(): Promise<Order[]> {
+  if (supabase) return fetchRomaneio();
   const res = await fetch(`${API_BASE}/api/orders`);
   return handleResponse<Order[]>(res);
 }

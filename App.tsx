@@ -502,11 +502,14 @@ const App: React.FC = () => {
           onClose={() => setIsImportModalOpen(false)}
           onImportShelfFicha={handleImportShelfFicha}
           onSyncServer={handleSyncServer}
+          onImportedRomaneio={() => queryClient.invalidateQueries({ queryKey: ['orders'] })}
+          onImportedEstoque={() => queryClient.invalidateQueries({ queryKey: ['stock'] })}
           shelfFicha={shelfFicha}
           isOrdersLoading={ordersQuery.isLoading}
           isStockLoading={stockQuery.isLoading}
           ordersError={ordersQuery.error}
           stockError={stockQuery.error}
+          useSupabaseOrdersStock={!!supabase}
         />
       )}
     </div>
