@@ -21,6 +21,7 @@ const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME || process.env.DB_DATABASE,
+  connectTimeout: 10000, // 10s — evita travar e gerar 502 se o MySQL estiver inacessível
 };
 
 // CORS: lê CORS_ORIGIN do .env (lista separada por vírgulas)
@@ -41,13 +42,16 @@ const corsOptions = {
 app.use(cors(corsOptions)); // inclui preflight OPTIONS em todas as rotas
 app.use(express.json());
 
-// Rota de saúde: abrir http://localhost:3000 no navegador mostra que a API está no ar
+// Rota de saúde (não usa DB) — Railway e navegador podem testar se a API está no ar
 app.get('/', (_req, res) => {
   res.json({
     ok: true,
     message: 'API Projeção de Estoque',
     endpoints: { stock: 'GET /api/stock', orders: 'GET /api/orders' },
   });
+});
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 
 function getQueriesDir() {
