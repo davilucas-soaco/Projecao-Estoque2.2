@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Carrega .env da raiz do projeto (um nível acima de server/)
 const envPath = path.resolve(__dirname, '..', '.env');
-dotenv.config({ path: envPath });
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
