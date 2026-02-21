@@ -504,6 +504,8 @@ const App: React.FC = () => {
           onSyncServer={handleSyncServer}
           onImportedRomaneio={() => queryClient.invalidateQueries({ queryKey: ['orders'] })}
           onImportedEstoque={() => queryClient.invalidateQueries({ queryKey: ['stock'] })}
+          onImportOrders={handleImportOrders}
+          onImportStock={handleImportStock}
           shelfFicha={shelfFicha}
           isOrdersLoading={ordersQuery.isLoading}
           isStockLoading={stockQuery.isLoading}

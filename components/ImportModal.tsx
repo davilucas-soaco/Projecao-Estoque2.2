@@ -57,12 +57,16 @@ interface Props {
   onSyncServer?: () => void;
   onImportedRomaneio?: () => void;
   onImportedEstoque?: () => void;
+  /** Importar romaneio para overlay (quando não usa Supabase). */
+  onImportOrders?: (orders: Order[]) => void;
+  /** Importar estoque para overlay (quando não usa Supabase). */
+  onImportStock?: (stock: StockItem[]) => void;
   shelfFicha: ShelfFicha[];
   isOrdersLoading?: boolean;
   isStockLoading?: boolean;
   ordersError?: Error | null;
   stockError?: Error | null;
-  /** Quando true, exibe abas de importação Romaneio e Estoque (Supabase). */
+  /** Quando true, persiste Romaneio/Estoque no Supabase; senão usa overlay (Excel em memória). */
   useSupabaseOrdersStock?: boolean;
 }
 
@@ -72,6 +76,8 @@ const ImportModal: React.FC<Props> = ({
   onSyncServer,
   onImportedRomaneio,
   onImportedEstoque,
+  onImportOrders,
+  onImportStock,
   shelfFicha,
   isOrdersLoading = false,
   isStockLoading = false,
@@ -144,7 +150,7 @@ const ImportModal: React.FC<Props> = ({
           setSuccessMsg(`Ficha Técnica atualizada: ${mappedFicha.length} estantes mapeadas.`);
         }
 
-        if (activeType === 'ROMANEIO' && useSupabaseOrdersStock) {
+        if (activeType === 'ROMANEIO') {
           const rowKeys = Object.keys(json[0] || {});
           const getVal = (row: Record<string, unknown>, keys: string[]) => {
             for (const k of keys) {
@@ -183,12 +189,17 @@ const ImportModal: React.FC<Props> = ({
               ufEntrega: String(g(['UF', 'uf']) ?? '').trim(),
             };
           });
-          await replaceRomaneio(orders);
-          onImportedRomaneio?.();
-          setSuccessMsg(`Romaneio importado: ${orders.length} registros salvos no Supabase.`);
+          if (useSupabaseOrdersStock) {
+            await replaceRomaneio(orders);
+            onImportedRomaneio?.();
+            setSuccessMsg(`Romaneio importado: ${orders.length} registros salvos no Supabase.`);
+          } else {
+            onImportOrders?.(orders);
+            setSuccessMsg(`Romaneio importado: ${orders.length} registros (uso em memória).`);
+          }
         }
 
-        if (activeType === 'ESTOQUE' && useSupabaseOrdersStock) {
+        if (activeType === 'ESTOQUE') {
           const rowKeys = Object.keys(json[0] || {});
           const getVal = (row: Record<string, unknown>, keys: string[]) => {
             for (const k of keys) {
@@ -209,9 +220,14 @@ const ImportModal: React.FC<Props> = ({
               saldoSetorFinal: toNum(g(['saldoSetorFinal', 'saldo_setor_final', 'Saldo Setor Final'])),
             };
           });
-          await replaceEstoque(stock);
-          onImportedEstoque?.();
-          setSuccessMsg(`Estoque importado: ${stock.length} registros salvos no Supabase.`);
+          if (useSupabaseOrdersStock) {
+            await replaceEstoque(stock);
+            onImportedEstoque?.();
+            setSuccessMsg(`Estoque importado: ${stock.length} registros salvos no Supabase.`);
+          } else {
+            onImportStock?.(stock);
+            setSuccessMsg(`Estoque importado: ${stock.length} registros (uso em memória).`);
+          }
         }
 
         if (activeType === 'FICHA' || activeType === 'ROMANEIO' || activeType === 'ESTOQUE') {
@@ -320,7 +336,7 @@ const ImportModal: React.FC<Props> = ({
             </div>
           )}
 
-          {(activeType === 'FICHA' || (useSupabaseOrdersStock && (activeType === 'ROMANEIO' || activeType === 'ESTOQUE'))) && (
+          {(activeType === 'FICHA' || activeType === 'ROMANEIO' || activeType === 'ESTOQUE') && (
           <div 
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
@@ -378,7 +394,7 @@ const ImportModal: React.FC<Props> = ({
               <>
                 <FileSpreadsheet className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
                 <div className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
-                  <strong>Romaneio:</strong> Envie um Excel/CSV com as colunas do romaneio (Codigo_Romaneio, N_Pedido, Cliente, Cod_Produto, descricao, Qtd_Pedida, Qtd_Vinculada_no_Romaneio, Data_de_Entrega, etc.). Os dados substituirão os atuais no Supabase.
+                  <strong>Romaneio:</strong> Envie um Excel/CSV com as colunas do romaneio (Codigo_Romaneio, N_Pedido, Cliente, Cod_Produto, descricao, Qtd_Pedida, Qtd_Vinculada_no_Romaneio, Data_de_Entrega, etc.). {useSupabaseOrdersStock ? 'Os dados substituirão os atuais no Supabase.' : 'Os dados serão usados em memória até a próxima sincronização.'}
                 </div>
               </>
             )}
@@ -386,7 +402,7 @@ const ImportModal: React.FC<Props> = ({
               <>
                 <PackageCheck className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
                 <div className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
-                  <strong>Estoque:</strong> Envie um Excel/CSV com as colunas de estoque (idProduto, Codigo, Descricao, setorEstoque, saldoSetorFinal, etc.). Os dados substituirão os atuais no Supabase.
+                  <strong>Estoque:</strong> Envie um Excel/CSV com as colunas de estoque (idProduto, Codigo, Descricao, setorEstoque, saldoSetorFinal, etc.). {useSupabaseOrdersStock ? 'Os dados substituirão os atuais no Supabase.' : 'Os dados serão usados em memória até a próxima sincronização.'}
                 </div>
               </>
             )}
