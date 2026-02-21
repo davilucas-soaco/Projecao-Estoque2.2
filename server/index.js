@@ -23,14 +23,22 @@ const dbConfig = {
   database: process.env.DB_NAME || process.env.DB_DATABASE,
 };
 
-// CORS: aceita múltiplas origens separadas por vírgula (ex.: Vercel + localhost)
+// CORS: lê CORS_ORIGIN do .env (lista separada por vírgulas)
 const corsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()).filter(Boolean)
   : ['http://localhost:5173'];
+
 const corsOptions = {
-  origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
+  origin(origin, callback) {
+    // Requisições sem origin (health checks, curl, Postman) são permitidas
+    if (!origin) return callback(null, true);
+    if (corsOrigins.includes(origin)) return callback(null, origin);
+    return callback(null, false);
+  },
   optionsSuccessStatus: 200,
+  credentials: false,
 };
+app.options('*', cors(corsOptions)); // preflight para todas as rotas
 app.use(cors(corsOptions));
 app.use(express.json());
 
