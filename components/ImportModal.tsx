@@ -1,30 +1,56 @@
-
-import React, { useState } from 'react';
-import { X, Upload, CheckCircle, FileText, Package, Database, Info, AlertCircle, RefreshCw } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Upload, CheckCircle, Package, Database, AlertCircle, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Order, StockItem, ShelfFicha } from '../types';
+import { ShelfFicha } from '../types';
 
 interface Props {
   onClose: () => void;
-  onImportOrders: (orders: Order[]) => void;
-  onImportStock: (stock: StockItem[]) => void;
   onImportShelfFicha: (ficha: ShelfFicha[]) => void;
+  onSyncServer?: () => void;
   shelfFicha: ShelfFicha[];
+  isOrdersLoading?: boolean;
+  isStockLoading?: boolean;
+  ordersError?: Error | null;
+  stockError?: Error | null;
 }
 
-const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock, onImportShelfFicha, shelfFicha }) => {
-  const [activeType, setActiveType] = useState<'ROMANEIO' | 'ESTOQUE' | 'FICHA'>('ROMANEIO');
+const ImportModal: React.FC<Props> = ({
+  onClose,
+  onImportShelfFicha,
+  onSyncServer,
+  shelfFicha,
+  isOrdersLoading = false,
+  isStockLoading = false,
+  ordersError = null,
+  stockError = null,
+}) => {
+  const [activeType, setActiveType] = useState<'FICHA' | 'SYNC'>('FICHA');
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [syncSuccess, setSyncSuccess] = useState(false);
+  const [toast, setToast] = useState('');
+  const wasLoadingRef = useRef(false);
+
+  const isSyncing = isOrdersLoading || isStockLoading;
+  useEffect(() => {
+    if (isSyncing) wasLoadingRef.current = true;
+    if (wasLoadingRef.current && !isSyncing && activeType === 'SYNC') {
+      setSyncSuccess(true);
+      setToast('Sincronização completa');
+      wasLoadingRef.current = false;
+      const t = setTimeout(() => { setToast(''); setSyncSuccess(false); }, 2500);
+      return () => clearTimeout(t);
+    }
+  }, [isSyncing, activeType]);
 
   const parseFile = async (file: File) => {
     setLoading(true);
     setErrorMsg('');
     const reader = new FileReader();
 
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array', cellDates: true });
@@ -36,58 +62,7 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock, 
           throw new Error("O arquivo parece estar vazio.");
         }
 
-        if (activeType === 'ROMANEIO') {
-          const mappedOrders: Order[] = json.map((row) => {
-            const get = (keys: string[]) => {
-              for (const k of keys) if (row[k] !== undefined) return row[k];
-              return '';
-            };
-
-            return {
-              codigoRomaneio: String(get(['Codigo Romaneio', 'Codigo_Romaneio', 'Cod. Romaneio']) || ''),
-              observacoesRomaneio: String(get(['observacoes Romaneio', 'observacoes_Romaneio', 'Observações']) || ''),
-              dataEmissaoRomaneio: String(get(['dataEmissao Romaneio', 'dataEmissao_Romaneio']) || ''),
-              numeroPedido: String(get(['N° Pedido', 'N_Pedido', 'Pedido']) || ''),
-              cliente: String(get(['Cliente']) || ''),
-              dataEmissaoPedido: String(get(['Data Emissao Pedido', 'Data_Emissao_Pedido']) || ''),
-              codigoProduto: String(get(['Cod.Produto', 'Cod_Produto', 'Codigo Produto']) || ''),
-              descricao: String(get(['descricao', 'Descricao']) || ''),
-              um: String(get(['U.M', 'UM']) || ''),
-              qtdPedida: Number(get(['Qtd Pedida', 'Qtd_Pedida']) || 0),
-              qtdVinculada: Number(get(['Qtd Vinculada no Romaneio', 'Qtd_Vinculada_no_Romaneio']) || 0),
-              tipoProduto: String(get(['Tipo de produto do item de pedido de venda', 'Tipo Produto']) || ''),
-              precoUnitario: Number(get(['Preço Unitario', 'Preco_Unitario']) || 0),
-              dataEntrega: String(get(['Data de Entrega', 'Data_de_Entrega']) || ''),
-              municipio: String(get(['Municipio']) || ''),
-              uf: String(get(['UF']) || ''),
-              metodoEntrega: String(get(['Metodo_de_entrega', 'Método de entrega', 'Metodo Entrega']) || ''),
-              requisicaoLoja: String(get(['Requisicao_de_Loja_do_grupo', 'Requisicao de Loja do grupo ?', 'Requisicao de Loja'])).toLowerCase().includes('sim'),
-              // Novos mapeamentos de localização
-              localEntregaDif: Number(get(['localEntregaDifEnderecoDestinatario', 'Local Entrega Dif']) || 0),
-              municipioCliente: String(get(['Municipio_Cliente', 'Municipio Cliente']) || ''),
-              ufCliente: String(get(['UF_Cliente', 'UF Cliente']) || ''),
-              municipioEntrega: String(get(['Municipio_Entrega', 'Municipio Entrega']) || ''),
-              ufEntrega: String(get(['UF_Entrega', 'UF Entrega']) || ''),
-              endereco: String(get(['Endereco', 'Endereço', 'ENDERECO', 'ENDEREÇO']) || '')
-            };
-          });
-
-          onImportOrders(mappedOrders);
-          setSuccessMsg(`Sincronização concluída: ${mappedOrders.length} pedidos ativos.`);
-        } else if (activeType === 'ESTOQUE') {
-          const mappedStock: StockItem[] = json.map(row => ({
-            idProduto: Number(row['idProduto'] || 0),
-            codigo: String(row['Codigo'] || row['codigo'] || ''),
-            idTipoProduto: Number(row['idTipoProduto'] || 0),
-            setorEstoquePadrao: String(row['SetorEstoquePadrao'] || ''),
-            descricao: String(row['Descricao'] || row['descricao'] || ''),
-            setorEstoque: String(row['setorEstoque'] || ''),
-            saldoSetorFinal: Number(row['saldoSetorFinal'] || 0)
-          }));
-
-          onImportStock(mappedStock);
-          setSuccessMsg(`Estoque atualizado: ${mappedStock.length} saldos sincronizados.`);
-        } else if (activeType === 'FICHA') {
+        if (activeType === 'FICHA') {
           const mappedFicha: ShelfFicha[] = json.map(row => {
             const rowKeys = Object.keys(row);
             const get = (keys: string[]) => {
@@ -100,6 +75,7 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock, 
             
             return {
               codigoEstante: String(get(['codigo_estante', 'codigoEstante', 'Codigo Estante', 'CODIGO_ESTANTE', 'codigo']) || '').trim(),
+              descEstante: String(get(['desc_estante', 'descricao estante', 'descEstante', 'DESC_ESTANTE']) || '').trim() || undefined,
               codColuna: String(get(['cod_coluna', 'codColuna', 'Cod Coluna', 'COD_COLUNA']) || '').trim(),
               descColuna: String(get(['desc_coluna', 'descColuna', 'Desc Coluna', 'DESC_COLUNA']) || '').trim(),
               qtdColuna: Number(get(['qtd_coluna', 'qtdColuna', 'Qtd Coluna', 'QTD_COLUNA']) || 0),
@@ -107,10 +83,9 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock, 
               descBandeja: String(get(['desc_bandeja', 'descBandeja', 'Desc Bandeja', 'DESC_BANDEJA']) || '').trim(),
               qtdBandeja: Number(get(['qtd_bandeja', 'qtdBandeja', 'Qtd Bandeja', 'QTD_BANDEJA']) || 0)
             };
-          }).filter(f => f.codigoEstante); // Remove linhas sem código de estante
+          }).filter(f => f.codigoEstante);
 
-          console.log('Ficha importada:', mappedFicha); // Debug
-          onImportShelfFicha(mappedFicha);
+          await Promise.resolve(onImportShelfFicha(mappedFicha));
           setSuccessMsg(`Ficha Técnica atualizada: ${mappedFicha.length} estantes mapeadas.`);
         }
 
@@ -164,17 +139,32 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock, 
         </div>
 
         <div className="p-8">
-          <div className="flex gap-2 mb-8 bg-gray-100 dark:bg-[#1a1a1a] p-1 rounded-xl">
-            <button disabled={loading} onClick={() => setActiveType('ROMANEIO')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'ROMANEIO' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
-              <FileText className="w-4 h-4" /> Romaneio
-            </button>
-            <button disabled={loading} onClick={() => setActiveType('ESTOQUE')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'ESTOQUE' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
-              <Database className="w-4 h-4" /> Estoque
-            </button>
+          <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-[#1a1a1a] p-1 rounded-xl">
             <button disabled={loading} onClick={() => setActiveType('FICHA')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'FICHA' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
               <Package className="w-4 h-4" /> Ficha Estantes
             </button>
+            <button disabled={loading} onClick={() => setActiveType('SYNC')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'SYNC' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
+              <RefreshCw className="w-4 h-4" /> Sincronizar com o banco
+            </button>
           </div>
+
+          {activeType === 'SYNC' && (
+            <div className="mb-6 flex flex-col items-center gap-4 py-6">
+              <p className="text-sm text-neutral text-center">Atualize estoque e romaneio a partir do banco de dados.</p>
+              <button
+                type="button"
+                onClick={() => { wasLoadingRef.current = false; onSyncServer?.(); setErrorMsg(''); }}
+                disabled={isSyncing}
+                className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${syncSuccess ? 'bg-green-500 text-white' : isSyncing ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed' : 'bg-secondary hover:bg-blue-700 text-white'}`}
+                title="Sincronizar"
+              >
+                <RefreshCw className={`w-7 h-7 ${isSyncing ? 'animate-spin' : ''}`} />
+              </button>
+              {(ordersError || stockError) && (
+                <span className="text-[10px] text-red-600 dark:text-red-400 text-center">Erro: {(ordersError || stockError)?.message}</span>
+              )}
+            </div>
+          )}
 
           {activeType === 'FICHA' && shelfFicha.length > 0 && (
             <div className="mb-4 flex justify-end">
@@ -187,6 +177,13 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock, 
             </div>
           )}
 
+          {activeType === 'SYNC' && (
+            <div className="rounded-2xl p-6 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1a1a1a] min-h-[200px] flex items-center justify-center">
+              <span className="text-[11px] text-neutral">Selecione a guia &quot;Sincronizar com o banco&quot; e use o botão acima para atualizar.</span>
+            </div>
+          )}
+
+          {activeType === 'FICHA' && (
           <div 
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
@@ -223,11 +220,18 @@ const ImportModal: React.FC<Props> = ({ onClose, onImportOrders, onImportStock, 
               </>
             )}
           </div>
+          )}
+
+          {toast && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[110] px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
+              {toast}
+            </div>
+          )}
 
           <div className="mt-6 p-4 bg-orange-50 dark:bg-orange-900/10 rounded-xl flex gap-3 border border-orange-100 dark:border-orange-800">
             <RefreshCw className="w-5 h-5 text-orange-500 shrink-0" />
             <div className="text-[11px] text-orange-700 dark:text-orange-300 leading-relaxed">
-              <strong>Atenção (Modo Sincronização):</strong> Ao importar, o sistema substituirá os dados atuais pelos deste arquivo. Pedidos que não constarem no arquivo serão removidos do sistema.
+              <strong>Ficha Estantes:</strong> Ao importar, o sistema enviará os dados para o Supabase (ou substituirá os locais). Inclua a coluna <em>desc_estante</em> no Excel para preencher a descrição da estante.
             </div>
           </div>
         </div>

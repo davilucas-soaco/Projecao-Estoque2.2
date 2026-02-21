@@ -32,6 +32,13 @@ interface Props {
   horizonLabel?: string;
 }
 
+const formatCellNum = (v: unknown): string | number => {
+  if (v === undefined || v === null) return '-';
+  const n = Number(v);
+  if (Number.isNaN(n) || n === 0) return '-';
+  return n % 1 === 0 ? Math.round(n) : Math.round(n * 100) / 100;
+};
+
 const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilterRoutes, horizonLabel }) => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
@@ -445,11 +452,11 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                       </td>
                       
                       <td className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${item.estoqueAtual < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                        {item.isShelf ? '-' : item.estoqueAtual}
+                        {item.isShelf ? '-' : (item.estoqueAtual === 0 ? '-' : item.estoqueAtual)}
                       </td>
                       
                       <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
-                        {item.totalPedido}
+                        {item.totalPedido === 0 ? '-' : item.totalPedido}
                       </td>
   
                       <td className={`px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${item.pendenteProducao < 0 ? 'text-highlight' : 'text-green-600 dark:text-green-400'}`}>
@@ -458,17 +465,17 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                             {item.pendenteProducao}
                             <TrendingDown className="w-2.5 h-2.5" />
                           </div>
-                        ) : '0')}
+                        ) : '-')}
                       </td>
 
                       {/* Renderização da Rota Fixa Só Móveis (Condicional) */}
                       {isRouteVisible(ROUTE_SO_MOVEIS) && (
                         <React.Fragment>
                           <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px]">
-                            {smData.pedido || '-'}
+                            {formatCellNum(smData.pedido)}
                           </td>
                           <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${smData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                            {item.isShelf ? '-' : (smData.falta || '-')}
+                            {item.isShelf ? '-' : formatCellNum(smData.falta)}
                           </td>
                         </React.Fragment>
                       )}
@@ -477,10 +484,10 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                       {isRouteVisible(ROUTE_G_TERESINA) && (
                         <React.Fragment>
                           <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-blue-400 font-bold text-[11px]">
-                            {gtData.pedido || '-'}
+                            {formatCellNum(gtData.pedido)}
                           </td>
                           <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${gtData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                            {item.isShelf ? '-' : (gtData.falta || '-')}
+                            {item.isShelf ? '-' : formatCellNum(gtData.falta)}
                           </td>
                         </React.Fragment>
                       )}
@@ -489,10 +496,10 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                       {isRouteVisible(ROUTE_CLIENTE_BUSCA) && (
                         <React.Fragment>
                           <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-purple-400 font-bold text-[11px]">
-                            {cbData.pedido || '-'}
+                            {formatCellNum(cbData.pedido)}
                           </td>
                           <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${cbData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                            {item.isShelf ? '-' : (cbData.falta || '-')}
+                            {item.isShelf ? '-' : formatCellNum(cbData.falta)}
                           </td>
                         </React.Fragment>
                       )}
@@ -502,10 +509,10 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                         return (
                           <React.Fragment key={route.id}>
                             <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-medium text-[11px]">
-                              {rd.pedido || '-'}
+                              {formatCellNum(rd.pedido)}
                             </td>
                             <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                              {item.isShelf ? '-' : (rd.falta || '-')}
+                              {item.isShelf ? '-' : formatCellNum(rd.falta)}
                             </td>
                           </React.Fragment>
                         );
@@ -520,7 +527,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
 
                       return (
                         <tr key={`${item.codigo}-${comp.codigo}`} className="bg-gray-100/30 dark:bg-gray-800/20 border-l-4 border-secondary animate-in slide-in-from-top-1 duration-200">
-                          <td className="px-3 py-1 text-[10px] font-mono sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                          <td className="px-3 py-1 text-[10px] font-mono sticky left-0 z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)]">
                             <div className="flex items-center gap-2 pl-4">
                               <CornerDownRight className="w-3 h-3 text-neutral opacity-50" />
                               {comp.codigo}
@@ -528,28 +535,28 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                           </td>
                           <td 
                             style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
-                            className="px-3 py-1 text-[10px] sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate italic text-neutral"
+                            className="px-3 py-1 text-[10px] sticky left-[110px] z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)] truncate italic text-neutral"
                           >
                             {comp.descricao}
                           </td>
                           <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400 border-l border-gray-100 dark:border-gray-800">
-                            {comp.estoqueAtual}
+                            {comp.estoqueAtual === 0 ? '-' : comp.estoqueAtual}
                           </td>
                           <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400">
-                            {comp.totalPedido}
+                            {comp.totalPedido === 0 ? '-' : comp.totalPedido}
                           </td>
                           <td className={`px-3 py-1 text-center font-bold text-[10px] border-r border-gray-100 dark:border-gray-800 ${comp.falta < 0 ? 'text-highlight' : 'text-green-600'}`}>
-                            {comp.falta || '0'}
+                            {formatCellNum(comp.falta)}
                           </td>
 
                           {/* Componente: Só Móveis */}
                           {isRouteVisible(ROUTE_SO_MOVEIS) && (
                             <React.Fragment>
                               <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
-                                {cSmData.pedido || '-'}
+                                {formatCellNum(cSmData.pedido)}
                               </td>
                               <td className={`px-2 py-1 text-center font-bold text-[10px] ${cSmData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
-                                {cSmData.falta || '-'}
+                                {formatCellNum(cSmData.falta)}
                               </td>
                             </React.Fragment>
                           )}
@@ -558,10 +565,10 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                           {isRouteVisible(ROUTE_G_TERESINA) && (
                             <React.Fragment>
                               <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
-                                {cGtData.pedido || '-'}
+                                {formatCellNum(cGtData.pedido)}
                               </td>
                               <td className={`px-2 py-1 text-center font-bold text-[10px] ${cGtData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
-                                {cGtData.falta || '-'}
+                                {formatCellNum(cGtData.falta)}
                               </td>
                             </React.Fragment>
                           )}
@@ -570,10 +577,10 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                           {isRouteVisible(ROUTE_CLIENTE_BUSCA) && (
                             <React.Fragment>
                               <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
-                                {cCbData.pedido || '-'}
+                                {formatCellNum(cCbData.pedido)}
                               </td>
                               <td className={`px-2 py-1 text-center font-bold text-[10px] ${cCbData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
-                                {cCbData.falta || '-'}
+                                {formatCellNum(cCbData.falta)}
                               </td>
                             </React.Fragment>
                           )}
@@ -583,7 +590,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
                             return (
                               <React.Fragment key={route.id}>
                                 <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-gray-500 font-medium text-[10px]">
-                                  {rd.pedido || '-'}
+                                  {formatCellNum(rd.pedido)}
                                 </td>
                                 <td className={`px-2 py-1 text-center font-bold text-[10px] ${rd.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
                                   {rd.falta || '-'}

@@ -1,20 +1,74 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Projeção de Estoque
 
-# Run and deploy your AI Studio app
+Aplicação web para gestão de projeção de estoque, sequência de entrega e romaneios.
 
-This contains everything you need to run your app locally.
+## Stack
 
-View your app in AI Studio: https://ai.studio/apps/678528ce-6cfe-4861-a085-867f8d4d1188
+- **Frontend:** React, Vite, TypeScript, Tailwind CSS, TanStack Query
+- **Backend:** Node.js/Express (API para MySQL)
+- **Bancos:** MySQL (pedidos/romaneio e estoque), Supabase/PostgreSQL (MiniFicha / shelf_ficha)
 
-## Run Locally
+## Pré-requisitos
 
-**Prerequisites:**  Node.js
+- Node.js 18+
+- MySQL (acesso às bases do sistema)
+- Conta Supabase (para shelf_ficha; opcional — sem Supabase a ficha usa localStorage)
 
+## Variáveis de ambiente
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Copie `.env.example` para `.env` e preencha:
+
+- **Backend (raiz do projeto):** `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `PORT`
+- **Frontend:** `VITE_API_URL` (URL do backend, ex.: `http://localhost:3000`), `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (se usar Supabase)
+
+Nunca commite o arquivo `.env` (ele está no `.gitignore`).
+
+## Execução
+
+### 1. Backend (API MySQL)
+
+```bash
+cd server
+npm install
+npm run dev
+```
+
+O servidor sobe em `http://localhost:3000` (ou no `PORT` definido no `.env`). Endpoints:
+
+- `GET /api/stock` — saldo de estoque (query em `server/queries/saldo-estoque.sql`)
+- `GET /api/orders` — romaneio/requisição (query em `server/queries/romaneio-requisicao.sql`)
+
+Para alterar as consultas, edite os arquivos em `server/queries/` e reinicie o servidor.
+
+### 2. Frontend
+
+```bash
+npm install
+npm run dev
+```
+
+Acesse a URL exibida no terminal (em geral `http://localhost:5173`). Configure `VITE_API_URL` para apontar ao backend.
+
+### 3. Supabase (shelf_ficha)
+
+Se for usar a MiniFicha no Supabase:
+
+1. Crie um projeto no [Supabase](https://supabase.com).
+2. No SQL Editor, execute o script em `docs/supabase-shelf-ficha.sql` para criar a tabela e as políticas RLS.
+3. Em Settings > API, copie a URL e a chave `anon` e defina `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` no `.env`.
+
+Sem Supabase, os dados da Ficha de Estantes ficam apenas em localStorage.
+
+## Estrutura
+
+- `server/` — API Express, conexão MySQL, leitura das queries em `server/queries/*.sql`
+- `components/` — componentes React (ImportModal, ProjectionTable, etc.)
+- `docs/` — PRD e script SQL da tabela `shelf_ficha`
+- `api.ts` — cliente HTTP para `/api/stock` e `/api/orders`
+- `supabaseClient.ts` — cliente Supabase e funções para `shelf_ficha`
+
+## Segurança
+
+- Credenciais do MySQL ficam apenas no backend e no `.env` (nunca com prefixo `VITE_`).
+- A API é a fonte de verdade para pedidos e estoque; o frontend apenas consome e exibe.
+- Supabase usa RLS na tabela `shelf_ficha`; use a chave anon (pública) e restrinja acesso pelas políticas.

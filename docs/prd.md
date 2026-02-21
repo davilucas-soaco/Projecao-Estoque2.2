@@ -45,7 +45,7 @@ desc_bandeja | TEXT | Descrição da bandeja.
 qtd_bandeja | INTEGER | Quantidade da bandeja.
 created_at | TIMESTAMPTZ | Data de criação.
 Instruções para o Desenvolvedor (Cursor AI)
-Backend para MySQL: Implementar um servidor Node.js/Express para gerenciar a conexão e as queries ao MySQL para orders e stock. As credenciais do MySQL (DB_HOST, DB_USER, DB_PASSWORD, DB_DATABASE) devem ser carregadas de variáveis de ambiente no backend e NUNCA expostas ao frontend.
+Backend para MySQL: Implementar um servidor Node.js/Express para gerenciar a conexão e as queries ao MySQL para orders e stock. As credenciais do MySQL (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME) devem ser carregadas de variáveis de ambiente no backend e NUNCA expostas ao frontend.
 Frontend para Supabase: Integrar o cliente Supabase no frontend para gerenciar a tabela shelf_ficha. As credenciais do Supabase (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) devem ser carregadas de variáveis de ambiente no frontend (com prefixo VITE_).
 handleImportShelfFicha: Adaptar a função para enviar os dados para o Supabase usando upsert. Certificar-se de que cada item ShelfFicha tenha um id UUID único antes de enviar.
 Assincronicidade e Erros: Garantir que todas as operações de dados (frontend e backend) sejam assíncronas e incluam tratamento de erros robusto, além de estados de carregamento na UI.

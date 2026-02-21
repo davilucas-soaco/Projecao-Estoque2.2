@@ -11,7 +11,24 @@ interface Props {
 
 type KpiFilterType = 'all' | 'so_moveis' | 'g_teresina' | 'cliente_busca' | 'em_rota' | 'sem_vinculo';
 
-const OrdersView: React.FC<Props> = ({ orders }) => {
+const safeNum = (v: unknown): number => {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number' && !Number.isNaN(v)) return v;
+  const n = Number(v);
+  return Number.isNaN(n) ? 0 : n;
+};
+
+const safeStr = (v: unknown): string => (v != null ? String(v) : '');
+
+const formatNum = (v: unknown): string => {
+  const n = safeNum(v);
+  if (n === 0) return '-';
+  return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2).replace(/\.?0+$/, '');
+};
+
+const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
+  const orders = useMemo(() => Array.isArray(ordersProp) ? ordersProp : [], [ordersProp]);
+
   const [filters, setFilters] = useState({
     pedido: '',
     cliente: '',
@@ -110,9 +127,9 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
   const { uniqueTotal, uniqueInRoute, uniquePending, uniqueRoutesCount, uniqueGTTotal, uniqueGTHorizon, uniqueSoMoveisTotal, uniqueSoMoveisHorizon, uniqueClienteBuscaTotal, uniqueClienteBuscaHorizon, uniqueNoLinkTotal, horizonLabel } = useMemo(() => {
     // Filter out invalid orders (e.g., missing numeroPedido or codigoProduto, or zero quantities/price)
     const validOrders = orders.filter(o => 
-      o.numeroPedido && o.numeroPedido.trim() !== '' &&
-      o.codigoProduto && o.codigoProduto.trim() !== '' &&
-      (o.qtdPedida > 0 || o.qtdVinculada > 0 || (o.precoUnitario && o.precoUnitario > 0))
+      safeStr(o?.numeroPedido).trim() !== '' &&
+      safeStr(o?.codigoProduto).trim() !== '' &&
+      (safeNum(o?.qtdPedida) > 0 || safeNum(o?.qtdVinculada) > 0 || safeNum(o?.precoUnitario) > 0)
     );
 
     const allUniquePedidos = Array.from(new Set(validOrders.map(o => o.numeroPedido)));
@@ -199,44 +216,41 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
     };
   }, [orders]);
 
-  const handleExportCSV = () => {
+  const handleExportExcel = () => {
     const headers = [
       "Cód. Romaneio", "Obs. Romaneio", "Nº Pedido", "Cliente", "Cód. Produto", "Descrição", "U.M.", "Qtd. Pedida", "Qtd. Vinculada", "Preço Unit.", "Data Entrega", "Município", "UF", "Endereço", "Método Entrega", "Req. Loja", "Tipo Entrega", "Status"
     ];
-    
+    const colWidths = [14, 22, 12, 28, 14, 40, 6, 12, 14, 14, 12, 18, 4, 32, 20, 8, 24, 12];
+
     const dataToExport = filteredOrders.map(order => {
       const isGT = isEligibleForGTeresina(order);
       const isSoMoveis = order.requisicaoLoja === true;
       const isClienteBusca = isClienteVemBuscar(order);
       let deliveryType = '-';
-      if (isSoMoveis) {
-        deliveryType = ROUTE_SO_MOVEIS;
-      } else if (isClienteBusca) {
-        deliveryType = ROUTE_CLIENTE_BUSCA;
-      } else if (isGT) {
-        deliveryType = ROUTE_G_TERESINA;
-      } else if (order.observacoesRomaneio && order.observacoesRomaneio.trim() !== '') {
-        deliveryType = `${order.observacoesRomaneio} (${order.codigoRomaneio})`;
-      }
-      const hasRoute = (order.codigoRomaneio && order.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
+      if (isSoMoveis) deliveryType = ROUTE_SO_MOVEIS;
+      else if (isClienteBusca) deliveryType = ROUTE_CLIENTE_BUSCA;
+      else if (isGT) deliveryType = ROUTE_G_TERESINA;
+      else if (safeStr(order.observacoesRomaneio).trim() !== '') deliveryType = `${safeStr(order.observacoesRomaneio)} (${safeStr(order.codigoRomaneio)})`;
+      const codRom = safeStr(order.codigoRomaneio);
+      const hasRoute = (codRom.trim() !== '' && codRom !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
       const statusText = hasRoute ? 'VINCULADO' : 'SEM ROTA';
 
       return [
-        order.codigoRomaneio,
-        order.observacoesRomaneio,
-        order.numeroPedido,
-        order.cliente,
-        order.codigoProduto,
-        order.descricao,
-        order.um,
-        order.qtdPedida,
-        order.qtdVinculada,
-        order.precoUnitario,
-        formatDate(order.dataEntrega),
-        order.municipio,
-        order.uf,
-        order.endereco,
-        order.metodoEntrega,
+        safeStr(order.codigoRomaneio),
+        safeStr(order.observacoesRomaneio),
+        safeStr(order.numeroPedido),
+        safeStr(order.cliente),
+        safeStr(order.codigoProduto),
+        safeStr(order.descricao),
+        safeStr(order.um),
+        formatNum(order.qtdPedida),
+        formatNum(order.qtdVinculada),
+        safeNum(order.precoUnitario) > 0 ? safeNum(order.precoUnitario) : '-',
+        formatDate(safeStr(order.dataEntrega)),
+        safeStr(order.municipio),
+        safeStr(order.uf),
+        safeStr(order.endereco),
+        safeStr(order.metodoEntrega),
         order.requisicaoLoja ? 'Sim' : 'Não',
         deliveryType,
         statusText
@@ -244,9 +258,11 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
     });
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...dataToExport]);
+    ws['!cols'] = colWidths.map(w => ({ wch: w }));
+    if (ws['!ref']) ws['!autofilter'] = { ref: ws['!ref'] };
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Pedidos Filtrados");
-    XLSX.writeFile(wb, "pedidos_filtrados.csv");
+    XLSX.utils.book_append_sheet(wb, ws, "Lista Detalhada Itens");
+    XLSX.writeFile(wb, "lista_detalhada_itens.xlsx");
   };
 
   const filteredOrders = useMemo(() => {
@@ -281,16 +297,16 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
         }
       }
 
-      const matchPedido = o.numeroPedido.toLowerCase().includes(filters.pedido.toLowerCase());
-      const matchCliente = o.cliente.toLowerCase().includes(filters.cliente.toLowerCase());
-      const matchProduto = o.codigoProduto.toLowerCase().includes(filters.produto.toLowerCase()) || 
-                           o.descricao.toLowerCase().includes(filters.produto.toLowerCase());
+      const matchPedido = safeStr(o.numeroPedido).toLowerCase().includes(filters.pedido.toLowerCase());
+      const matchCliente = safeStr(o.cliente).toLowerCase().includes(filters.cliente.toLowerCase());
+      const matchProduto = safeStr(o.codigoProduto).toLowerCase().includes(filters.produto.toLowerCase()) ||
+                           safeStr(o.descricao).toLowerCase().includes(filters.produto.toLowerCase());
       const matchRota = deliveryType.toLowerCase().includes(filters.rota.toLowerCase());
-      
+
       const romaneioTerm = filters.romaneio.toLowerCase();
-      const matchRomaneio = 
-        o.codigoRomaneio.toLowerCase().includes(romaneioTerm) || 
-        o.observacoesRomaneio.toLowerCase().includes(romaneioTerm);
+      const matchRomaneio =
+        safeStr(o.codigoRomaneio).toLowerCase().includes(romaneioTerm) ||
+        safeStr(o.observacoesRomaneio).toLowerCase().includes(romaneioTerm);
 
       const hasRoute = (o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
       const statusText = hasRoute ? 'vinculado' : 'sem rota';
@@ -469,8 +485,8 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
                   <X className="w-3.5 h-3.5" /> LIMPAR FILTROS
                 </button>
               )}
-              <button onClick={handleExportCSV} className="text-[11px] font-bold flex items-center gap-2 bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-4 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-[#333] transition-colors shadow-sm active:scale-95">
-                <Download className="w-3.5 h-3.5" /> CSV
+              <button onClick={handleExportExcel} className="text-[11px] font-bold flex items-center gap-2 bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-4 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-[#333] transition-colors shadow-sm active:scale-95">
+                <Download className="w-3.5 h-3.5" /> Excel
               </button>
             </div>
           </div>
@@ -530,34 +546,35 @@ const OrdersView: React.FC<Props> = ({ orders }) => {
                     deliveryType = ROUTE_CLIENTE_BUSCA;
                   } else if (isGT) {
                     deliveryType = ROUTE_G_TERESINA;
-                  } else if (order.observacoesRomaneio && order.observacoesRomaneio.trim() !== '') {
-                    deliveryType = `${order.observacoesRomaneio} (${order.codigoRomaneio})`;
+                  } else if (safeStr(order.observacoesRomaneio).trim() !== '') {
+                    deliveryType = `${safeStr(order.observacoesRomaneio)} (${safeStr(order.codigoRomaneio)})`;
                   }
 
-                  const hasRoute = (order.codigoRomaneio && order.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
+                  const codRom = safeStr(order.codigoRomaneio);
+                  const hasRoute = (codRom.trim() !== '' && codRom !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
 
                   return (
                     <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.codigoRomaneio}</td>
-                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.observacoesRomaneio }}>{order.observacoesRomaneio}</td>
-                      <td className="px-4 py-3 font-medium font-mono border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.numeroPedido}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.cliente }}>{order.cliente}</td>
-                      <td className="px-4 py-3 font-mono border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.codigoProduto}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.descricao }}>{order.descricao}</td>
-                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.um}</td>
-                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.qtdPedida}</td>
-                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.qtdVinculada}</td>
+                      <td className="px-4 py-3 font-mono text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.codigoRomaneio)}</td>
+                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.observacoesRomaneio }}>{safeStr(order.observacoesRomaneio)}</td>
+                      <td className="px-4 py-3 font-medium font-mono border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.numeroPedido)}</td>
+                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.cliente }}>{safeStr(order.cliente)}</td>
+                      <td className="px-4 py-3 font-mono border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.codigoProduto)}</td>
+                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.descricao }}>{safeStr(order.descricao)}</td>
+                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.um)}</td>
+                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{formatNum(order.qtdPedida)}</td>
+                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{formatNum(order.qtdVinculada)}</td>
                       <td className="px-4 py-3 text-right font-mono text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">
-                        {order.precoUnitario ? order.precoUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
+                        {safeNum(order.precoUnitario) > 0 ? safeNum(order.precoUnitario).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
                       </td>
-                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{formatDate(order.dataEntrega)}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.municipio }}>{order.municipio}</td>
-                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.uf}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.endereco }}>{order.endereco}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.metodoEntrega }}>{order.metodoEntrega}</td>
+                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{formatDate(safeStr(order.dataEntrega))}</td>
+                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.municipio }}>{safeStr(order.municipio)}</td>
+                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.uf)}</td>
+                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.endereco }}>{safeStr(order.endereco)}</td>
+                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.metodoEntrega }}>{safeStr(order.metodoEntrega)}</td>
                       <td className="px-4 py-3 text-center text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.requisicaoLoja ? 'SIM' : 'NÃO'}</td>
                       <td className="px-4 py-3 text-[10px] font-bold border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.tipoEntrega }}>
-                        <span className={isSoMoveis ? 'text-emerald-600 dark:text-emerald-400' : isClienteBusca ? 'text-purple-600 dark:text-purple-400' : isGT ? 'text-blue-600 dark:text-blue-400' : order.observacoesRomaneio && order.observacoesRomaneio.trim() !== '' ? 'text-blue-500' : 'text-neutral italic font-normal'}>
+                        <span className={isSoMoveis ? 'text-emerald-600 dark:text-emerald-400' : isClienteBusca ? 'text-purple-600 dark:text-purple-400' : isGT ? 'text-blue-600 dark:text-blue-400' : safeStr(order.observacoesRomaneio).trim() !== '' ? 'text-blue-500' : 'text-neutral italic font-normal'}>
                           {deliveryType}
                         </span>
                       </td>

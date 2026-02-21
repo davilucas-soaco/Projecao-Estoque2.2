@@ -55,7 +55,9 @@ export interface Route {
 }
 
 export interface ShelfFicha {
+  id?: string;
   codigoEstante: string;
+  descEstante?: string;
   codColuna: string;
   descColuna: string;
   qtdColuna: number;

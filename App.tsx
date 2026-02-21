@@ -1,11 +1,11 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  BarChart3, 
-  ArrowRightLeft, 
-  Upload, 
-  Search, 
-  Moon, 
+import { useQuery } from '@tanstack/react-query';
+import {
+  BarChart3,
+  ArrowRightLeft,
+  Upload,
+  Search,
+  Moon,
   Sun,
   ClipboardList,
   LogOut,
@@ -13,7 +13,10 @@ import {
   Users
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, Route, ProductConsolidated, UserAccount, ShelfFicha } from './types';
-import { normalizeText, isEligibleForGTeresina, getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, isClienteVemBuscar, ROUTE_CLIENTE_BUSCA, isSoMoveis, isRotaNormal } from './utils';
+import { isEligibleForGTeresina, getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, isClienteVemBuscar, ROUTE_CLIENTE_BUSCA, isSoMoveis, isRotaNormal } from './utils';
+import { fetchOrders, fetchStock } from './api';
+import { supabase, fetchShelfFicha, upsertShelfFicha } from './supabaseClient';
+import { useQueryClient } from '@tanstack/react-query';
 import ProjectionTable from './components/ProjectionTable';
 import SequenceTable from './components/SequenceTable';
 import OrdersView from './components/OrdersView';
@@ -23,8 +26,6 @@ import UserManagement from './components/UserManagement';
 
 const STORAGE_KEYS = {
   USERS: 'sa_industrial_accounts_v2',
-  ORDERS: 'sa_industrial_orders_v2',
-  STOCK: 'sa_industrial_stock_v2',
   ROUTES: 'sa_industrial_routes_v2',
   SHELF_FICHA: 'sa_industrial_shelf_ficha_v2',
   USER_SESSION: 'sa_industrial_user_session_v2'
@@ -54,32 +55,56 @@ const App: React.FC = () => {
     return accountList;
   });
 
-  // Data State
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.ORDERS);
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [stock, setStock] = useState<StockItem[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.STOCK);
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Server state: orders e stock via API
+  const ordersQuery = useQuery({ queryKey: ['orders'], queryFn: fetchOrders });
+  const stockQuery = useQuery({ queryKey: ['stock'], queryFn: fetchStock });
+  const ordersFromApi = ordersQuery.data ?? [];
+  const stockFromApi = stockQuery.data ?? [];
+  const [ordersOverlay, setOrdersOverlay] = useState<Order[] | null>(null);
+  const [stockOverlay, setStockOverlay] = useState<StockItem[] | null>(null);
+  const orders = ordersOverlay ?? ordersFromApi;
+  const stock = stockOverlay ?? stockFromApi;
 
   const [routes, setRoutes] = useState<Route[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.ROUTES);
     return saved ? JSON.parse(saved) : [];
   });
 
-  const [shelfFicha, setShelfFicha] = useState<ShelfFicha[]>(() => {
+  const queryClient = useQueryClient();
+  const shelfFichaQuery = useQuery({
+    queryKey: ['shelf_ficha'],
+    queryFn: fetchShelfFicha,
+    enabled: !!supabase,
+  });
+  const shelfFichaFromSupabase = shelfFichaQuery.data ?? [];
+  const [shelfFichaLocal, setShelfFichaLocal] = useState<ShelfFicha[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SHELF_FICHA);
     return saved ? JSON.parse(saved) : [];
   });
+  const shelfFicha = supabase ? shelfFichaFromSupabase : shelfFichaLocal;
 
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); }, [users]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders)); }, [orders]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.STOCK, JSON.stringify(stock)); }, [stock]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.ROUTES, JSON.stringify(routes)); }, [routes]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SHELF_FICHA, JSON.stringify(shelfFicha)); }, [shelfFicha]);
+  useEffect(() => {
+    if (!supabase) localStorage.setItem(STORAGE_KEYS.SHELF_FICHA, JSON.stringify(shelfFichaLocal));
+  }, [supabase, shelfFichaLocal]);
+
+  // Sincroniza rotas quando os pedidos da API carregam
+  useEffect(() => {
+    const source = ordersOverlay ?? ordersFromApi;
+    if (source.length === 0) return;
+    const routeNamesInData = Array.from(new Set(source.map(o => {
+      if (isSoMoveis(o) || isClienteVemBuscar(o) || isEligibleForGTeresina(o)) return null;
+      return o.observacoesRomaneio;
+    }))).filter((n): n is string => n !== null && n.trim() !== '' && n !== '&nbsp;');
+    setRoutes(prev => {
+      const filtered = prev.filter(r => routeNamesInData.includes(r.name));
+      const existingNames = new Set(filtered.map(r => r.name));
+      const newNames = routeNamesInData.filter(n => !existingNames.has(n));
+      const added: Route[] = newNames.map(name => ({ id: crypto.randomUUID(), name, date: new Date().toISOString().split('T')[0], order: 0 }));
+      return [...filtered, ...added].map((r, i) => ({ ...r, order: i + 1 }));
+    });
+  }, [ordersFromApi, ordersOverlay]);
 
   useEffect(() => {
     if (darkMode) document.documentElement.classList.add('dark');
@@ -103,38 +128,28 @@ const App: React.FC = () => {
   const handleDeleteUser = (id: string) => setUsers(prev => prev.filter(u => u.id !== id));
   const handleUpdateUser = (updatedUser: UserAccount) => setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
 
-  const handleImportOrders = (newOrders: Order[]) => {
-    setOrders(newOrders);
-    
-    const routeNamesInNewData = Array.from(new Set(newOrders.map(o => {
-      if (isSoMoveis(o) || isClienteVemBuscar(o) || isEligibleForGTeresina(o)) return null;
-      return o.observacoesRomaneio;
-    })))
-    .filter((n): n is string => n !== null && n.trim() !== '' && n !== '&nbsp;');
-    
-    setRoutes(prevRoutes => {
-      const filteredExisting = prevRoutes.filter(r => routeNamesInNewData.includes(r.name));
-      const existingNames = new Set(filteredExisting.map(r => r.name));
-      const newRouteNames = routeNamesInNewData.filter(name => !existingNames.has(name));
-      const brandNewRoutes: Route[] = newRouteNames.map(name => ({
-        id: crypto.randomUUID(),
-        name,
-        date: new Date().toISOString().split('T')[0],
-        order: 0
-      }));
-      return [...filteredExisting, ...brandNewRoutes].map((r, i) => ({
-        ...r,
-        order: i + 1
-      }));
-    });
+  const handleImportOrders = (newOrders: Order[]) => setOrdersOverlay(newOrders);
+  const handleImportStock = (newStock: StockItem[]) => setStockOverlay(newStock);
+
+  const handleSyncServer = () => {
+    setOrdersOverlay(null);
+    setStockOverlay(null);
+    ordersQuery.refetch();
+    stockQuery.refetch();
   };
 
-  const handleImportStock = (newStock: StockItem[]) => {
-    setStock(newStock); 
-  };
-
-  const handleImportShelfFicha = (newFicha: ShelfFicha[]) => {
-    setShelfFicha(newFicha);
+  const handleImportShelfFicha = async (newFicha: ShelfFicha[]) => {
+    if (supabase) {
+      try {
+        await upsertShelfFicha(newFicha);
+        await queryClient.invalidateQueries({ queryKey: ['shelf_ficha'] });
+      } catch (err) {
+        console.error('Erro ao enviar ficha para Supabase:', err);
+        throw err;
+      }
+    } else {
+      setShelfFichaLocal(newFicha);
+    }
   };
 
   const handleExportData = () => {
@@ -149,10 +164,13 @@ const App: React.FC = () => {
 
   const handleImportData = (json: any) => {
     if (json.users) setUsers(json.users);
-    if (json.orders) setOrders(json.orders);
-    if (json.stock) setStock(json.stock);
+    if (json.orders) setOrdersOverlay(json.orders);
+    if (json.stock) setStockOverlay(json.stock);
     if (json.routes) setRoutes(json.routes);
-    if (json.shelfFicha) setShelfFicha(json.shelfFicha);
+    if (json.shelfFicha && !supabase) setShelfFichaLocal(json.shelfFicha);
+    if (json.shelfFicha && supabase) {
+      upsertShelfFicha(json.shelfFicha).then(() => queryClient.invalidateQueries({ queryKey: ['shelf_ficha'] })).catch(console.error);
+    }
     alert('Sistema restaurado com sucesso!');
   };
 
@@ -479,14 +497,17 @@ const App: React.FC = () => {
         <div><span>&copy; 2025 Só Aço Industrial</span></div>
       </footer>
 
-      {isImportModalOpen && ( 
-        <ImportModal 
-          onClose={() => setIsImportModalOpen(false)} 
-          onImportOrders={handleImportOrders} 
-          onImportStock={handleImportStock} 
+      {isImportModalOpen && (
+        <ImportModal
+          onClose={() => setIsImportModalOpen(false)}
           onImportShelfFicha={handleImportShelfFicha}
+          onSyncServer={handleSyncServer}
           shelfFicha={shelfFicha}
-        /> 
+          isOrdersLoading={ordersQuery.isLoading}
+          isStockLoading={stockQuery.isLoading}
+          ordersError={ordersQuery.error}
+          stockError={stockQuery.error}
+        />
       )}
     </div>
   );
