@@ -42,6 +42,12 @@ const corsOptions = {
 app.use(cors(corsOptions)); // inclui preflight OPTIONS em todas as rotas
 app.use(express.json());
 
+// Garante header CORS em respostas de erro (evita "No 'Access-Control-Allow-Origin'" no front)
+function setCorsOnError(req, res) {
+  const origin = req.get('Origin');
+  if (origin && corsOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+}
+
 // Rota de saúde (não usa DB) — Railway e navegador podem testar se a API está no ar
 app.get('/', (_req, res) => {
   res.json({
@@ -99,6 +105,7 @@ app.get('/api/stock', async (_req, res) => {
     }
   } catch (err) {
     console.error('GET /api/stock error:', err.message);
+    setCorsOnError(_req, res);
     res.status(500).json({ error: 'Erro ao buscar estoque. Tente novamente.' });
   }
 });
@@ -163,8 +170,16 @@ app.get('/api/orders', async (_req, res) => {
     }
   } catch (err) {
     console.error('GET /api/orders error:', err.message);
+    setCorsOnError(_req, res);
     res.status(500).json({ error: 'Erro ao buscar romaneio. Tente novamente.' });
   }
+});
+
+// Tratador global: qualquer erro não capturado ainda envia CORS + 500
+app.use((err, _req, res, _next) => {
+  setCorsOnError(_req, res);
+  console.error('Unhandled error:', err?.message || err);
+  if (!res.headersSent) res.status(500).json({ error: 'Erro interno do servidor.' });
 });
 
 // Escuta em 0.0.0.0 para aceitar conexões externas (Railway, Render, etc.)
