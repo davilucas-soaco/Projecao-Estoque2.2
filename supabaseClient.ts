@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import type { Route, UserAccount } from './types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -10,6 +11,167 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
+
+// --- Delivery Sequence (Sequenciamento de entrega) ---
+
+export type DeliverySequenceRow = {
+  id: string;
+  name: string;
+  date: string;
+  order_index: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function rowToRoute(row: DeliverySequenceRow): Route {
+  return {
+    id: row.id,
+    name: row.name,
+    date: row.date,
+    order: row.order_index,
+  };
+}
+
+export async function fetchDeliverySequence(): Promise<Route[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('delivery_sequence')
+    .select('*')
+    .order('order_index', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []).map(rowToRoute);
+}
+
+export async function upsertDeliverySequence(routes: Route[]): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const rows = routes.map((r, i) => ({
+    id: r.id,
+    name: r.name,
+    date: r.date,
+    order_index: r.order ?? i + 1,
+    updated_at: new Date().toISOString(),
+  }));
+  const { error } = await supabase.from('delivery_sequence').upsert(rows, {
+    onConflict: 'id',
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteDeliverySequence(ids: string[]): Promise<void> {
+  if (!supabase || ids.length === 0) return;
+  const { error } = await supabase.from('delivery_sequence').delete().in('id', ids);
+  if (error) throw new Error(error.message);
+}
+
+/** Substitui todo o sequenciamento: remove rotas que não estão mais na lista e faz upsert do restante */
+export async function syncDeliverySequenceFull(routes: Route[]): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const routeIds = new Set(routes.map((r) => r.id));
+  const { data: existing } = await supabase.from('delivery_sequence').select('id');
+  const toDelete = (existing || []).map((r) => r.id).filter((id) => !routeIds.has(id));
+  if (toDelete.length > 0) {
+    await deleteDeliverySequence(toDelete);
+  }
+  if (routes.length > 0) {
+    await upsertDeliverySequence(routes);
+  }
+}
+
+export function subscribeDeliverySequence(callback: (routes: Route[]) => void): () => void {
+  if (!supabase) return () => {};
+  const refetch = async () => {
+    const routes = await fetchDeliverySequence();
+    callback(routes);
+  };
+  const channel = supabase
+    .channel('delivery-sequence-changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'delivery_sequence' },
+      () => refetch()
+    )
+    .subscribe();
+  refetch();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+// --- User Accounts (Gestão de usuários) ---
+
+export type UserAccountRow = {
+  id: string;
+  username: string;
+  name: string;
+  password: string;
+  profile: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function rowToUserAccount(row: UserAccountRow): UserAccount {
+  return {
+    id: row.id,
+    username: row.username,
+    name: row.name,
+    password: row.password,
+    profile: row.profile as UserAccount['profile'],
+  };
+}
+
+export async function fetchUserAccounts(): Promise<UserAccount[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('user_accounts')
+    .select('*')
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []).map(rowToUserAccount);
+}
+
+export async function upsertUserAccount(user: UserAccount): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const row = {
+    id: user.id,
+    username: user.username.toLowerCase().trim(),
+    name: user.name,
+    password: user.password,
+    profile: user.profile,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from('user_accounts').upsert(row, {
+    onConflict: 'id',
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteUserAccount(id: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from('user_accounts').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export function subscribeUserAccounts(callback: (users: UserAccount[]) => void): () => void {
+  if (!supabase) return () => {};
+  const refetch = async () => {
+    const users = await fetchUserAccounts();
+    callback(users);
+  };
+  const channel = supabase
+    .channel('user-accounts-changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'user_accounts' },
+      () => refetch()
+    )
+    .subscribe();
+  refetch();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+// --- Shelf Ficha (MiniFicha) ---
 
 export type ShelfFichaRow = {
   id: string;

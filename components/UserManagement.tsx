@@ -20,7 +20,7 @@ import {
 
 interface Props {
   users: UserAccount[];
-  onAddUser: (user: UserAccount) => void;
+  onAddUser: (user: UserAccount) => void | Promise<void>;
   onDeleteUser: (id: string) => void;
   onUpdateUser: (user: UserAccount) => void;
   onExport: () => void;
@@ -37,10 +37,16 @@ const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpd
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editPasswordValue, setEditPasswordValue] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUsername || !newPassword || !newName) return;
+    setSubmitError(null);
+    if (!newUsername || !newPassword || !newName) {
+      setSubmitError('Preencha todos os campos obrigatórios.');
+      return;
+    }
 
     const newUser: UserAccount = {
       id: crypto.randomUUID(),
@@ -50,11 +56,18 @@ const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpd
       profile: newProfile
     };
 
-    onAddUser(newUser);
-    setNewUsername('');
-    setNewName('');
-    setNewPassword('');
-    setNewProfile('CONSULTA');
+    setIsSubmitting(true);
+    try {
+      await onAddUser(newUser);
+      setNewUsername('');
+      setNewName('');
+      setNewPassword('');
+      setNewProfile('CONSULTA');
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Erro ao cadastrar. Tente novamente.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleTogglePassword = (userId: string) => {
@@ -199,12 +212,18 @@ const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpd
               <option value="ADMIN">ADMINISTRADOR (Acesso Total)</option>
             </select>
           </div>
+          {submitError && (
+            <div className="md:col-span-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm font-medium">
+              {submitError}
+            </div>
+          )}
           <div className="md:col-span-2 pt-2">
             <button 
               type="submit"
-              className="w-full bg-secondary hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg active:scale-[0.99]"
+              disabled={isSubmitting}
+              className={`w-full bg-secondary hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg active:scale-[0.99] ${isSubmitting ? 'opacity-70 cursor-wait' : ''}`}
             >
-              CADASTRAR USUÁRIO
+              {isSubmitting ? 'Cadastrando...' : 'CADASTRAR USUÁRIO'}
             </button>
           </div>
         </form>

@@ -16,7 +16,18 @@ import {
 import { UserProfile, Order, StockItem, Route, ProductConsolidated, UserAccount, ShelfFicha } from './types';
 import { isEligibleForGTeresina, getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, isClienteVemBuscar, ROUTE_CLIENTE_BUSCA, isSoMoveis, isRotaNormal } from './utils';
 import { fetchOrders, fetchStock } from './api';
-import { supabase, fetchShelfFicha, upsertShelfFicha } from './supabaseClient';
+import {
+  supabase,
+  fetchShelfFicha,
+  upsertShelfFicha,
+  fetchDeliverySequence,
+  syncDeliverySequenceFull,
+  subscribeDeliverySequence,
+  fetchUserAccounts,
+  upsertUserAccount,
+  deleteUserAccount,
+  subscribeUserAccounts,
+} from './supabaseClient';
 import { useQueryClient } from '@tanstack/react-query';
 import ProjectionTable from './components/ProjectionTable';
 import SequenceTable from './components/SequenceTable';
@@ -49,7 +60,7 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<UserAccount[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.USERS);
     let accountList: UserAccount[] = saved ? JSON.parse(saved) : [];
-    const hasMaster = accountList.some(u => u.username === 'admin' || u.username === 'administrador');
+    const hasMaster = accountList.some((u) => u.username === 'admin' || u.username === 'administrador');
     if (!hasMaster) {
       accountList = [{ id: 'master', username: 'admin', name: 'Administrador Principal', password: 'admin123', profile: 'ADMIN' }, ...accountList];
     }
@@ -72,6 +83,40 @@ const App: React.FC = () => {
   });
 
   const queryClient = useQueryClient();
+
+  // Supabase: usuários (com real-time)
+  const usersQuery = useQuery({
+    queryKey: ['user_accounts'],
+    queryFn: async () => {
+      const list = await fetchUserAccounts();
+      const hasMaster = list.some((u) => u.username === 'admin' || u.username === 'administrador');
+      if (!hasMaster) {
+        const admin: UserAccount = {
+          id: 'master',
+          username: 'admin',
+          name: 'Administrador Principal',
+          password: 'admin123',
+          profile: 'ADMIN',
+        };
+        await upsertUserAccount(admin);
+        return [admin, ...list];
+      }
+      return list;
+    },
+    enabled: !!supabase,
+    initialData: undefined,
+  });
+  const usersFromSupabase = usersQuery.data;
+
+  // Supabase: sequenciamento de entrega (com real-time)
+  const routesQuery = useQuery({
+    queryKey: ['delivery_sequence'],
+    queryFn: fetchDeliverySequence,
+    enabled: !!supabase,
+    initialData: undefined,
+  });
+  const routesFromSupabase = routesQuery.data;
+
   const shelfFichaQuery = useQuery({
     queryKey: ['shelf_ficha'],
     queryFn: fetchShelfFicha,
@@ -84,28 +129,66 @@ const App: React.FC = () => {
   });
   const shelfFicha = supabase ? shelfFichaFromSupabase : shelfFichaLocal;
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); }, [users]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.ROUTES, JSON.stringify(routes)); }, [routes]);
+  // Fonte de dados: Supabase ou localStorage
+  const effectiveUsers = supabase && usersFromSupabase ? usersFromSupabase : users;
+  const effectiveRoutes = supabase && routesFromSupabase !== undefined ? routesFromSupabase : routes;
+
+
+  useEffect(() => {
+    if (!supabase) localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  }, [supabase, users]);
+  useEffect(() => {
+    if (!supabase) localStorage.setItem(STORAGE_KEYS.ROUTES, JSON.stringify(routes));
+  }, [supabase, routes]);
   useEffect(() => {
     if (!supabase) localStorage.setItem(STORAGE_KEYS.SHELF_FICHA, JSON.stringify(shelfFichaLocal));
   }, [supabase, shelfFichaLocal]);
 
-  // Sincroniza rotas quando os pedidos da API carregam
+  // Subscriptions em tempo real (Supabase)
+  useEffect(() => {
+    if (!supabase) return;
+    const unsubUsers = subscribeUserAccounts((list) => {
+      queryClient.setQueryData(['user_accounts'], list);
+    });
+    const unsubRoutes = subscribeDeliverySequence((list) => {
+      queryClient.setQueryData(['delivery_sequence'], list);
+    });
+    return () => {
+      unsubUsers();
+      unsubRoutes();
+    };
+  }, [supabase, queryClient]);
+
+  // Sincroniza rotas quando os pedidos da API carregam (merge com rotas existentes)
   useEffect(() => {
     const source = ordersOverlay ?? ordersFromApi;
     if (source.length === 0) return;
-    const routeNamesInData = Array.from(new Set(source.map(o => {
-      if (isSoMoveis(o) || isClienteVemBuscar(o) || isEligibleForGTeresina(o)) return null;
-      return o.observacoesRomaneio;
-    }))).filter((n): n is string => n !== null && n.trim() !== '' && n !== '&nbsp;');
-    setRoutes(prev => {
-      const filtered = prev.filter(r => routeNamesInData.includes(r.name));
-      const existingNames = new Set(filtered.map(r => r.name));
-      const newNames = routeNamesInData.filter(n => !existingNames.has(n));
-      const added: Route[] = newNames.map(name => ({ id: uuidv4(), name, date: new Date().toISOString().split('T')[0], order: 0 }));
-      return [...filtered, ...added].map((r, i) => ({ ...r, order: i + 1 }));
-    });
-  }, [ordersFromApi, ordersOverlay]);
+    if (supabase && routesFromSupabase === undefined) return; // Aguarda carregar do Supabase
+    const routeNamesInData = Array.from(
+      new Set(
+        source.map((o) => {
+          if (isSoMoveis(o) || isClienteVemBuscar(o) || isEligibleForGTeresina(o)) return null;
+          return o.observacoesRomaneio;
+        })
+      )
+    ).filter((n): n is string => n !== null && n.trim() !== '' && n !== '&nbsp;');
+    const prev = supabase ? (routesFromSupabase ?? []) : routes;
+    const filtered = prev.filter((r) => routeNamesInData.includes(r.name));
+    const existingNames = new Set(filtered.map((r) => r.name));
+    const newNames = routeNamesInData.filter((n) => !existingNames.has(n));
+    const added: Route[] = newNames.map((name) => ({
+      id: uuidv4(),
+      name,
+      date: new Date().toISOString().split('T')[0],
+      order: 0,
+    }));
+    const merged = [...filtered, ...added].map((r, i) => ({ ...r, order: i + 1 }));
+    if (supabase) {
+      syncDeliverySequenceFull(merged).catch(console.error);
+    } else {
+      setRoutes(merged);
+    }
+  }, [ordersFromApi, ordersOverlay, supabase, routesFromSupabase, routes, queryClient]);
 
   useEffect(() => {
     if (darkMode) document.documentElement.classList.add('dark');
@@ -125,9 +208,37 @@ const App: React.FC = () => {
     setActiveTab('PROJECAO');
   };
 
-  const handleAddUser = (user: UserAccount) => setUsers(prev => [...prev, user]);
-  const handleDeleteUser = (id: string) => setUsers(prev => prev.filter(u => u.id !== id));
-  const handleUpdateUser = (updatedUser: UserAccount) => setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+  const handleAddUser = async (user: UserAccount) => {
+    if (supabase) {
+      await upsertUserAccount(user);
+      await queryClient.invalidateQueries({ queryKey: ['user_accounts'] });
+    } else {
+      setUsers((prev) => [...prev, user]);
+    }
+  };
+  const handleDeleteUser = (id: string) => {
+    if (supabase) {
+      deleteUserAccount(id).catch(console.error);
+    } else {
+      setUsers((prev) => prev.filter((u) => u.id !== id));
+    }
+  };
+  const handleUpdateUser = (updatedUser: UserAccount) => {
+    if (supabase) {
+      upsertUserAccount(updatedUser).catch(console.error);
+    } else {
+      setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    }
+  };
+
+  const setRoutesWithSync = (newRoutes: Route[] | ((prev: Route[]) => Route[])) => {
+    const resolved = typeof newRoutes === 'function' ? newRoutes(effectiveRoutes) : newRoutes;
+    if (supabase) {
+      syncDeliverySequenceFull(resolved).catch(console.error);
+    } else {
+      setRoutes(resolved);
+    }
+  };
 
   const handleImportOrders = (newOrders: Order[]) => setOrdersOverlay(newOrders);
   const handleImportStock = (newStock: StockItem[]) => setStockOverlay(newStock);
@@ -154,7 +265,7 @@ const App: React.FC = () => {
   };
 
   const handleExportData = () => {
-    const backup = { users, orders, stock, routes, shelfFicha, exportedAt: new Date().toISOString() };
+    const backup = { users: effectiveUsers, orders, stock, routes: effectiveRoutes, shelfFicha, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -164,10 +275,26 @@ const App: React.FC = () => {
   };
 
   const handleImportData = (json: any) => {
-    if (json.users) setUsers(json.users);
+    if (json.users) {
+      if (supabase) {
+        Promise.all(json.users.map((u: UserAccount) => upsertUserAccount(u)))
+          .then(() => queryClient.invalidateQueries({ queryKey: ['user_accounts'] }))
+          .catch(console.error);
+      } else {
+        setUsers(json.users);
+      }
+    }
     if (json.orders) setOrdersOverlay(json.orders);
     if (json.stock) setStockOverlay(json.stock);
-    if (json.routes) setRoutes(json.routes);
+    if (json.routes) {
+      if (supabase) {
+        syncDeliverySequenceFull(json.routes)
+          .then(() => queryClient.invalidateQueries({ queryKey: ['delivery_sequence'] }))
+          .catch(console.error);
+      } else {
+        setRoutes(json.routes);
+      }
+    }
     if (json.shelfFicha && !supabase) setShelfFichaLocal(json.shelfFicha);
     if (json.shelfFicha && supabase) {
       upsertShelfFicha(json.shelfFicha).then(() => queryClient.invalidateQueries({ queryKey: ['shelf_ficha'] })).catch(console.error);
@@ -291,7 +418,7 @@ const App: React.FC = () => {
       }
     });
 
-    const sortedRoutes = [...routes].sort((a, b) => a.order - b.order);
+    const sortedRoutes = [...effectiveRoutes].sort((a, b) => a.order - b.order);
     
     productMap.forEach(prod => {
       if (!prod.isShelf) {
@@ -371,7 +498,7 @@ const App: React.FC = () => {
       result = result.filter(p => p.codigo.toLowerCase().includes(lowerSearch) || p.descricao.toLowerCase().includes(lowerSearch));
     }
     return result;
-  }, [orders, stock, routes, shelfFicha, searchTerm]);
+  }, [orders, stock, effectiveRoutes, shelfFicha, searchTerm]);
 
   const displayData = useMemo(() => {
     if (selectedRouteNames.length === 0) return consolidatedData;
@@ -411,7 +538,7 @@ const App: React.FC = () => {
     }).map(o => o.numeroPedido)).size;
   }, [orders, isEligibleForGTeresina]);
 
-  if (!currentUser) return <Login onLogin={handleLogin} users={users} />;
+  if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} />;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
@@ -483,17 +610,17 @@ const App: React.FC = () => {
       </nav>
 
       <main className="flex-1 p-6 overflow-auto">
-        {activeTab === 'PROJECAO' && ( <ProjectionTable data={displayData} routes={routes} onRoutesReorder={setRoutes} selectedRoutes={selectedRouteNames} onFilterRoutes={setSelectedRouteNames} horizonLabel={getHorizonInfo().label} /> )}
-        {activeTab === 'SEQUENCIA' && ( <SequenceTable routes={routes} orders={orders} onReorder={setRoutes} isAdmin={currentUser.profile !== 'CONSULTA'} /> )}
+        {activeTab === 'PROJECAO' && ( <ProjectionTable data={displayData} routes={effectiveRoutes} onRoutesReorder={setRoutesWithSync} selectedRoutes={selectedRouteNames} onFilterRoutes={setSelectedRouteNames} horizonLabel={getHorizonInfo().label} /> )}
+        {activeTab === 'SEQUENCIA' && ( <SequenceTable routes={effectiveRoutes} orders={orders} onReorder={setRoutesWithSync} isAdmin={currentUser.profile !== 'CONSULTA'} /> )}
         {activeTab === 'ROMANEIO' && ( <OrdersView orders={orders} /> )}
-        {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={users} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} /> )}
+        {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} /> )}
       </main>
 
       <footer className="bg-white dark:bg-[#252525] border-t border-gray-200 dark:border-gray-700 p-2 px-6 flex justify-between text-[11px] text-neutral">
         <div className="flex gap-4">
           <span>Pedidos Únicos: <b>{uniqueOrdersCount}</b></span>
           <span>Produtos: <b>{displayData.length}</b></span>
-          <span>Rotas Ativas: <b>{routes.length}</b></span>
+          <span>Rotas Ativas: <b>{effectiveRoutes.length}</b></span>
         </div>
         <div><span>&copy; 2025 Só Aço Industrial</span></div>
       </footer>
