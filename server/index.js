@@ -25,7 +25,10 @@ const dbConfig = {
 
 // CORS: restrito à origem do frontend em dev
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: [
+    'http://localhost:5173',
+    'http://10.80.1.15:5173'
+  ],
   optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
@@ -153,6 +156,12 @@ app.get('/api/orders', async (_req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
+// para rodar via ip
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
+
+// para rodar no localhost, descomente a linha abaixo
+//app.listen(PORT, () => {
+//  console.log(`Servidor rodando em http://localhost:${PORT}`);
+//});

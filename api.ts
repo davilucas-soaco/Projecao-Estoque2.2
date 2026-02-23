@@ -1,6 +1,8 @@
 import type { Order, StockItem } from './types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+const API_BASE = import.meta.env.VITE_API_URL!;
+//const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {

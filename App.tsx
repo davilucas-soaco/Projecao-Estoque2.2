@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -101,7 +102,7 @@ const App: React.FC = () => {
       const filtered = prev.filter(r => routeNamesInData.includes(r.name));
       const existingNames = new Set(filtered.map(r => r.name));
       const newNames = routeNamesInData.filter(n => !existingNames.has(n));
-      const added: Route[] = newNames.map(name => ({ id: crypto.randomUUID(), name, date: new Date().toISOString().split('T')[0], order: 0 }));
+      const added: Route[] = newNames.map(name => ({ id: uuidv4(), name, date: new Date().toISOString().split('T')[0], order: 0 }));
       return [...filtered, ...added].map((r, i) => ({ ...r, order: i + 1 }));
     });
   }, [ordersFromApi, ordersOverlay]);
