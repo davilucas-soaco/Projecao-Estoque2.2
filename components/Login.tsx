@@ -6,9 +6,10 @@ import { UserProfile, UserAccount } from '../types';
 interface Props {
   onLogin: (profile: UserProfile, name: string) => void;
   users: UserAccount[];
+  companyLogo?: string | null;
 }
 
-const Login: React.FC<Props> = ({ onLogin, users }) => {
+const Login: React.FC<Props> = ({ onLogin, users, companyLogo }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -55,8 +56,8 @@ const Login: React.FC<Props> = ({ onLogin, users }) => {
             {/* Logo Centralizada */}
             <div className="relative z-10 mb-2">
               <img 
-                src="logo.png" 
-                alt="Só Aço + 25 Anos" 
+                src={companyLogo || 'logo.png'} 
+                alt="Logo da Empresa" 
                 className="w-48 h-auto object-contain drop-shadow-2xl"
                 onError={(e) => {
                   // Fallback caso a imagem não seja encontrada durante o desenvolvimento

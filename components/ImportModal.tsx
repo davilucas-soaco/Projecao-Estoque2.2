@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Upload, CheckCircle, Package, Database, AlertCircle, RefreshCw } from 'lucide-react';
+import { X, Upload, CheckCircle, Package, Database, AlertCircle, RefreshCw, Info } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { ShelfFicha } from '../types';
 
@@ -125,21 +125,21 @@ const ImportModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-white dark:bg-[#252525] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-        <div className="bg-primary p-6 text-white flex justify-between items-center">
+      <div className="bg-white dark:bg-[#252525] w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="bg-primary p-4 text-white flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-white/10 rounded-lg">
               <Upload className="w-5 h-5 text-highlight" />
             </div>
-            <h2 className="text-xl font-bold">Importar Dados</h2>
+            <h2 className="text-xl font-bold">Atualizações</h2>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-8">
-          <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-[#1a1a1a] p-1 rounded-xl">
+        <div className="p-5">
+          <div className="flex gap-2 mb-4 bg-gray-100 dark:bg-[#1a1a1a] p-1 rounded-xl">
             <button disabled={loading} onClick={() => setActiveType('FICHA')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-bold transition-all ${activeType === 'FICHA' ? 'bg-white dark:bg-darkBg shadow-sm text-secondary' : 'text-neutral opacity-60'}`}>
               <Package className="w-4 h-4" /> Ficha Estantes
             </button>
@@ -149,17 +149,29 @@ const ImportModal: React.FC<Props> = ({
           </div>
 
           {activeType === 'SYNC' && (
-            <div className="mb-6 flex flex-col items-center gap-4 py-6">
-              <p className="text-sm text-neutral text-center">Atualize estoque e romaneio a partir do banco de dados.</p>
-              <button
-                type="button"
-                onClick={() => { wasLoadingRef.current = false; onSyncServer?.(); setErrorMsg(''); }}
-                disabled={isSyncing}
-                className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${syncSuccess ? 'bg-green-500 text-white' : isSyncing ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed' : 'bg-secondary hover:bg-blue-700 text-white'}`}
-                title="Sincronizar"
-              >
-                <RefreshCw className={`w-7 h-7 ${isSyncing ? 'animate-spin' : ''}`} />
-              </button>
+            <div className="mb-4 flex flex-col items-center justify-center gap-4 py-4 px-2">
+              <div className="text-center space-y-1 max-w-xs">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  Traga os dados mais recentes do sistema.
+                </p>
+                <p className="text-xs text-neutral leading-relaxed">
+                  Clique no botão abaixo para atualizar estoque e romaneio do banco de dados.
+                </p>
+              </div>
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => { wasLoadingRef.current = false; onSyncServer?.(); setErrorMsg(''); }}
+                  disabled={isSyncing}
+                  className={`w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 ${syncSuccess ? 'bg-green-500 text-white scale-105' : isSyncing ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed' : 'bg-secondary hover:bg-blue-700 hover:scale-105 text-white'}`}
+                  title="Sincronizar dados"
+                >
+                  <RefreshCw className={`w-12 h-12 ${isSyncing ? 'animate-spin' : ''}`} />
+                </button>
+                <p className="text-xs text-neutral font-medium">
+                  {isSyncing ? 'Sincronizando...' : syncSuccess ? 'Sincronização concluída!' : 'Clique para sincronizar'}
+                </p>
+              </div>
               {(ordersError || stockError) && (
                 <span className="text-[10px] text-red-600 dark:text-red-400 text-center">Erro: {(ordersError || stockError)?.message}</span>
               )}
@@ -177,18 +189,12 @@ const ImportModal: React.FC<Props> = ({
             </div>
           )}
 
-          {activeType === 'SYNC' && (
-            <div className="rounded-2xl p-6 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1a1a1a] min-h-[200px] flex items-center justify-center">
-              <span className="text-[11px] text-neutral">Selecione a guia &quot;Sincronizar com o banco&quot; e use o botão acima para atualizar.</span>
-            </div>
-          )}
-
           {activeType === 'FICHA' && (
           <div 
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all cursor-pointer relative ${dragging ? 'border-secondary bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-neutral'} ${loading ? 'opacity-50 cursor-wait' : ''}`}
+            className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer relative ${dragging ? 'border-secondary bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-neutral'} ${loading ? 'opacity-50 cursor-wait' : ''}`}
           >
             {loading ? (
               <div className="flex flex-col items-center gap-3">
@@ -212,7 +218,10 @@ const ImportModal: React.FC<Props> = ({
                   <Upload className="w-8 h-8 text-neutral" />
                 </div>
                 <h3 className="font-bold text-lg mb-2">Arraste seu arquivo aqui</h3>
-                <p className="text-sm text-neutral mb-4">ou clique para selecionar</p>
+                <p className="text-sm text-neutral mb-2">ou clique na área para selecionar</p>
+                <p className="text-[11px] text-neutral mb-4 max-w-xs mx-auto">
+                  Importe a Ficha Técnica de Estantes em Excel ou CSV. O arquivo deve conter colunas como codigo_estante, cod_coluna, cod_bandeja e descrições.
+                </p>
                 <input type="file" disabled={loading} className="absolute inset-0 opacity-0 cursor-pointer" accept=".xlsx, .xls, .csv" onChange={(e) => e.target.files && parseFile(e.target.files[0])} />
                 <div className="flex items-center justify-center gap-4 text-[10px] text-neutral font-bold tracking-widest uppercase">
                   <span>Excel</span><span className="w-1 h-1 rounded-full bg-neutral"></span><span>CSV</span>
@@ -228,12 +237,23 @@ const ImportModal: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="mt-6 p-4 bg-orange-50 dark:bg-orange-900/10 rounded-xl flex gap-3 border border-orange-100 dark:border-orange-800">
-            <RefreshCw className="w-5 h-5 text-orange-500 shrink-0" />
-            <div className="text-[11px] text-orange-700 dark:text-orange-300 leading-relaxed">
-              <strong>Ficha Estantes:</strong> Ao importar, o sistema enviará os dados para o Supabase (ou substituirá os locais). Inclua a coluna <em>desc_estante</em> no Excel para preencher a descrição da estante.
+          {activeType === 'FICHA' && (
+            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-xl flex gap-3 border border-blue-100 dark:border-blue-800">
+              <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-blue-700 dark:text-blue-300 leading-relaxed">
+                <strong>Ficha Estantes:</strong> Importe Excel ou CSV com a ficha técnica. Colunas esperadas: <em>codigo_estante</em>, <em>cod_coluna</em>, <em>cod_bandeja</em>, <em>desc_coluna</em>, <em>desc_bandeja</em>, <em>qtd_coluna</em>, <em>qtd_bandeja</em>. Inclua <em>desc_estante</em> para descrição opcional.
+              </p>
             </div>
-          </div>
+          )}
+
+          {activeType === 'SYNC' && (
+            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-xl flex gap-3 border border-blue-100 dark:border-blue-800">
+              <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-blue-700 dark:text-blue-300 leading-relaxed">
+                <strong>Sincronização:</strong> Use o botão acima para buscar estoque e pedidos atualizados do banco. Ele gira durante o processo e exibe confirmação ao finalizar.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

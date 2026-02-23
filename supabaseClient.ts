@@ -171,6 +171,43 @@ export function subscribeUserAccounts(callback: (users: UserAccount[]) => void):
   };
 }
 
+// --- Company Config (Logo da empresa) ---
+
+const COMPANY_LOGO_KEY = 'company_logo';
+
+export async function fetchCompanyLogo(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('company_config')
+    .select('value')
+    .eq('key', COMPANY_LOGO_KEY)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.value ?? null;
+}
+
+export async function upsertCompanyLogo(logoDataUrl: string | null): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const { error } = await supabase
+    .from('company_config')
+    .upsert({ key: COMPANY_LOGO_KEY, value: logoDataUrl, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) throw new Error(error.message);
+}
+
+export function subscribeCompanyLogo(callback: (logo: string | null) => void): () => void {
+  if (!supabase) return () => {};
+  const refetch = async () => {
+    const logo = await fetchCompanyLogo();
+    callback(logo);
+  };
+  const channel = supabase
+    .channel('company-logo-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'company_config' }, () => refetch())
+    .subscribe();
+  refetch();
+  return () => supabase.removeChannel(channel);
+}
+
 // --- Shelf Ficha (MiniFicha) ---
 
 export type ShelfFichaRow = {

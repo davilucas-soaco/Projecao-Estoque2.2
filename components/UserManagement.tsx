@@ -1,10 +1,9 @@
-
 import React, { useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { UserAccount, UserProfile } from '../types';
 import { 
   UserPlus, 
   Trash2, 
-  Shield, 
   User, 
   Key, 
   Users, 
@@ -15,7 +14,8 @@ import {
   EyeOff, 
   Edit2, 
   Save, 
-  X 
+  X,
+  ImagePlus 
 } from 'lucide-react';
 
 interface Props {
@@ -25,9 +25,11 @@ interface Props {
   onUpdateUser: (user: UserAccount) => void;
   onExport: () => void;
   onImport: (json: any) => void;
+  companyLogo?: string | null;
+  onLogoChange?: (logoDataUrl: string | null) => void;
 }
 
-const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpdateUser, onExport, onImport }) => {
+const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpdateUser, onExport, onImport, companyLogo, onLogoChange }) => {
   const [newUsername, setNewUsername] = useState('');
   const [newName, setNewName] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -49,7 +51,7 @@ const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpd
     }
 
     const newUser: UserAccount = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       username: newUsername.toLowerCase().trim(),
       name: newName,
       password: newPassword,
@@ -90,6 +92,18 @@ const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpd
     setEditingUserId(null);
   };
 
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      onLogoChange?.(dataUrl);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -109,6 +123,42 @@ const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpd
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500">
       
+      {/* Logo da Empresa */}
+      {onLogoChange && (
+        <div className="bg-white dark:bg-[#252525] p-6 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <h2 className="text-xl font-bold flex items-center gap-2 mb-4 text-gray-900 dark:text-gray-100">
+            <ImagePlus className="w-5 h-5 text-secondary" />
+            Logo da Empresa
+          </h2>
+          <p className="text-xs text-neutral dark:text-gray-400 mb-4">
+            A logo aparecerá no cabeçalho do sistema e na tela de login. Formatos: PNG, JPG, SVG (recomendado fundo transparente).
+          </p>
+          <div className="flex flex-wrap items-center gap-6">
+            <div className="w-24 h-24 flex items-center justify-center bg-gray-100 dark:bg-[#1a1a1a] rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 overflow-hidden">
+              {companyLogo ? (
+                <img src={companyLogo} alt="Logo" className="w-full h-full object-contain" />
+              ) : (
+                <ImagePlus className="w-10 h-10 text-neutral opacity-50" />
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="cursor-pointer">
+                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                <span className="inline-flex items-center gap-2 px-4 py-2 bg-secondary hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors">
+                  <Upload className="w-4 h-4" />
+                  {companyLogo ? 'Alterar logo' : 'Enviar logo'}
+                </span>
+              </label>
+              {companyLogo && (
+                <button onClick={() => onLogoChange(null)} className="text-xs text-red-600 hover:underline">
+                  Remover logo
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Seção de Backup e Restauração */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-blue-50 dark:bg-blue-900/10 p-6 rounded-2xl border border-blue-100 dark:border-blue-800 flex flex-col justify-between">

@@ -27,6 +27,9 @@ import {
   upsertUserAccount,
   deleteUserAccount,
   subscribeUserAccounts,
+  fetchCompanyLogo,
+  upsertCompanyLogo,
+  subscribeCompanyLogo,
 } from './supabaseClient';
 import { useQueryClient } from '@tanstack/react-query';
 import ProjectionTable from './components/ProjectionTable';
@@ -40,7 +43,8 @@ const STORAGE_KEYS = {
   USERS: 'sa_industrial_accounts_v2',
   ROUTES: 'sa_industrial_routes_v2',
   SHELF_FICHA: 'sa_industrial_shelf_ficha_v2',
-  USER_SESSION: 'sa_industrial_user_session_v2'
+  USER_SESSION: 'sa_industrial_user_session_v2',
+  LOGO: 'sa_industrial_company_logo_v1',
 };
 
 const App: React.FC = () => {
@@ -50,6 +54,7 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRouteNames, setSelectedRouteNames] = useState<string[]>([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
 
   // Auth State
   const [currentUser, setCurrentUser] = useState<{ profile: UserProfile, name: string } | null>(() => {
@@ -123,6 +128,15 @@ const App: React.FC = () => {
     enabled: !!supabase,
   });
   const shelfFichaFromSupabase = shelfFichaQuery.data ?? [];
+
+  // Supabase: logo da empresa (com real-time)
+  const logoQuery = useQuery({
+    queryKey: ['company_logo'],
+    queryFn: fetchCompanyLogo,
+    enabled: !!supabase,
+    initialData: undefined,
+  });
+  const logoFromSupabase = logoQuery.data;
   const [shelfFichaLocal, setShelfFichaLocal] = useState<ShelfFicha[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SHELF_FICHA);
     return saved ? JSON.parse(saved) : [];
@@ -132,6 +146,7 @@ const App: React.FC = () => {
   // Fonte de dados: Supabase ou localStorage
   const effectiveUsers = supabase && usersFromSupabase ? usersFromSupabase : users;
   const effectiveRoutes = supabase && routesFromSupabase !== undefined ? routesFromSupabase : routes;
+  const effectiveLogo = supabase && logoFromSupabase !== undefined ? logoFromSupabase : companyLogo;
 
 
   useEffect(() => {
@@ -143,6 +158,10 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!supabase) localStorage.setItem(STORAGE_KEYS.SHELF_FICHA, JSON.stringify(shelfFichaLocal));
   }, [supabase, shelfFichaLocal]);
+  useEffect(() => {
+    if (!supabase && companyLogo) localStorage.setItem(STORAGE_KEYS.LOGO, companyLogo);
+    else if (!supabase) localStorage.removeItem(STORAGE_KEYS.LOGO);
+  }, [supabase, companyLogo]);
 
   // Subscriptions em tempo real (Supabase)
   useEffect(() => {
@@ -153,9 +172,13 @@ const App: React.FC = () => {
     const unsubRoutes = subscribeDeliverySequence((list) => {
       queryClient.setQueryData(['delivery_sequence'], list);
     });
+    const unsubLogo = subscribeCompanyLogo((logo) => {
+      queryClient.setQueryData(['company_logo'], logo);
+    });
     return () => {
       unsubUsers();
       unsubRoutes();
+      unsubLogo();
     };
   }, [supabase, queryClient]);
 
@@ -228,6 +251,19 @@ const App: React.FC = () => {
       upsertUserAccount(updatedUser).catch(console.error);
     } else {
       setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    }
+  };
+
+  const handleLogoChange = async (logoDataUrl: string | null) => {
+    if (supabase) {
+      try {
+        await upsertCompanyLogo(logoDataUrl);
+        await queryClient.invalidateQueries({ queryKey: ['company_logo'] });
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      setCompanyLogo(logoDataUrl);
     }
   };
 
@@ -538,14 +574,14 @@ const App: React.FC = () => {
     }).map(o => o.numeroPedido)).size;
   }, [orders, isEligibleForGTeresina]);
 
-  if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} />;
+  if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
       <header className="bg-primary text-white p-4 shadow-lg sticky top-0 z-[60] flex justify-between items-center">
         <div className="flex items-center gap-4">
           <div className="relative h-10 flex items-center">
-            <img src="logo.png" alt="Só Aço Industrial" className="h-10 w-auto object-contain" onError={(e) => { 
+            <img src={effectiveLogo || 'logo.png'} alt="Logo da Empresa" className="h-10 w-auto object-contain" onError={(e) => { 
               e.currentTarget.style.display = 'none'; 
               e.currentTarget.parentElement!.innerHTML = `
                 <div class="flex items-baseline gap-1 font-black italic select-none">
@@ -570,7 +606,7 @@ const App: React.FC = () => {
           </button>
           <button onClick={() => setIsImportModalOpen(true)} className="flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded font-semibold text-sm transition-all active:scale-95 shadow-lg">
             <Upload className="w-4 h-4" />
-            <span>Importar</span>
+            <span>Atualizações</span>
           </button>
           <div className="relative">
             <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 border-l border-white/20 pl-4 ml-2 hover:opacity-80 transition-opacity">
@@ -589,7 +625,7 @@ const App: React.FC = () => {
                 {currentUser.profile === 'ADMIN' && (
                   <button onClick={() => { setActiveTab('USUARIOS'); setShowUserMenu(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 font-bold transition-colors">
                     <Users className="w-4 h-4 text-secondary" />
-                    Gerir Usuários
+                    Gestão
                   </button>
                 )}
                 <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10 font-bold transition-colors">
@@ -606,14 +642,14 @@ const App: React.FC = () => {
         <TabButton active={activeTab === 'PROJECAO'} onClick={() => setActiveTab('PROJECAO')} icon={<BarChart3 className="w-4 h-4" />} label="Projeção de Estoque" />
         <TabButton active={activeTab === 'SEQUENCIA'} onClick={() => setActiveTab('SEQUENCIA')} icon={<ArrowRightLeft className="w-4 h-4" />} label="Sequência de Entrega" />
         <TabButton active={activeTab === 'ROMANEIO'} onClick={() => setActiveTab('ROMANEIO')} icon={<ClipboardList className="w-4 h-4" />} label="Romaneio / Pedidos" />
-        {currentUser.profile === 'ADMIN' && ( <TabButton active={activeTab === 'USUARIOS'} onClick={() => setActiveTab('USUARIOS')} icon={<Users className="w-4 h-4" />} label="Gestão Usuários" /> )}
+        {currentUser.profile === 'ADMIN' && ( <TabButton active={activeTab === 'USUARIOS'} onClick={() => setActiveTab('USUARIOS')} icon={<Users className="w-4 h-4" />} label="Gestão" /> )}
       </nav>
 
       <main className="flex-1 p-6 overflow-auto">
         {activeTab === 'PROJECAO' && ( <ProjectionTable data={displayData} routes={effectiveRoutes} onRoutesReorder={setRoutesWithSync} selectedRoutes={selectedRouteNames} onFilterRoutes={setSelectedRouteNames} horizonLabel={getHorizonInfo().label} /> )}
         {activeTab === 'SEQUENCIA' && ( <SequenceTable routes={effectiveRoutes} orders={orders} onReorder={setRoutesWithSync} isAdmin={currentUser.profile !== 'CONSULTA'} /> )}
         {activeTab === 'ROMANEIO' && ( <OrdersView orders={orders} /> )}
-        {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} /> )}
+        {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} companyLogo={effectiveLogo} onLogoChange={handleLogoChange} /> )}
       </main>
 
       <footer className="bg-white dark:bg-[#252525] border-t border-gray-200 dark:border-gray-700 p-2 px-6 flex justify-between text-[11px] text-neutral">
