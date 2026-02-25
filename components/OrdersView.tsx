@@ -2,7 +2,7 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { ShoppingCart, Truck, Store, User, AlertCircle, ArrowUp, ArrowDown, Download, Filter, X, MapPin } from 'lucide-react';
 import { Order } from '../types';
-import { isEligibleForGTeresina, getHorizonInfo, parseOrderDate, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, isClienteVemBuscar, ROUTE_CLIENTE_BUSCA } from '../utils';
+import { getHorizonInfo, parseOrderDate, getCategoriaFromObservacoes, CATEGORY_REQUISICAO, CATEGORY_ENTREGA_GT, CATEGORY_RETIRADA, CATEGORY_INSERIR_ROMANEIO, isCategoriaEspecial } from '../utils';
 import * as XLSX from 'xlsx';
 
 interface Props {
@@ -124,7 +124,7 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
     };
   }, [resizingColumn]);
 
-  const { uniqueTotal, uniqueInRoute, uniquePending, uniqueRoutesCount, uniqueGTTotal, uniqueGTHorizon, uniqueSoMoveisTotal, uniqueSoMoveisHorizon, uniqueClienteBuscaTotal, uniqueClienteBuscaHorizon, uniqueNoLinkTotal, horizonLabel } = useMemo(() => {
+  const { uniqueTotal, uniqueInRoute, uniqueRoutesCount, uniqueGTTotal, uniqueGTHorizon, uniqueRequisicaoTotal, uniqueRequisicaoHorizon, uniqueRetiradaTotal, uniqueRetiradaHorizon, uniqueSemVinculoTotal, horizonLabel } = useMemo(() => {
     // Filter out invalid orders (e.g., missing numeroPedido or codigoProduto, or zero quantities/price)
     const validOrders = orders.filter(o => 
       safeStr(o?.numeroPedido).trim() !== '' &&
@@ -138,24 +138,46 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
     const horizon = getHorizonInfo();
     const horizonDate = horizon.end;
 
-    const uniqueInRouteSet = new Set(
+    const categorias = validOrders.map(o => {
+      const obs = safeStr(o.observacoesRomaneio).trim();
+      const categoria = getCategoriaFromObservacoes(obs);
+      const isRequisicaoRaw = obs === '5-Requisicao';
+      const isGtRaw = obs === '3-Entrega em Grande Teresina';
+      const isRetiradaRaw =
+        obs === '2-Retirada na So Moveis' || obs === '1-Retirada na So Aço';
+      const isSemVinculoRaw = obs === '4-Inserir em Romaneio';
+
+      return {
+        pedido: o.numeroPedido,
+        categoria,
+        dataEntrega: o.dataEntrega,
+        obs,
+        isRequisicaoRaw,
+        isGtRaw,
+        isRetiradaRaw,
+        isSemVinculoRaw,
+      };
+    });
+
+    // Pedidos em Rota: RM preenchido (campo RM -> codigoRomaneio)
+    const pedidosEmRota = new Set(
       validOrders
-        .filter(o => o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;')
+        .filter(o => safeStr(o.codigoRomaneio).trim() !== '' && safeStr(o.codigoRomaneio).trim() !== '&nbsp;')
         .map(o => o.numeroPedido)
     );
+    const uniqueInRouteSet = pedidosEmRota;
     const inRouteCount = uniqueInRouteSet.size;
-    const pendingCount = totalUnique - inRouteCount;
 
-    // Cálculo das rotas únicas criadas
+    // Cálculo das rotas únicas criadas (categorias que representam rotas nomeadas)
     const uniqueRoutesSet = new Set(
-      orders
-        .map(o => o.observacoesRomaneio)
-        .filter(n => n && n.trim() !== '' && n !== '&nbsp;')
+      categorias
+        .filter(c => c.categoria && !isCategoriaEspecial(c.categoria))
+        .map(c => c.categoria)
     );
 
     // Indicadores G.Teresina
-    const gtOrders = validOrders.filter(o => isEligibleForGTeresina(o));
-    const uniqueGTTotal = new Set(gtOrders.map(o => o.numeroPedido)).size;
+    const gtOrders = categorias.filter(c => c.isGtRaw);
+    const uniqueGTTotal = new Set(gtOrders.map(o => o.pedido)).size;
     
     const uniqueGTHorizon = new Set(gtOrders.filter(o => {
       const dEntrega = parseOrderDate(o.dataEntrega);
@@ -166,10 +188,10 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
       return false;
     }).map(o => o.numeroPedido)).size;
 
-    // Indicadores Só Móveis
-    const soMoveisOrders = validOrders.filter(o => o.requisicaoLoja === true);
-    const uniqueSoMoveisTotal = new Set(soMoveisOrders.map(o => o.numeroPedido)).size;
-    const uniqueSoMoveisHorizon = new Set(soMoveisOrders.filter(o => {
+    // Indicadores Requisição
+    const requisicaoOrders = categorias.filter(c => c.isRequisicaoRaw);
+    const uniqueRequisicaoTotal = new Set(requisicaoOrders.map(o => o.pedido)).size;
+    const uniqueRequisicaoHorizon = new Set(requisicaoOrders.filter(o => {
       const dEntrega = parseOrderDate(o.dataEntrega);
       if (dEntrega) {
         dEntrega.setHours(0, 0, 0, 0);
@@ -178,10 +200,10 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
       return false;
     }).map(o => o.numeroPedido)).size;
 
-    // Indicadores Cliente Vem Buscar
-    const clienteBuscaOrders = validOrders.filter(o => isClienteVemBuscar(o));
-    const uniqueClienteBuscaTotal = new Set(clienteBuscaOrders.map(o => o.numeroPedido)).size;
-    const uniqueClienteBuscaHorizon = new Set(clienteBuscaOrders.filter(o => {
+    // Indicadores Retirada
+    const retiradaOrders = categorias.filter(c => c.isRetiradaRaw);
+    const uniqueRetiradaTotal = new Set(retiradaOrders.map(o => o.pedido)).size;
+    const uniqueRetiradaHorizon = new Set(retiradaOrders.filter(o => {
       const dEntrega = parseOrderDate(o.dataEntrega);
       if (dEntrega) {
         dEntrega.setHours(0, 0, 0, 0);
@@ -190,28 +212,21 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
       return false;
     }).map(o => o.numeroPedido)).size;
 
-    // Indicadores Pedidos Sem Vínculo (Nem Rota, Nem GT, Nem SM, Nem CB)
-    const noLinkOrders = validOrders.filter(o => {
-      const isGT = isEligibleForGTeresina(o);
-      const isSM = o.requisicaoLoja === true;
-      const isCB = isClienteVemBuscar(o);
-      const hasRoute = o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;';
-      return !isGT && !isSM && !isCB && !hasRoute;
-    });
-    const uniqueNoLinkTotal = new Set(noLinkOrders.map(o => o.numeroPedido)).size;
+    // Indicadores Pedidos Sem Vínculo (Inserir em Romaneio)
+    const semVinculoOrders = categorias.filter(c => c.isSemVinculoRaw);
+    const uniqueSemVinculoTotal = new Set(semVinculoOrders.map(o => o.pedido)).size;
 
     return {
       uniqueTotal: totalUnique,
       uniqueInRoute: inRouteCount,
-      uniquePending: pendingCount,
       uniqueRoutesCount: uniqueRoutesSet.size,
       uniqueGTTotal,
       uniqueGTHorizon,
-      uniqueSoMoveisTotal,
-      uniqueSoMoveisHorizon,
-      uniqueClienteBuscaTotal,
-      uniqueClienteBuscaHorizon,
-      uniqueNoLinkTotal,
+      uniqueRequisicaoTotal,
+      uniqueRequisicaoHorizon,
+      uniqueRetiradaTotal,
+      uniqueRetiradaHorizon,
+      uniqueSemVinculoTotal,
       horizonLabel: horizon.label
     };
   }, [orders]);
@@ -223,16 +238,10 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
     const colWidths = [14, 22, 12, 28, 14, 40, 6, 12, 14, 14, 12, 18, 4, 32, 20, 8, 24, 12];
 
     const dataToExport = filteredOrders.map(order => {
-      const isGT = isEligibleForGTeresina(order);
-      const isSoMoveis = order.requisicaoLoja === true;
-      const isClienteBusca = isClienteVemBuscar(order);
-      let deliveryType = '-';
-      if (isSoMoveis) deliveryType = ROUTE_SO_MOVEIS;
-      else if (isClienteBusca) deliveryType = ROUTE_CLIENTE_BUSCA;
-      else if (isGT) deliveryType = ROUTE_G_TERESINA;
-      else if (safeStr(order.observacoesRomaneio).trim() !== '') deliveryType = `${safeStr(order.observacoesRomaneio)} (${safeStr(order.codigoRomaneio)})`;
-      const codRom = safeStr(order.codigoRomaneio);
-      const hasRoute = (codRom.trim() !== '' && codRom !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
+      const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
+      const isSemVinculo = categoria === CATEGORY_INSERIR_ROMANEIO;
+      const deliveryType = categoria || '-';
+      const hasRoute = categoria && !isSemVinculo;
       const statusText = hasRoute ? 'VINCULADO' : 'SEM ROTA';
 
       return [
@@ -267,33 +276,29 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
 
   const filteredOrders = useMemo(() => {
     let filtered = orders.filter(o => {
-      const isGT = isEligibleForGTeresina(o);
-      const isSoMoveis = o.requisicaoLoja === true;
-      const isClienteBusca = isClienteVemBuscar(o);
-      
-      let deliveryType = '-';
-      if (isSoMoveis) {
-        deliveryType = ROUTE_SO_MOVEIS;
-      } else if (isClienteBusca) {
-        deliveryType = ROUTE_CLIENTE_BUSCA;
-      } else if (isGT) {
-        deliveryType = ROUTE_G_TERESINA;
-      } else if (o.observacoesRomaneio && o.observacoesRomaneio.trim() !== '') {
-        deliveryType = `${o.observacoesRomaneio} (${o.codigoRomaneio})`;
-      }
+      const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
+      const isRequisicao = categoria === CATEGORY_REQUISICAO;
+      const isGT = categoria === CATEGORY_ENTREGA_GT;
+      const isRetirada = categoria === CATEGORY_RETIRADA;
+      const isSemVinculo = categoria === CATEGORY_INSERIR_ROMANEIO;
+      const hasRm =
+        safeStr(o.codigoRomaneio).trim() !== '' &&
+        safeStr(o.codigoRomaneio).trim() !== '&nbsp;';
+      const isRotaCategoria = categoria && !isCategoriaEspecial(categoria);
+
+      const deliveryType = categoria || '-';
 
       // KPI Filter Logic
       if (filters.kpi !== 'all') {
-        if (filters.kpi === 'so_moveis' && !isSoMoveis) return false;
+        if (filters.kpi === 'so_moveis' && !isRequisicao) return false;
         if (filters.kpi === 'g_teresina' && !isGT) return false;
-        if (filters.kpi === 'cliente_busca' && !isClienteBusca) return false;
+        if (filters.kpi === 'cliente_busca' && !isRetirada) return false;
         if (filters.kpi === 'em_rota') {
-           // Em rota = tem código de romaneio válido (conforme lógica do KPI)
-           if (!o.codigoRomaneio || o.codigoRomaneio.trim() === '' || o.codigoRomaneio === '&nbsp;') return false;
+          // Em rota = categoria de rota (não especial) E RM preenchido
+          if (!isRotaCategoria || !hasRm) return false;
         }
         if (filters.kpi === 'sem_vinculo') {
-           const hasRoute = (o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
-           if (hasRoute) return false;
+           if (!isSemVinculo) return false;
         }
       }
 
@@ -308,7 +313,7 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
         safeStr(o.codigoRomaneio).toLowerCase().includes(romaneioTerm) ||
         safeStr(o.observacoesRomaneio).toLowerCase().includes(romaneioTerm);
 
-      const hasRoute = (o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
+      const hasRoute = categoria && !isSemVinculo;
       const statusText = hasRoute ? 'vinculado' : 'sem rota';
       const matchStatus = filters.status === '' || statusText === filters.status;
 
@@ -327,20 +332,15 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
             valB = b.requisicaoLoja ? 'Sim' : 'Não';
           } else if (criterion.key === 'tipoEntrega') {
             const getDeliveryType = (o: Order) => {
-              if (o.requisicaoLoja) return ROUTE_SO_MOVEIS;
-              if (isClienteVemBuscar(o)) return ROUTE_CLIENTE_BUSCA;
-              if (isEligibleForGTeresina(o)) return ROUTE_G_TERESINA;
-              if (o.observacoesRomaneio && o.observacoesRomaneio.trim() !== '') return `${o.observacoesRomaneio} (${o.codigoRomaneio})`;
-              return '-';
+              const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
+              return categoria || '-';
             };
             valA = getDeliveryType(a);
             valB = getDeliveryType(b);
           } else if (criterion.key === 'status') {
             const getStatus = (o: Order) => {
-              const isGT = isEligibleForGTeresina(o);
-              const isSM = o.requisicaoLoja === true;
-              const isCB = isClienteVemBuscar(o);
-              const hasRoute = (o.codigoRomaneio && o.codigoRomaneio.trim() !== '' && o.codigoRomaneio !== '&nbsp;') || isGT || isSM || isCB;
+              const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
+              const hasRoute = categoria && categoria !== CATEGORY_INSERIR_ROMANEIO;
               return hasRoute ? 'VINCULADO' : 'SEM ROTA';
             }
             valA = getStatus(a);
@@ -420,17 +420,17 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
         
         <KpiCard 
           icon={<Store className="text-emerald-600" />} 
-          label="Requisições / Só Móveis" 
-          value={uniqueSoMoveisTotal} 
+          label="Requisições" 
+          value={uniqueRequisicaoTotal} 
           subLabel={`No ${horizonLabel}`}
-          subValue={uniqueSoMoveisHorizon}
+          subValue={uniqueRequisicaoHorizon}
           active={filters.kpi === 'so_moveis'}
           onClick={() => setFilters(f => ({ ...f, kpi: 'so_moveis' }))}
         />
 
         <KpiCard 
           icon={<MapPin className="text-blue-600" />} 
-          label="Entrega G.Teresina" 
+          label="Entrega em Grande Teresina" 
           value={uniqueGTTotal} 
           subLabel={`No ${horizonLabel}`}
           subValue={uniqueGTHorizon}
@@ -440,10 +440,10 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
 
         <KpiCard 
           icon={<User className="text-purple-600" />} 
-          label="Cliente Vem Buscar" 
-          value={uniqueClienteBuscaTotal} 
+          label="Retirada" 
+          value={uniqueRetiradaTotal} 
           subLabel={`No ${horizonLabel}`}
-          subValue={uniqueClienteBuscaHorizon}
+          subValue={uniqueRetiradaHorizon}
           active={filters.kpi === 'cliente_busca'}
           onClick={() => setFilters(f => ({ ...f, kpi: 'cliente_busca' }))}
         />
@@ -460,7 +460,7 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
         <KpiCard 
           icon={<AlertCircle className="text-red-500" />} 
           label="Pedidos Sem Vínculo" 
-          value={uniqueNoLinkTotal} 
+          value={uniqueSemVinculoTotal} 
           active={filters.kpi === 'sem_vinculo'}
           onClick={() => setFilters(f => ({ ...f, kpi: 'sem_vinculo' }))}
         />
@@ -535,23 +535,10 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
                 {filteredOrders.map((order, i) => {
-                  const isGT = isEligibleForGTeresina(order);
-                  const isSoMoveis = order.requisicaoLoja === true;
-                  const isClienteBusca = isClienteVemBuscar(order);
-                  
-                  let deliveryType = '-';
-                  if (isSoMoveis) {
-                    deliveryType = ROUTE_SO_MOVEIS;
-                  } else if (isClienteBusca) {
-                    deliveryType = ROUTE_CLIENTE_BUSCA;
-                  } else if (isGT) {
-                    deliveryType = ROUTE_G_TERESINA;
-                  } else if (safeStr(order.observacoesRomaneio).trim() !== '') {
-                    deliveryType = `${safeStr(order.observacoesRomaneio)} (${safeStr(order.codigoRomaneio)})`;
-                  }
-
-                  const codRom = safeStr(order.codigoRomaneio);
-                  const hasRoute = (codRom.trim() !== '' && codRom !== '&nbsp;') || isGT || isSoMoveis || isClienteBusca;
+                  const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
+                  const isSemVinculo = categoria === CATEGORY_INSERIR_ROMANEIO;
+                  const deliveryType = categoria || '-';
+                  const hasRoute = categoria && !isSemVinculo;
 
                   return (
                     <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
@@ -574,7 +561,7 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
                       <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.metodoEntrega }}>{safeStr(order.metodoEntrega)}</td>
                       <td className="px-4 py-3 text-center text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.requisicaoLoja ? 'SIM' : 'NÃO'}</td>
                       <td className="px-4 py-3 text-[10px] font-bold border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.tipoEntrega }}>
-                        <span className={isSoMoveis ? 'text-emerald-600 dark:text-emerald-400' : isClienteBusca ? 'text-purple-600 dark:text-purple-400' : isGT ? 'text-blue-600 dark:text-blue-400' : safeStr(order.observacoesRomaneio).trim() !== '' ? 'text-blue-500' : 'text-neutral italic font-normal'}>
+                        <span className={categoria === CATEGORY_REQUISICAO ? 'text-emerald-600 dark:text-emerald-400' : categoria === CATEGORY_RETIRADA ? 'text-purple-600 dark:text-purple-400' : categoria === CATEGORY_ENTREGA_GT ? 'text-blue-600 dark:text-blue-400' : safeStr(order.observacoesRomaneio).trim() !== '' ? 'text-blue-500' : 'text-neutral italic font-normal'}>
                           {deliveryType}
                         </span>
                       </td>

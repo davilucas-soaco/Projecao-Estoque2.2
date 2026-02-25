@@ -1,17 +1,7 @@
 
-import { Order } from './types';
-
-export const ROUTE_G_TERESINA = "Entrega G.Teresina";
-export const ROUTE_SO_MOVEIS = "Só Móveis";
-export const ROUTE_CLIENTE_BUSCA = "Cliente vem buscar";
-export const CIDADES_G_TERESINA = [
-  { cidade: 'TERESINA', uf: 'PI' },
-  { cidade: 'TIMON', uf: 'MA' },
-  { cidade: 'DEMERVAL LOBÃO', uf: 'PI' },
-  { cidade: 'DEMERVAL', uf: 'PI' },
-  { cidade: 'JOSE DE FREITAS', uf: 'PI' },
-  { cidade: 'NAZARIA', uf: 'PI' }
-];
+export const ROUTE_G_TERESINA = 'Entrega em Grande Teresina';
+export const ROUTE_SO_MOVEIS = 'Requisição';
+export const ROUTE_CLIENTE_BUSCA = 'Retirada';
 
 export const normalizeText = (str: string | undefined | null): string => {
   if (!str) return "";
@@ -22,52 +12,47 @@ export const normalizeText = (str: string | undefined | null): string => {
     .trim();
 };
 
-// 1. Prioridade Máxima: Só Móveis
-export const isSoMoveis = (order: Order): boolean => {
-  return order.requisicaoLoja === true;
+export const CATEGORY_REQUISICAO = ROUTE_SO_MOVEIS;
+export const CATEGORY_INSERIR_ROMANEIO = 'inserir em Romaneio';
+export const CATEGORY_ENTREGA_GT = ROUTE_G_TERESINA;
+export const CATEGORY_RETIRADA = ROUTE_CLIENTE_BUSCA;
+
+export const getCategoriaFromObservacoes = (observacoes: string | undefined | null): string => {
+  const original = (observacoes ?? '').toString().trim();
+  if (!original) return '';
+
+  // Remove prefixos numéricos do tipo "5-XXXX"
+  const prefixMatch = original.match(/^\d+\s*[-–]\s*(.*)$/);
+  const base = prefixMatch ? prefixMatch[1] : original;
+
+  const norm = normalizeText(base);
+  if (!norm) return '';
+
+  if (norm === 'REQUISICAO') return CATEGORY_REQUISICAO;
+
+  if (norm === 'INSERIREMROMANEIO' || norm === 'INSERIRNORMANEIO') {
+    return CATEGORY_INSERIR_ROMANEIO;
+  }
+
+  if (norm === 'ENTREGAEMGRANDETERESINA') {
+    return CATEGORY_ENTREGA_GT;
+  }
+
+  if (norm.includes('RETIRADA')) {
+    return CATEGORY_RETIRADA;
+  }
+
+  return base;
 };
 
-// 2. Segunda Prioridade: Cliente vem buscar
-export const isClienteVemBuscar = (order: Order): boolean => {
-  // Se for Só Móveis, não entra aqui (Prioridade 1 já tratou)
-  if (isSoMoveis(order)) return false;
-
-  const endNorm = normalizeText(order.endereco);
-  
-  // Regex para "COLETORA" ou "COL"
-  const coletoraPattern = /(COL|COLETORA)/;
-  // Regex para "SECUNDARIA" ou "SEC"
-  const secundariaPattern = /(SEC|SECUNDARIA)/;
-
-  const hasColetoraLike = coletoraPattern.test(endNorm);
-  const hasSecundariaLike = secundariaPattern.test(endNorm);
-
-  return hasColetoraLike && hasSecundariaLike;
-};
-
-// 3. Terceira Prioridade: Grande Teresina
-export const isEligibleForGTeresina = (order: Order): boolean => {
-  // Se for Só Móveis ou Cliente vem buscar, não entra aqui (Prioridades 1 e 2 já trataram)
-  if (isSoMoveis(order) || isClienteVemBuscar(order)) return false;
-
-  const metodoNorm = normalizeText(order.metodoEntrega);
-  if (metodoNorm !== normalizeText("Entrega Pelo Grupo Só Aço")) return false;
-
-  const municipioReal = order.localEntregaDif === 1 
-    ? normalizeText(order.municipioEntrega)
-    : normalizeText(order.municipioCliente);
-  const finalMunicipio = municipioReal || normalizeText(order.municipio);
-  const finalUf = order.localEntregaDif === 1 ? normalizeText(order.ufEntrega) : normalizeText(order.ufCliente) || normalizeText(order.uf);
-
-  return CIDADES_G_TERESINA.some(
-    loc => normalizeText(loc.cidade) === finalMunicipio && normalizeText(loc.uf) === finalUf
+export const isCategoriaEspecial = (categoria: string | null | undefined): boolean => {
+  const c = (categoria ?? '').trim();
+  return (
+    c === CATEGORY_REQUISICAO ||
+    c === CATEGORY_INSERIR_ROMANEIO ||
+    c === CATEGORY_ENTREGA_GT ||
+    c === CATEGORY_RETIRADA
   );
-};
-
-// 4. Quarta Prioridade: Rotas Normais (Verificado no processamento pelo Codigo_Romaneio)
-export const isRotaNormal = (order: Order): boolean => {
-  if (isSoMoveis(order) || isClienteVemBuscar(order) || isEligibleForGTeresina(order)) return false;
-  return !!order.codigoRomaneio && order.codigoRomaneio.trim() !== "";
 };
 
 export const parseOrderDate = (dateStr: string) => {

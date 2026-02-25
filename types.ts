@@ -37,6 +37,66 @@ export interface Order {
   endereco: string;
 }
 
+export interface ProjecaoImportada {
+  idChave: string;
+  observacoes: string;
+  rm: string;
+  pd: string;
+  cliente: string;
+  cod: string;
+  descricaoProduto: string;
+  setorProducao: string;
+  status: string;
+  requisicaoLojaGrupo: string;
+  uf: string;
+  municipioEntrega: string;
+  qtdePendenteReal: number;
+  tipoF: string;
+  emissao: string;
+  dataOriginal: string;
+  previsaoAnterior: string;
+  previsaoAtual: string;
+}
+
+export function projecaoImportadaToOrder(row: ProjecaoImportada): Order {
+  const qtde = Number.isFinite(row.qtdePendenteReal) ? row.qtdePendenteReal : Number(row.qtdePendenteReal) || 0;
+  const requisicaoLoja =
+    typeof row.requisicaoLojaGrupo === 'string'
+      ? row.requisicaoLojaGrupo.toLowerCase().includes('sim')
+      : false;
+
+  return {
+    codigoRomaneio: row.rm ?? '',
+    observacoesRomaneio: row.observacoes ?? '',
+    dataEmissaoRomaneio: row.emissao ?? '',
+    numeroPedido: row.pd ?? '',
+    cliente: row.cliente ?? '',
+    dataEmissaoPedido: row.dataOriginal ?? '',
+    codigoProduto: row.cod ?? '',
+    descricao: row.descricaoProduto ?? '',
+    um: '',
+    qtdPedida: qtde,
+    qtdVinculada: qtde,
+    tipoProduto: row.tipoF ?? '',
+    precoUnitario: 0,
+    dataEntrega: row.previsaoAtual ?? '',
+    municipio: row.municipioEntrega ?? '',
+    uf: row.uf ?? '',
+    metodoEntrega: '',
+    requisicaoLoja,
+    localEntregaDif: 0,
+    municipioCliente: row.municipioEntrega ?? '',
+    ufCliente: row.uf ?? '',
+    municipioEntrega: row.municipioEntrega ?? '',
+    ufEntrega: row.uf ?? '',
+    endereco: '',
+  };
+}
+
+export function mapProjecaoImportadaToOrders(rows: ProjecaoImportada[]): Order[] {
+  return rows.map(projecaoImportadaToOrder);
+}
+
 export interface StockItem {
   idProduto: number;
   codigo: string;

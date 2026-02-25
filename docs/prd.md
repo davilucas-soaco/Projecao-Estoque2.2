@@ -18,7 +18,7 @@ Storage: Não aplicável no momento, mas Supabase Storage pode ser considerado p
 Estrutura de Dados e Persistência
 Dados de Pedidos (orders) e Estoque (stock):
 Serão buscados e persistidos no MySQL através de um backend Node.js/Express.
-O backend terá endpoints (ex: /api/orders, /api/stock) que consultam o MySQL e retornam os dados para o frontend.
+O backend terá endpoint `/api/stock` que consulta o MySQL e retorna os dados de estoque para o frontend. Os dados de projeção passam a ser carregados a partir do Supabase (`projecao_importada`), alimentado pela planilha importada no frontend.
 As funções de importação (handleImportOrders, handleImportStock) no frontend serão modificadas para enviar os dados para o backend, que então os salvará no MySQL.
 Dados da MiniFicha (shelf_ficha):
 Serão buscados e persistidos no Supabase (PostgreSQL).

@@ -1,5 +1,4 @@
-import type { Order, StockItem } from './types';
-
+import type { StockItem } from './types';
 
 const API_BASE = import.meta.env.VITE_API_URL!;
 //const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -25,9 +24,4 @@ async function handleResponse<T>(res: Response): Promise<T> {
 export async function fetchStock(): Promise<StockItem[]> {
   const res = await fetch(`${API_BASE}/api/stock`);
   return handleResponse<StockItem[]>(res);
-}
-
-export async function fetchOrders(): Promise<Order[]> {
-  const res = await fetch(`${API_BASE}/api/orders`);
-  return handleResponse<Order[]>(res);
 }

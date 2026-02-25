@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import type { Route, UserAccount } from './types';
+import type { Route, UserAccount, ProjecaoImportada } from './types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -171,9 +171,12 @@ export function subscribeUserAccounts(callback: (users: UserAccount[]) => void):
   };
 }
 
-// --- Company Config (Logo da empresa) ---
+// --- Company Config (Logo da empresa + metadados diversos) ---
 
 const COMPANY_LOGO_KEY = 'company_logo';
+const PROJECTION_UPLOAD_AT_KEY = 'last_projecao_upload_at';
+const PROJECTION_UPLOAD_USER_KEY = 'last_projecao_upload_user';
+const STOCK_SYNC_AT_KEY = 'last_stock_sync_at';
 
 export async function fetchCompanyLogo(): Promise<string | null> {
   if (!supabase) return null;
@@ -206,6 +209,55 @@ export function subscribeCompanyLogo(callback: (logo: string | null) => void): (
     .subscribe();
   refetch();
   return () => supabase.removeChannel(channel);
+}
+
+export async function fetchProjectionUploadMeta(): Promise<{ lastUploadAt: string | null; lastUploadUser: string | null }> {
+  if (!supabase) return { lastUploadAt: null, lastUploadUser: null };
+
+  const [{ data: atData, error: atError }, { data: userData, error: userError }] = await Promise.all([
+    supabase.from('company_config').select('value').eq('key', PROJECTION_UPLOAD_AT_KEY).maybeSingle(),
+    supabase.from('company_config').select('value').eq('key', PROJECTION_UPLOAD_USER_KEY).maybeSingle(),
+  ]);
+
+  if (atError) throw new Error(atError.message);
+  if (userError) throw new Error(userError.message);
+
+  return {
+    lastUploadAt: atData?.value ?? null,
+    lastUploadUser: userData?.value ?? null,
+  };
+}
+
+export async function upsertProjectionUploadMeta(params: { at: string; user: string }): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const now = new Date().toISOString();
+  const { error } = await supabase.from('company_config').upsert(
+    [
+      { key: PROJECTION_UPLOAD_AT_KEY, value: params.at, updated_at: now },
+      { key: PROJECTION_UPLOAD_USER_KEY, value: params.user, updated_at: now },
+    ],
+    { onConflict: 'key' }
+  );
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchStockSyncMeta(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('company_config')
+    .select('value')
+    .eq('key', STOCK_SYNC_AT_KEY)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.value ?? null;
+}
+
+export async function upsertStockSyncMeta(at: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const { error } = await supabase
+    .from('company_config')
+    .upsert({ key: STOCK_SYNC_AT_KEY, value: at, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) throw new Error(error.message);
 }
 
 // --- Shelf Ficha (MiniFicha) ---
@@ -273,5 +325,121 @@ export async function upsertShelfFicha(rows: import('./types').ShelfFicha[]): Pr
       );
     }
     throw new Error(error.message);
+  }
+}
+
+// --- Projeção Importada ---
+
+export type ProjecaoImportadaRow = {
+  id: string;
+  id_chave: string;
+  observacoes: string | null;
+  rm: string | null;
+  pd: string | null;
+  cliente: string | null;
+  cod: string | null;
+  descricao_produto: string | null;
+  setor_producao: string | null;
+  status: string | null;
+  requisicao_loja_grupo: string | null;
+  uf: string | null;
+  municipio_entrega: string | null;
+  qtde_pendente_real: number | null;
+  tipo_f: string | null;
+  emissao: string | null;
+  data_original: string | null;
+  previsao_anterior: string | null;
+  previsao_atual: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function rowToProjecaoImportada(row: ProjecaoImportadaRow): ProjecaoImportada {
+  return {
+    idChave: row.id_chave,
+    observacoes: row.observacoes ?? '',
+    rm: row.rm ?? '',
+    pd: row.pd ?? '',
+    cliente: row.cliente ?? '',
+    cod: row.cod ?? '',
+    descricaoProduto: row.descricao_produto ?? '',
+    setorProducao: row.setor_producao ?? '',
+    status: row.status ?? '',
+    requisicaoLojaGrupo: row.requisicao_loja_grupo ?? '',
+    uf: row.uf ?? '',
+    municipioEntrega: row.municipio_entrega ?? '',
+    qtdePendenteReal: row.qtde_pendente_real ?? 0,
+    tipoF: row.tipo_f ?? '',
+    emissao: row.emissao ?? '',
+    dataOriginal: row.data_original ?? '',
+    previsaoAnterior: row.previsao_anterior ?? '',
+    previsaoAtual: row.previsao_atual ?? '',
+  };
+}
+
+function projecaoImportadaToRow(p: ProjecaoImportada): Record<string, unknown> {
+  const now = new Date().toISOString();
+  return {
+    id_chave: p.idChave,
+    observacoes: p.observacoes,
+    rm: p.rm,
+    pd: p.pd,
+    cliente: p.cliente,
+    cod: p.cod,
+    descricao_produto: p.descricaoProduto,
+    setor_producao: p.setorProducao,
+    status: p.status,
+    requisicao_loja_grupo: p.requisicaoLojaGrupo,
+    uf: p.uf,
+    municipio_entrega: p.municipioEntrega,
+    qtde_pendente_real: p.qtdePendenteReal,
+    tipo_f: p.tipoF,
+    emissao: p.emissao,
+    data_original: p.dataOriginal,
+    previsao_anterior: p.previsaoAnterior,
+    previsao_atual: p.previsaoAtual,
+    updated_at: now,
+  };
+}
+
+export async function fetchProjecaoImportada(): Promise<ProjecaoImportada[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('projecao_importada')
+    .select('*')
+    .order('emissao', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []).map((row) => rowToProjecaoImportada(row as ProjecaoImportadaRow));
+}
+
+export async function replaceProjecaoImportada(rows: ProjecaoImportada[]): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado.');
+
+  const ids = Array.from(new Set(rows.map((r) => r.idChave).filter((v) => v && v.trim() !== '')));
+
+  const { data: existing, error: existingError } = await supabase
+    .from('projecao_importada')
+    .select('id_chave');
+  if (existingError) throw new Error(existingError.message);
+
+  const existingKeys = new Set((existing || []).map((r: { id_chave: string }) => r.id_chave));
+  const incomingKeys = new Set(ids);
+
+  const toDelete = Array.from(existingKeys).filter((key) => !incomingKeys.has(key));
+
+  if (toDelete.length > 0) {
+    const { error: deleteError } = await supabase
+      .from('projecao_importada')
+      .delete()
+      .in('id_chave', toDelete);
+    if (deleteError) throw new Error(deleteError.message);
+  }
+
+  if (rows.length > 0) {
+    const toUpsert = rows.map((r) => projecaoImportadaToRow(r));
+    const { error: upsertError } = await supabase
+      .from('projecao_importada')
+      .upsert(toUpsert, { onConflict: 'id_chave' });
+    if (upsertError) throw new Error(upsertError.message);
   }
 }

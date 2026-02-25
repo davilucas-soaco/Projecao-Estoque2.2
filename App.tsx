@@ -11,11 +11,12 @@ import {
   ClipboardList,
   LogOut,
   ChevronDown,
-  Users
+  Users,
+  X,
 } from 'lucide-react';
-import { UserProfile, Order, StockItem, Route, ProductConsolidated, UserAccount, ShelfFicha } from './types';
-import { isEligibleForGTeresina, getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, isClienteVemBuscar, ROUTE_CLIENTE_BUSCA, isSoMoveis, isRotaNormal } from './utils';
-import { fetchOrders, fetchStock } from './api';
+import { UserProfile, Order, StockItem, Route, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
+import { getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, ROUTE_CLIENTE_BUSCA, getCategoriaFromObservacoes, isCategoriaEspecial, CATEGORY_REQUISICAO, CATEGORY_INSERIR_ROMANEIO, CATEGORY_ENTREGA_GT, CATEGORY_RETIRADA } from './utils';
+import { fetchStock } from './api';
 import {
   supabase,
   fetchShelfFicha,
@@ -30,6 +31,12 @@ import {
   fetchCompanyLogo,
   upsertCompanyLogo,
   subscribeCompanyLogo,
+  fetchProjecaoImportada,
+  replaceProjecaoImportada,
+  fetchProjectionUploadMeta,
+  upsertProjectionUploadMeta,
+  fetchStockSyncMeta,
+  upsertStockSyncMeta,
 } from './supabaseClient';
 import { useQueryClient } from '@tanstack/react-query';
 import ProjectionTable from './components/ProjectionTable';
@@ -55,6 +62,8 @@ const App: React.FC = () => {
   const [selectedRouteNames, setSelectedRouteNames] = useState<string[]>([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
+  const [showErpPanel, setShowErpPanel] = useState(false);
+  const [erpStatus, setErpStatus] = useState<'idle' | 'connected' | 'disconnected'>('idle');
 
   // Auth State
   const [currentUser, setCurrentUser] = useState<{ profile: UserProfile, name: string } | null>(() => {
@@ -72,15 +81,25 @@ const App: React.FC = () => {
     return accountList;
   });
 
-  // Server state: orders e stock via API
-  const ordersQuery = useQuery({ queryKey: ['orders'], queryFn: fetchOrders });
+  // Server state: estoque via API
   const stockQuery = useQuery({ queryKey: ['stock'], queryFn: fetchStock });
-  const ordersFromApi = ordersQuery.data ?? [];
   const stockFromApi = stockQuery.data ?? [];
-  const [ordersOverlay, setOrdersOverlay] = useState<Order[] | null>(null);
   const [stockOverlay, setStockOverlay] = useState<StockItem[] | null>(null);
-  const orders = ordersOverlay ?? ordersFromApi;
   const stock = stockOverlay ?? stockFromApi;
+
+  // Projeção importada (Supabase ou local)
+  const projectionQuery = useQuery({
+    queryKey: ['projection'],
+    queryFn: fetchProjecaoImportada,
+    enabled: !!supabase,
+  });
+  const projectionFromSupabase = projectionQuery.data ?? [];
+  const [projectionLocal, setProjectionLocal] = useState<ProjecaoImportada[]>(() => {
+    const saved = localStorage.getItem('sa_industrial_projection_v1');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const projection: ProjecaoImportada[] = supabase ? projectionFromSupabase : projectionLocal;
+  const orders: Order[] = useMemo(() => mapProjecaoImportadaToOrders(projection), [projection]);
 
   const [routes, setRoutes] = useState<Route[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.ROUTES);
@@ -143,6 +162,21 @@ const App: React.FC = () => {
   });
   const shelfFicha = supabase ? shelfFichaFromSupabase : shelfFichaLocal;
 
+  // Metadados de upload da projeção e sincronização de estoque
+  const projectionMetaQuery = useQuery({
+    queryKey: ['projection_upload_meta'],
+    queryFn: fetchProjectionUploadMeta,
+    enabled: !!supabase,
+  });
+  const projectionMeta = projectionMetaQuery.data;
+
+  const stockSyncMetaQuery = useQuery({
+    queryKey: ['stock_sync_meta'],
+    queryFn: fetchStockSyncMeta,
+    enabled: !!supabase,
+  });
+  const lastStockSyncAt = stockSyncMetaQuery.data ?? null;
+
   // Fonte de dados: Supabase ou localStorage
   const effectiveUsers = supabase && usersFromSupabase ? usersFromSupabase : users;
   const effectiveRoutes = supabase && routesFromSupabase !== undefined ? routesFromSupabase : routes;
@@ -158,6 +192,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!supabase) localStorage.setItem(STORAGE_KEYS.SHELF_FICHA, JSON.stringify(shelfFichaLocal));
   }, [supabase, shelfFichaLocal]);
+  useEffect(() => {
+    if (!supabase) localStorage.setItem('sa_industrial_projection_v1', JSON.stringify(projectionLocal));
+  }, [supabase, projectionLocal]);
   useEffect(() => {
     if (!supabase && companyLogo) localStorage.setItem(STORAGE_KEYS.LOGO, companyLogo);
     else if (!supabase) localStorage.removeItem(STORAGE_KEYS.LOGO);
@@ -182,16 +219,17 @@ const App: React.FC = () => {
     };
   }, [supabase, queryClient]);
 
-  // Sincroniza rotas quando os pedidos da API carregam (merge com rotas existentes)
+  // Sincroniza rotas quando os pedidos (projeção) carregam (merge com rotas existentes)
   useEffect(() => {
-    const source = ordersOverlay ?? ordersFromApi;
+    const source = orders;
     if (source.length === 0) return;
     if (supabase && routesFromSupabase === undefined) return; // Aguarda carregar do Supabase
     const routeNamesInData = Array.from(
       new Set(
         source.map((o) => {
-          if (isSoMoveis(o) || isClienteVemBuscar(o) || isEligibleForGTeresina(o)) return null;
-          return o.observacoesRomaneio;
+          const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
+          if (isCategoriaEspecial(categoria)) return null;
+          return categoria || o.observacoesRomaneio;
         })
       )
     ).filter((n): n is string => n !== null && n.trim() !== '' && n !== '&nbsp;');
@@ -211,7 +249,7 @@ const App: React.FC = () => {
     } else {
       setRoutes(merged);
     }
-  }, [ordersFromApi, ordersOverlay, supabase, routesFromSupabase, routes, queryClient]);
+  }, [orders, supabase, routesFromSupabase, routes, queryClient]);
 
   useEffect(() => {
     if (darkMode) document.documentElement.classList.add('dark');
@@ -276,14 +314,19 @@ const App: React.FC = () => {
     }
   };
 
-  const handleImportOrders = (newOrders: Order[]) => setOrdersOverlay(newOrders);
-  const handleImportStock = (newStock: StockItem[]) => setStockOverlay(newStock);
-
-  const handleSyncServer = () => {
-    setOrdersOverlay(null);
-    setStockOverlay(null);
-    ordersQuery.refetch();
-    stockQuery.refetch();
+  const handleImportProjection = async (rows: ProjecaoImportada[]) => {
+    if (supabase) {
+      await replaceProjecaoImportada(rows);
+      const at = new Date().toLocaleString('pt-BR');
+      const userName = currentUser?.name ?? 'Desconhecido';
+      await upsertProjectionUploadMeta({ at, user: userName });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['projection'] }),
+        queryClient.invalidateQueries({ queryKey: ['projection_upload_meta'] }),
+      ]);
+    } else {
+      setProjectionLocal(rows);
+    }
   };
 
   const handleImportShelfFicha = async (newFicha: ShelfFicha[]) => {
@@ -301,7 +344,7 @@ const App: React.FC = () => {
   };
 
   const handleExportData = () => {
-    const backup = { users: effectiveUsers, orders, stock, routes: effectiveRoutes, shelfFicha, exportedAt: new Date().toISOString() };
+    const backup = { users: effectiveUsers, stock, routes: effectiveRoutes, shelfFicha, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -320,7 +363,6 @@ const App: React.FC = () => {
         setUsers(json.users);
       }
     }
-    if (json.orders) setOrdersOverlay(json.orders);
     if (json.stock) setStockOverlay(json.stock);
     if (json.routes) {
       if (supabase) {
@@ -363,25 +405,16 @@ const App: React.FC = () => {
     };
     
     orders.forEach(order => {
-      const isSM = isSoMoveis(order);
-      const isCB = isClienteVemBuscar(order);
-      const isGT = isEligibleForGTeresina(order);
-      const isRN = isRotaNormal(order);
-      
-      // Validação do Horizonte para G.Teresina, Só Móveis e Cliente vem buscar
-      let isInHorizon = false;
-      if (isGT || isSM || isCB) {
-        const dEntrega = parseOrderDateLocal(order.dataEntrega);
-        if (dEntrega) {
-          dEntrega.setHours(0, 0, 0, 0);
-          isInHorizon = dEntrega <= horizonDate;
-        }
-      }
+      const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
 
-      // Se for rota fixa, só processa se estiver dentro do horizonte de 13 dias.
-      // Se não for rota fixa, exige romaneio vinculado (isRN já garante isso).
-      if (!isSM && !isCB && !isGT && !isRN) return;
-      if ((isSM || isCB || isGT) && !isInHorizon) return;
+      // Validação do Horizonte para todos os pedidos (com base na data de entrega)
+      let isInHorizon = false;
+      const dEntrega = parseOrderDateLocal(order.dataEntrega);
+      if (dEntrega) {
+        dEntrega.setHours(0, 0, 0, 0);
+        isInHorizon = dEntrega <= horizonDate;
+      }
+      if (!isInHorizon) return;
 
       if (!productMap.has(order.codigoProduto)) {
         const normalizedCode = order.codigoProduto.trim().toUpperCase();
@@ -404,17 +437,7 @@ const App: React.FC = () => {
       const orderQty = order.qtdVinculada || order.qtdPedida;
       prod.totalPedido += orderQty;
       
-      // Decisão de Rota seguindo a prioridade
-      let routeName = '';
-      if (isSM) {
-        routeName = ROUTE_SO_MOVEIS;
-      } else if (isCB) {
-        routeName = ROUTE_CLIENTE_BUSCA;
-      } else if (isGT) {
-        routeName = ROUTE_G_TERESINA;
-      } else if (isRN) {
-        routeName = order.observacoesRomaneio;
-      }
+      const routeName = categoria || order.observacoesRomaneio;
       
       if (routeName && routeName !== '&nbsp;') {
         if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0 };
@@ -477,9 +500,10 @@ const App: React.FC = () => {
           }
         };
 
-        processRoute(ROUTE_SO_MOVEIS);
-        processRoute(ROUTE_G_TERESINA);
-        processRoute(ROUTE_CLIENTE_BUSCA);
+        processRoute(CATEGORY_REQUISICAO);
+        processRoute(CATEGORY_INSERIR_ROMANEIO);
+        processRoute(CATEGORY_ENTREGA_GT);
+        processRoute(CATEGORY_RETIRADA);
         sortedRoutes.forEach(r => processRoute(r.name));
         
         prod.pendenteProducao = totalFalta;
@@ -515,9 +539,10 @@ const App: React.FC = () => {
             }
           };
 
-          processCompRoute(ROUTE_SO_MOVEIS);
-          processCompRoute(ROUTE_G_TERESINA);
-          processCompRoute(ROUTE_CLIENTE_BUSCA);
+          processCompRoute(CATEGORY_REQUISICAO);
+          processCompRoute(CATEGORY_INSERIR_ROMANEIO);
+          processCompRoute(CATEGORY_ENTREGA_GT);
+          processCompRoute(CATEGORY_RETIRADA);
           sortedRoutes.forEach(r => processCompRoute(r.name));
 
           comp.falta = compTotalFalta;
@@ -556,23 +581,19 @@ const App: React.FC = () => {
       return null;
     };
 
-    return new Set(orders.filter(o => {
-      const isSM = isSoMoveis(o);
-      const isCB = isClienteVemBuscar(o);
-      const isGT = isEligibleForGTeresina(o);
-      const isRN = isRotaNormal(o);
-      
-      let isInHorizon = false;
-      if (isGT || isSM || isCB) {
-        const dEntrega = parseOrderDateLocal(o.dataEntrega);
-        if (dEntrega) {
+    return new Set(
+      orders
+        .filter(o => {
+          const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
+          if (!categoria) return false;
+          const dEntrega = parseOrderDateLocal(o.dataEntrega);
+          if (!dEntrega) return false;
           dEntrega.setHours(0, 0, 0, 0);
-          isInHorizon = dEntrega <= horizonDate;
-        }
-      }
-      return isRN || isInHorizon;
-    }).map(o => o.numeroPedido)).size;
-  }, [orders, isEligibleForGTeresina]);
+          return dEntrega <= horizonDate;
+        })
+        .map(o => o.numeroPedido)
+    ).size;
+  }, [orders]);
 
   if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
 
@@ -606,7 +627,7 @@ const App: React.FC = () => {
           </button>
           <button onClick={() => setIsImportModalOpen(true)} className="flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded font-semibold text-sm transition-all active:scale-95 shadow-lg">
             <Upload className="w-4 h-4" />
-            <span>Atualizações</span>
+            <span>Importações</span>
           </button>
           <div className="relative">
             <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 border-l border-white/20 pl-4 ml-2 hover:opacity-80 transition-opacity">
@@ -646,7 +667,17 @@ const App: React.FC = () => {
       </nav>
 
       <main className="flex-1 p-6 overflow-auto">
-        {activeTab === 'PROJECAO' && ( <ProjectionTable data={displayData} routes={effectiveRoutes} onRoutesReorder={setRoutesWithSync} selectedRoutes={selectedRouteNames} onFilterRoutes={setSelectedRouteNames} horizonLabel={getHorizonInfo().label} /> )}
+        {activeTab === 'PROJECAO' && (
+          <ProjectionTable
+            data={displayData}
+            routes={effectiveRoutes}
+            orders={orders}
+            onRoutesReorder={setRoutesWithSync}
+            selectedRoutes={selectedRouteNames}
+            onFilterRoutes={setSelectedRouteNames}
+            horizonLabel={getHorizonInfo().label}
+          />
+        )}
         {activeTab === 'SEQUENCIA' && ( <SequenceTable routes={effectiveRoutes} orders={orders} onReorder={setRoutesWithSync} isAdmin={currentUser.profile !== 'CONSULTA'} /> )}
         {activeTab === 'ROMANEIO' && ( <OrdersView orders={orders} /> )}
         {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} companyLogo={effectiveLogo} onLogoChange={handleLogoChange} /> )}
@@ -665,14 +696,100 @@ const App: React.FC = () => {
         <ImportModal
           onClose={() => setIsImportModalOpen(false)}
           onImportShelfFicha={handleImportShelfFicha}
-          onSyncServer={handleSyncServer}
           shelfFicha={shelfFicha}
-          isOrdersLoading={ordersQuery.isLoading}
-          isStockLoading={stockQuery.isLoading}
-          ordersError={ordersQuery.error}
-          stockError={stockQuery.error}
+          onImportProjection={handleImportProjection}
+          lastProjectionUploadAt={projectionMeta?.lastUploadAt ?? null}
+          lastProjectionUploadUser={projectionMeta?.lastUploadUser ?? null}
         />
       )}
+
+      {/* Conexão API / ERP */}
+      {showErpPanel && (
+        <div className="fixed bottom-20 right-4 z-[70] w-80 bg-white dark:bg-[#252525] rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[11px] font-bold text-neutral uppercase tracking-widest">
+                Conexão com API / ERP
+              </span>
+              <span
+                className={`text-xs font-bold ${
+                  erpStatus === 'connected'
+                    ? 'text-emerald-500'
+                    : erpStatus === 'disconnected'
+                    ? 'text-red-500'
+                    : 'text-yellow-500'
+                }`}
+              >
+                {erpStatus === 'connected'
+                  ? 'Conectado'
+                  : erpStatus === 'disconnected'
+                  ? 'Desconectado'
+                  : 'Aguardando sincronização'}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowErpPanel(false)}
+              className="text-xs text-neutral hover:text-primary transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="px-4 py-3 text-[11px] text-neutral space-y-1">
+            <p>
+              <span className="font-bold">Status da API:</span>{' '}
+              {erpStatus === 'connected'
+                ? 'Conectado'
+                : erpStatus === 'disconnected'
+                ? 'Desconectado'
+                : 'Aguardando sincronização'}
+            </p>
+            <p className="mt-2">
+              <span className="font-bold block">Última sincronização com ERP:</span>
+              <span>{lastStockSyncAt || 'Nunca sincronizado'}</span>
+            </p>
+          </div>
+          <div className="px-4 pb-4 pt-2 border-t border-gray-200 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  setErpStatus('idle');
+                  const result = await stockQuery.refetch();
+                  if (result.error) {
+                    throw result.error;
+                  }
+                  if (supabase) {
+                    const at = new Date().toLocaleString('pt-BR');
+                    await upsertStockSyncMeta(at);
+                    await queryClient.invalidateQueries({ queryKey: ['stock_sync_meta'] });
+                  }
+                  setErpStatus('connected');
+                } catch (err) {
+                  console.error(err);
+                  setErpStatus('disconnected');
+                }
+              }}
+              disabled={stockQuery.isFetching}
+              className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white shadow-md transition-all ${
+                stockQuery.isFetching
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-secondary hover:bg-blue-700 active:scale-95'
+              }`}
+            >
+              {stockQuery.isFetching ? 'Sincronizando...' : 'Sincronizar'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setShowErpPanel((prev) => !prev)}
+        className="fixed bottom-4 right-4 z-[60] flex items-center gap-2 px-4 py-2 rounded-full bg-secondary hover:bg-blue-700 text-white text-xs font-bold shadow-xl active:scale-95 transition-all"
+      >
+        <ArrowRightLeft className="w-4 h-4" />
+        <span>Conexão API / ERP</span>
+      </button>
     </div>
   );
 };

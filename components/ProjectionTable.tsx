@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ProductConsolidated, Route } from '../types';
-import { ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, ROUTE_CLIENTE_BUSCA } from '../utils';
+import { ProductConsolidated, Route, Order } from '../types';
+import { ROUTE_SO_MOVEIS, ROUTE_G_TERESINA, ROUTE_CLIENTE_BUSCA, getCategoriaFromObservacoes, CATEGORY_REQUISICAO, isCategoriaEspecial } from '../utils';
 import { 
   AlertTriangle, 
   TrendingDown, 
@@ -26,6 +26,7 @@ interface SortCriterion {
 interface Props {
   data: ProductConsolidated[];
   routes: Route[];
+  orders: Order[];
   onRoutesReorder: (routes: Route[]) => void;
   selectedRoutes: string[];
   onFilterRoutes: (routeNames: string[]) => void;
@@ -39,7 +40,7 @@ const formatCellNum = (v: unknown): string | number => {
   return n % 1 === 0 ? Math.round(n) : Math.round(n * 100) / 100;
 };
 
-const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilterRoutes, horizonLabel }) => {
+const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes, onFilterRoutes, horizonLabel }) => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
@@ -59,39 +60,18 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, selectedRoutes, onFilt
   };
 
   const sortedRoutes = useMemo(() => [...routes].sort((a, b) => a.order - b.order), [routes]);
-  
-  // Lista unificada para o filtro (Incluindo a rota fixa G.Teresina e Só Móveis)
-  const allFilterableRoutes = useMemo(() => {
-    return [
-      { id: 'fixed-sm', name: ROUTE_SO_MOVEIS, order: -1 },
-      { id: 'fixed-gt', name: ROUTE_G_TERESINA, order: 0 },
-      { id: 'fixed-cb', name: ROUTE_CLIENTE_BUSCA, order: 1 },
-      ...sortedRoutes
-    ];
-  }, [sortedRoutes]);
 
-  const filteredRoutesOptions = allFilterableRoutes.filter(r => 
-    r.name.toLowerCase().includes(filterSearch.toLowerCase())
+  // TODO: quando a projeção por datas for finalizada, este filtro será refeito.
+  // Por enquanto, mantemos rotas ordenadas e desativamos a filtragem dinâmica,
+  // apenas para evitar erros de referência em tempo de execução.
+  const allFilterableRoutes = useMemo(
+    () => sortedRoutes.map(r => ({ id: r.id, name: r.name })),
+    [sortedRoutes]
   );
-
-  const isRouteVisible = (name: string) => {
-    if (selectedRoutes.length === 0) return true;
-    return selectedRoutes.includes(name);
-  };
-
-  const routesToDisplay = useMemo(() => 
-    selectedRoutes.length > 0 
-      ? sortedRoutes.filter(r => selectedRoutes.includes(r.name))
-      : sortedRoutes
-  , [selectedRoutes, sortedRoutes]);
-
-  const toggleRoute = (name: string) => {
-    if (selectedRoutes.includes(name)) {
-      onFilterRoutes(selectedRoutes.filter(n => n !== name));
-    } else {
-      onFilterRoutes([...selectedRoutes, name]);
-    }
-  };
+  const filteredRoutesOptions = allFilterableRoutes;
+  const isRouteVisible = (_name: string) => true;
+  const routesToDisplay = sortedRoutes;
+  const toggleRoute = (_name: string) => {};
 
   const handleSort = (columnKey: string, isCtrl: boolean) => {
     if (isResizing) return;

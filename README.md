@@ -35,8 +35,7 @@ npm run dev
 
 O servidor sobe em `http://localhost:3000` (ou no `PORT` definido no `.env`). Endpoints:
 
-- `GET /api/stock` — saldo de estoque (query em `server/queries/saldo-estoque.sql`)
-- `GET /api/orders` — romaneio/requisição (query em `server/queries/romaneio-requisicao.sql`)
+ - `GET /api/stock` — saldo de estoque (query em `server/queries/saldo-estoque.sql`)
 
 Para alterar as consultas, edite os arquivos em `server/queries/` e reinicie o servidor.
 
@@ -64,7 +63,7 @@ Sem Supabase, os dados da Ficha de Estantes ficam apenas em localStorage.
 - `server/` — API Express, conexão MySQL, leitura das queries em `server/queries/*.sql`
 - `components/` — componentes React (ImportModal, ProjectionTable, etc.)
 - `docs/` — PRD e script SQL da tabela `shelf_ficha`
-- `api.ts` — cliente HTTP para `/api/stock` e `/api/orders`
+- `api.ts` — cliente HTTP para `/api/stock`
 - `supabaseClient.ts` — cliente Supabase e funções para `shelf_ficha`
 
 ## Segurança

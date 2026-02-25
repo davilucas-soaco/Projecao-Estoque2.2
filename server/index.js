@@ -27,7 +27,8 @@ const dbConfig = {
 const corsOptions = {
   origin: [
     'http://localhost:5173',
-    'http://10.80.1.15:5173'
+    'http://10.80.1.15:5173',
+    'http://192.168.18.155:5173'
   ],
   optionsSuccessStatus: 200,
 };
@@ -39,7 +40,7 @@ app.get('/', (_req, res) => {
   res.json({
     ok: true,
     message: 'API Projeção de Estoque',
-    endpoints: { stock: 'GET /api/stock', orders: 'GET /api/orders' },
+    endpoints: { stock: 'GET /api/stock' },
   });
 });
 
@@ -89,70 +90,6 @@ app.get('/api/stock', async (_req, res) => {
   } catch (err) {
     console.error('GET /api/stock error:', err.message);
     res.status(500).json({ error: 'Erro ao buscar estoque. Tente novamente.' });
-  }
-});
-
-// GET /api/orders — Romaneio e requisição (retorna camelCase para o frontend)
-const orderKeysMap = {
-  Codigo_Romaneio: 'codigoRomaneio',
-  observacoes_Romaneio: 'observacoesRomaneio',
-  dataEmissao_Romaneio: 'dataEmissaoRomaneio',
-  N_Pedido: 'numeroPedido',
-  Cliente: 'cliente',
-  Data_Emissao_Pedido: 'dataEmissaoPedido',
-  Cod_Produto: 'codigoProduto',
-  descricao: 'descricao',
-  'U.M': 'um',
-  Qtd_Pedida: 'qtdPedida',
-  Qtd_Vinculada_no_Romaneio: 'qtdVinculada',
-  Tipo_de_produto_do_item_de_pedido_de_venda: 'tipoProduto',
-  Preco_Unitario: 'precoUnitario',
-  Data_de_Entrega: 'dataEntrega',
-  Municipio: 'municipio',
-  UF: 'uf',
-  Endereco: 'endereco',
-  Metodo_de_entrega: 'metodoEntrega',
-  Requisicao_de_Loja_do_grupo: 'requisicaoLojaRaw',
-};
-
-const ORDER_NUMERIC_KEYS = ['qtdPedida', 'qtdVinculada', 'precoUnitario'];
-
-function rowToOrder(row) {
-  const order = {};
-  for (const [dbKey, camelKey] of Object.entries(orderKeysMap)) {
-    if (Object.prototype.hasOwnProperty.call(row, dbKey)) {
-      order[camelKey] = row[dbKey];
-    }
-  }
-  for (const key of ORDER_NUMERIC_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(order, key)) order[key] = toNumber(order[key]);
-  }
-  if (order.requisicaoLojaRaw !== undefined) {
-    order.requisicaoLoja = String(order.requisicaoLojaRaw || '').toLowerCase().includes('sim');
-    delete order.requisicaoLojaRaw;
-  }
-  order.localEntregaDif = 0;
-  order.municipioCliente = order.municipio || '';
-  order.ufCliente = order.uf || '';
-  order.municipioEntrega = order.municipio || '';
-  order.ufEntrega = order.uf || '';
-  return order;
-}
-
-app.get('/api/orders', async (_req, res) => {
-  try {
-    const sql = await loadQuery('romaneio-requisicao.sql');
-    const conn = await getConnection();
-    try {
-      const [rows] = await conn.execute(sql);
-      const orders = (rows || []).map(row => rowToOrder(row));
-      res.json(orders);
-    } finally {
-      await conn.end();
-    }
-  } catch (err) {
-    console.error('GET /api/orders error:', err.message);
-    res.status(500).json({ error: 'Erro ao buscar romaneio. Tente novamente.' });
   }
 });
 
