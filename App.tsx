@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
-import { getHorizonInfo, getCategoriaFromObservacoes, CATEGORY_REQUISICAO, getDateColumns, getTodayStart, dateToKey, formatDestinoForTooltip, parseOrderDate } from './utils';
+import { getHorizonInfo, getCategoriaFromObservacoes, CATEGORY_REQUISICAO, CATEGORY_INSERIR_ROMANEIO, getDateColumns, getTodayStart, dateToKey, formatDestinoForTooltip, parseOrderDate } from './utils';
 import { fetchStock } from './api';
 import {
   supabase,
@@ -56,7 +56,8 @@ const App: React.FC = () => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
   const [showErpPanel, setShowErpPanel] = useState(false);
-  const [erpStatus, setErpStatus] = useState<'idle' | 'connected' | 'disconnected'>('idle');
+  const [erpStatus, setErpStatus] = useState<'connected' | 'disconnected' | 'syncing'>('syncing');
+  const [logoLoadError, setLogoLoadError] = useState(false);
 
   // Auth State
   const [currentUser, setCurrentUser] = useState<{ profile: UserProfile, name: string } | null>(() => {
@@ -175,6 +176,10 @@ const App: React.FC = () => {
     else if (!supabase) localStorage.removeItem(STORAGE_KEYS.LOGO);
   }, [supabase, companyLogo]);
 
+  useEffect(() => {
+    setLogoLoadError(false);
+  }, [effectiveLogo]);
+
   // Subscriptions em tempo real (Supabase)
   useEffect(() => {
     if (!supabase) return;
@@ -194,6 +199,21 @@ const App: React.FC = () => {
     if (darkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [darkMode]);
+
+  useEffect(() => {
+    if (erpStatus === 'syncing' && stockQuery.isFetching) return;
+    if (stockQuery.isFetching) {
+      setErpStatus('syncing');
+      return;
+    }
+    if (stockQuery.error) {
+      setErpStatus('disconnected');
+      return;
+    }
+    if (Array.isArray(stockQuery.data)) {
+      setErpStatus('connected');
+    }
+  }, [stockQuery.isFetching, stockQuery.error, stockQuery.data, erpStatus]);
 
   const handleLogin = (profile: UserProfile, name: string) => {
     const user = { profile, name };
@@ -355,14 +375,27 @@ const App: React.FC = () => {
       else obj.routeData[colKey].breakdown!.push({ destino: destinoDisplay, qty });
     };
 
+    const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
+
     orders.forEach(order => {
       const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
       const dEntrega = parseOrderDateLocal(order.dataEntrega);
       const orderQty = order.qtdVinculada || order.qtdPedida;
       const destDisplay = formatDestinoForTooltip(categoria || order.observacoesRomaneio);
 
+      // Regra: "4-Inserir em Romaneio" não entra na projeção.
+      if (categoria === CATEGORY_INSERIR_ROMANEIO) return;
+      if (!dEntrega) return;
+      if (lastFutureDate && dEntrega > lastFutureDate) return;
+
       const prod = ensureProduct(order.codigoProduto, order.descricao);
       prod.totalPedido += orderQty;
+      if (prod.isShelf && prod.components) {
+        const normalizedCode = prod.codigo.trim().toUpperCase();
+        const ficha = shelfFichaMap.get(normalizedCode)!;
+        prod.components[0].totalPedido += orderQty * ficha.qtdColuna;
+        prod.components[1].totalPedido += orderQty * ficha.qtdBandeja;
+      }
 
       // 1. Só Móveis (Requisição) — horizonte próprio, prioridade fixa nº 1
       if (categoria === CATEGORY_REQUISICAO && dEntrega && dEntrega <= horizonDate) {
@@ -377,14 +410,12 @@ const App: React.FC = () => {
           const normalizedCode = prod.codigo.trim().toUpperCase();
           const ficha = shelfFichaMap.get(normalizedCode)!;
           const col = prod.components[0];
-          col.totalPedido += orderQty * ficha.qtdColuna;
           if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
           col.routeData[routeName].pedido += orderQty * ficha.qtdColuna;
           const colExisting = col.routeData[routeName].breakdown!.find(b => b.destino === 'Requisição');
           if (colExisting) colExisting.qty += orderQty * ficha.qtdColuna;
           else col.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * ficha.qtdColuna });
           const ban = prod.components[1];
-          ban.totalPedido += orderQty * ficha.qtdBandeja;
           if (!ban.routeData[routeName]) ban.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
           ban.routeData[routeName].pedido += orderQty * ficha.qtdBandeja;
           const banExisting = ban.routeData[routeName].breakdown!.find(b => b.destino === 'Requisição');
@@ -394,10 +425,8 @@ const App: React.FC = () => {
       }
 
       // 2. Colunas por data (Atrasados + 15 dias)
-      const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
-      if (dEntrega && lastFutureDate && dEntrega > lastFutureDate) return;
-
-      if (!dEntrega || dEntrega <= todayStart) {
+      // Atrasados: não considerar Requisição para evitar duplicidade com Só Móveis.
+      if (dEntrega <= todayStart && categoria !== CATEGORY_REQUISICAO) {
         addToDateColumn(prod, 'ATRASADOS', orderQty, destDisplay);
         if (prod.isShelf && prod.components) {
           const normalizedCode = prod.codigo.trim().toUpperCase();
@@ -405,7 +434,7 @@ const App: React.FC = () => {
           addToDateColumn(prod.components[0], 'ATRASADOS', orderQty * ficha.qtdColuna, destDisplay);
           addToDateColumn(prod.components[1], 'ATRASADOS', orderQty * ficha.qtdBandeja, destDisplay);
         }
-      } else {
+      } else if (dEntrega > todayStart) {
         const key = dateToKey(dEntrega);
         if (dateKeysSet.has(key)) {
           addToDateColumn(prod, key, orderQty, destDisplay);
@@ -505,15 +534,19 @@ const App: React.FC = () => {
       <header className="bg-primary text-white p-4 shadow-lg sticky top-0 z-[60] flex justify-between items-center">
         <div className="flex items-center gap-4">
           <div className="relative h-10 flex items-center">
-            <img src={effectiveLogo || 'logo.png'} alt="Logo da Empresa" className="h-10 w-auto object-contain" onError={(e) => { 
-              e.currentTarget.style.display = 'none'; 
-              e.currentTarget.parentElement!.innerHTML = `
-                <div class="flex items-baseline gap-1 font-black italic select-none">
-                  <span class="text-[#F4A900] text-2xl">SÓ</span>
-                  <span class="text-white text-2xl tracking-tighter">AÇO</span>
-                </div>
-              `; 
-            }} />
+            {effectiveLogo && !logoLoadError ? (
+              <img
+                src={effectiveLogo}
+                alt="Logo da Empresa"
+                className="h-10 w-auto object-contain"
+                onError={() => setLogoLoadError(true)}
+              />
+            ) : (
+              <div className="flex items-baseline gap-1 font-black italic select-none">
+                <span className="text-[#F4A900] text-2xl">SÓ</span>
+                <span className="text-white text-2xl tracking-tighter">AÇO</span>
+              </div>
+            )}
           </div>
           <div className="border-l border-white/20 pl-4">
             <h1 className="text-lg font-bold tracking-tight leading-none">Projeção de Estoque</h1>
@@ -621,7 +654,7 @@ const App: React.FC = () => {
                   ? 'Conectado'
                   : erpStatus === 'disconnected'
                   ? 'Desconectado'
-                  : 'Aguardando sincronização'}
+                  : 'Sincronizando'}
               </span>
             </div>
             <button
@@ -638,7 +671,7 @@ const App: React.FC = () => {
                 ? 'Conectado'
                 : erpStatus === 'disconnected'
                 ? 'Desconectado'
-                : 'Aguardando sincronização'}
+                : 'Sincronizando'}
             </p>
             <p className="mt-2">
               <span className="font-bold block">Última sincronização com ERP:</span>
@@ -650,7 +683,7 @@ const App: React.FC = () => {
               type="button"
               onClick={async () => {
                 try {
-                  setErpStatus('idle');
+                  setErpStatus('syncing');
                   const result = await stockQuery.refetch();
                   if (result.error) {
                     throw result.error;

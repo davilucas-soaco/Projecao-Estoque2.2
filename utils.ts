@@ -71,7 +71,7 @@ export const getHorizonInfo = () => {
   const start = new Date(today);
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
-  end.setDate(start.getDate() + 13);
+  end.setDate(start.getDate() + 14);
   const formatDate = (d: Date) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   return {
     start,

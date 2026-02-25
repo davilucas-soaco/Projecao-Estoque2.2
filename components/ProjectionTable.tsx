@@ -11,6 +11,7 @@ import {
   Minus,
   CornerDownRight,
   X,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 interface SortCriterion {
@@ -43,6 +44,8 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [descriptionWidth, setDescriptionWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
+  const [showColumnFilter, setShowColumnFilter] = useState(false);
+  const [selectedColumnKeys, setSelectedColumnKeys] = useState<Set<string>>(new Set());
   const [expandedShelves, setExpandedShelves] = useState<Set<string>>(new Set());
   const [tooltip, setTooltip] = useState<{
     codigo: string;
@@ -53,7 +56,9 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
     anchorRect: DOMRect;
   } | null>(null);
   const resizeRef = useRef<number>(0);
+  const didResizeRef = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const columnFilterRef = useRef<HTMLDivElement>(null);
 
   const toggleShelf = (codigo: string) => {
     setExpandedShelves(prev => {
@@ -65,7 +70,10 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
   };
 
   const handleSort = (columnKey: string, isCtrl: boolean) => {
-    if (isResizing) return;
+    if (isResizing || didResizeRef.current) {
+      didResizeRef.current = false;
+      return;
+    }
     setSortCriteria(prev => {
       const existingIndex = prev.findIndex(s => s.column === columnKey);
       if (isCtrl) {
@@ -92,6 +100,7 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
   const startResizing = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    didResizeRef.current = false;
     setIsResizing(true);
     resizeRef.current = e.pageX;
   };
@@ -118,6 +127,12 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
   };
 
   useEffect(() => {
+    const handleCloseMenus = (e: MouseEvent) => {
+      if (showColumnFilter && columnFilterRef.current && !columnFilterRef.current.contains(e.target as Node)) {
+        setShowColumnFilter(false);
+      }
+    };
+
     const handleClickOutside = (e: MouseEvent) => {
       if (tooltip && tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
         const target = e.target as HTMLElement;
@@ -126,14 +141,19 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
         }
       }
     };
+    document.addEventListener('mousedown', handleCloseMenus);
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [tooltip]);
+    return () => {
+      document.removeEventListener('mousedown', handleCloseMenus);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [tooltip, showColumnFilter]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
       const delta = e.pageX - resizeRef.current;
+      if (delta !== 0) didResizeRef.current = true;
       setDescriptionWidth(prev => Math.max(150, Math.min(800, prev + delta)));
       resizeRef.current = e.pageX;
     };
@@ -198,12 +218,89 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
     { key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true },
     ...dateColumns.map(c => ({ key: c.key, label: c.label, isSoMoveis: false })),
   ];
+  const allColumnsSelected = selectedColumnKeys.size === allColumns.length && allColumns.length > 0;
+  const selectedCountLabel = allColumnsSelected
+    ? 'Todas as colunas filtradas'
+    : `${selectedColumnKeys.size} opções filtradas`;
 
-  const totalColSpan = 5 + allColumns.length * 2;
+  useEffect(() => {
+    setSelectedColumnKeys(prev => {
+      if (prev.size === 0) return new Set(allColumns.map(c => c.key));
+      const next = new Set<string>();
+      for (const col of allColumns) {
+        if (prev.has(col.key)) next.add(col.key);
+      }
+      if (next.size === 0) {
+        allColumns.forEach(col => next.add(col.key));
+      }
+      return next;
+    });
+  }, [dateColumns]);
+
+  const visibleColumns = allColumns.filter(col => selectedColumnKeys.has(col.key));
+
+  const totalColSpan = 5 + visibleColumns.length * 2;
 
   return (
     <div className="space-y-4 h-full flex flex-col">
       <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0">
+        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-start">
+          <div className="relative" ref={columnFilterRef}>
+            <button
+              type="button"
+              onClick={() => setShowColumnFilter(prev => !prev)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Filtro de Colunas
+            </button>
+            <p className="mt-1 text-[10px] text-neutral font-semibold">{selectedCountLabel}</p>
+            {showColumnFilter && (
+              <div className="absolute left-0 mt-2 z-[95] w-72 max-h-80 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#252525] shadow-xl p-2">
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-neutral">Colunas visíveis</span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (allColumnsSelected) {
+                          setSelectedColumnKeys(new Set());
+                        } else {
+                          setSelectedColumnKeys(new Set(allColumns.map(c => c.key)));
+                        }
+                      }}
+                      className="text-[10px] font-bold text-secondary hover:underline"
+                    >
+                      {allColumnsSelected ? 'Desmarcar todas' : 'Selecionar todas'}
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {allColumns.map(col => (
+                    <label key={col.key} className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedColumnKeys.has(col.key)}
+                        onChange={(e) => {
+                          setSelectedColumnKeys(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) {
+                              next.add(col.key);
+                            } else {
+                              next.delete(col.key);
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                      <span>{col.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
         <div className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-250px)]">
           <table className="w-full text-left text-sm border-separate border-spacing-0 min-w-max">
             <thead className="sticky top-0 z-[70]">
@@ -262,7 +359,7 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
                   </div>
                 </th>
 
-                {allColumns.map(col => (
+                {visibleColumns.map(col => (
                   <th
                     key={col.key}
                     className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[90px] sticky top-0 z-[70]"
@@ -332,7 +429,7 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
                         ) : '-')}
                       </td>
 
-                      {allColumns.map(col => {
+                      {visibleColumns.map(col => {
                         const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
                         return (
                           <React.Fragment key={col.key}>
@@ -375,7 +472,7 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
                           {formatCellNum(comp.falta)}
                         </td>
 
-                        {allColumns.map(col => {
+                        {visibleColumns.map(col => {
                           const cRd = comp.routeData[col.key] || { pedido: 0, falta: 0 };
                           return (
                             <React.Fragment key={col.key}>

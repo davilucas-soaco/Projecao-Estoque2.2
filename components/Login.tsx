@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Lock, User, AlertCircle, Eye, EyeOff, LogIn } from 'lucide-react';
 import { UserProfile, UserAccount } from '../types';
 
@@ -15,6 +15,11 @@ const Login: React.FC<Props> = ({ onLogin, users, companyLogo }) => {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [logoLoadError, setLogoLoadError] = useState(false);
+
+  useEffect(() => {
+    setLogoLoadError(false);
+  }, [companyLogo]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,24 +60,22 @@ const Login: React.FC<Props> = ({ onLogin, users, companyLogo }) => {
             
             {/* Logo Centralizada */}
             <div className="relative z-10 mb-2">
-              <img 
-                src={companyLogo || 'logo.png'} 
-                alt="Logo da Empresa" 
-                className="w-48 h-auto object-contain drop-shadow-2xl"
-                onError={(e) => {
-                  // Fallback caso a imagem não seja encontrada durante o desenvolvimento
-                  e.currentTarget.style.display = 'none';
-                  e.currentTarget.parentElement!.innerHTML = `
-                    <div class="flex flex-col items-center">
-                      <div class="flex items-baseline gap-1 font-black italic select-none">
-                        <span class="text-[#F4A900] text-4xl">SÓ</span>
-                        <span class="text-white text-4xl tracking-tighter">AÇO + 25</span>
-                      </div>
-                      <div class="text-white/60 text-[8px] uppercase tracking-widest mt-2">Produzindo com excelência</div>
-                    </div>
-                  `;
-                }}
-              />
+              {companyLogo && !logoLoadError ? (
+                <img
+                  src={companyLogo}
+                  alt="Logo da Empresa"
+                  className="w-48 h-auto object-contain drop-shadow-2xl"
+                  onError={() => setLogoLoadError(true)}
+                />
+              ) : (
+                <div className="flex flex-col items-center">
+                  <div className="flex items-baseline gap-1 font-black italic select-none">
+                    <span className="text-[#F4A900] text-4xl">SÓ</span>
+                    <span className="text-white text-4xl tracking-tighter">AÇO</span>
+                  </div>
+                  <div className="text-white/60 text-[8px] uppercase tracking-widest mt-2">Produzindo com excelência</div>
+                </div>
+              )}
             </div>
             <p className="text-blue-200/50 text-[10px] relative z-10 font-bold uppercase tracking-[0.3em] mt-4">Projeção de Estoque</p>
           </div>
