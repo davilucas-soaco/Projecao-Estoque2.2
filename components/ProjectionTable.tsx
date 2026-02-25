@@ -170,9 +170,30 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
     };
   }, [isResizing]);
 
+  const dataFilteredByColumns = useMemo(() => {
+    const totalColumnsCount = 1 + dateColumns.length;
+    const filterIsActive = selectedColumnKeys.size < totalColumnsCount;
+    if (!filterIsActive) return data;
+    const selectedKeys = new Set(selectedColumnKeys);
+    return data.filter((item) => {
+      const itemHasSelected = Object.entries(item.routeData).some(
+        ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
+      );
+      if (itemHasSelected) return true;
+      if (item.isShelf && item.components) {
+        return item.components.some((comp) =>
+          Object.entries(comp.routeData).some(
+            ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
+          )
+        );
+      }
+      return false;
+    });
+  }, [data, selectedColumnKeys, dateColumns.length]);
+
   const sortedData = useMemo(() => {
-    if (sortCriteria.length === 0) return data;
-    return [...data].sort((a, b) => {
+    if (sortCriteria.length === 0) return dataFilteredByColumns;
+    return [...dataFilteredByColumns].sort((a, b) => {
       for (const criterion of sortCriteria) {
         let valA: unknown;
         let valB: unknown;
@@ -200,7 +221,7 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
       }
       return 0;
     });
-  }, [data, sortCriteria]);
+  }, [dataFilteredByColumns, sortCriteria]);
 
   const renderSortIndicator = (columnKey: string) => {
     const idx = sortCriteria.findIndex(s => s.column === columnKey);

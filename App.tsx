@@ -610,7 +610,7 @@ const App: React.FC = () => {
             dateColumns={dateColumns}
           />
         )}
-        {activeTab === 'ROMANEIO' && ( <OrdersView orders={orders} /> )}
+        {activeTab === 'ROMANEIO' && ( <OrdersView projection={projection} /> )}
         {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} companyLogo={effectiveLogo} onLogoChange={handleLogoChange} /> )}
       </main>
 

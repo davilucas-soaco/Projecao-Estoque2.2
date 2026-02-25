@@ -1,109 +1,116 @@
-
-import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { ShoppingCart, Truck, Store, User, AlertCircle, ArrowUp, ArrowDown, Download, Filter, X, MapPin } from 'lucide-react';
-import { Order } from '../types';
-import { getHorizonInfo, parseOrderDate, getCategoriaFromObservacoes, CATEGORY_REQUISICAO, CATEGORY_ENTREGA_GT, CATEGORY_RETIRADA, CATEGORY_INSERIR_ROMANEIO, isCategoriaEspecial } from '../utils';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Download, X } from 'lucide-react';
+import { ProjecaoImportada } from '../types';
+import { parseOrderDate } from '../utils';
 import * as XLSX from 'xlsx';
 
 interface Props {
-  orders: Order[];
+  projection: ProjecaoImportada[];
 }
 
-type KpiFilterType = 'all' | 'so_moveis' | 'g_teresina' | 'cliente_busca' | 'em_rota' | 'sem_vinculo';
+type ProjectionColumnKey =
+  | 'idChave'
+  | 'observacoes'
+  | 'rm'
+  | 'pd'
+  | 'cliente'
+  | 'cod'
+  | 'descricaoProduto'
+  | 'setorProducao'
+  | 'requisicaoLojaGrupo'
+  | 'uf'
+  | 'municipioEntrega'
+  | 'qtdePendenteReal'
+  | 'previsaoAtual';
 
+interface SortCriterion {
+  key: ProjectionColumnKey;
+  direction: 'asc' | 'desc';
+}
+
+const COLUMNS: { key: ProjectionColumnKey; label: string; width: number }[] = [
+  { key: 'idChave', label: 'idChave', width: 200 },
+  { key: 'observacoes', label: 'Observações', width: 220 },
+  { key: 'rm', label: 'RM', width: 110 },
+  { key: 'pd', label: 'PD', width: 130 },
+  { key: 'cliente', label: 'Cliente', width: 240 },
+  { key: 'cod', label: 'Cod', width: 110 },
+  { key: 'descricaoProduto', label: 'Descrição do produto', width: 360 },
+  { key: 'setorProducao', label: 'Setor de Produção', width: 200 },
+  { key: 'requisicaoLojaGrupo', label: 'Requisição de loja do grupo?', width: 220 },
+  { key: 'uf', label: 'UF', width: 80 },
+  { key: 'municipioEntrega', label: 'Município de entrega', width: 200 },
+  { key: 'qtdePendenteReal', label: 'Qtde Pendente Real', width: 170 },
+  { key: 'previsaoAtual', label: 'Previsão atual', width: 140 },
+];
+
+const FILTER_KEYS: ProjectionColumnKey[] = [
+  'idChave',
+  'observacoes',
+  'rm',
+  'pd',
+  'cliente',
+  'cod',
+  'descricaoProduto',
+  'setorProducao',
+  'requisicaoLojaGrupo',
+  'uf',
+  'municipioEntrega',
+  'previsaoAtual',
+];
+
+const safeStr = (v: unknown): string => (v == null ? '' : String(v));
 const safeNum = (v: unknown): number => {
-  if (v == null || v === '') return 0;
-  if (typeof v === 'number' && !Number.isNaN(v)) return v;
   const n = Number(v);
-  return Number.isNaN(n) ? 0 : n;
+  return Number.isFinite(n) ? n : 0;
 };
 
-const safeStr = (v: unknown): string => (v != null ? String(v) : '');
-
-const formatNum = (v: unknown): string => {
-  const n = safeNum(v);
-  if (n === 0) return '-';
-  return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2).replace(/\.?0+$/, '');
+const formatDateBR = (value: string): string => {
+  const d = parseOrderDate(value);
+  if (!d) return value || '';
+  return d.toLocaleDateString('pt-BR');
 };
 
-const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
-  const orders = useMemo(() => Array.isArray(ordersProp) ? ordersProp : [], [ordersProp]);
-
-  const [filters, setFilters] = useState({
-    pedido: '',
+const OrdersView: React.FC<Props> = ({ projection }) => {
+  const [filters, setFilters] = useState<Record<ProjectionColumnKey, string>>({
+    idChave: '',
+    observacoes: '',
+    rm: '',
+    pd: '',
     cliente: '',
-    produto: '',
-    rota: '',
-    romaneio: '',
-    status: '',
-    kpi: 'all' as KpiFilterType
+    cod: '',
+    descricaoProduto: '',
+    setorProducao: '',
+    requisicaoLojaGrupo: '',
+    uf: '',
+    municipioEntrega: '',
+    qtdePendenteReal: '',
+    previsaoAtual: '',
   });
-
-  const [sortCriteria, setSortCriteria] = useState<{ key: string; direction: 'asc' | 'desc' }[]>([]);
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
-    codigoRomaneio: 120,
-    observacoesRomaneio: 200,
-    numeroPedido: 100,
-    cliente: 150,
-    codigoProduto: 120,
-    descricao: 250,
-    um: 60,
-    qtdPedida: 80,
-    qtdVinculada: 100,
-    precoUnitario: 100,
-    dataEntrega: 110,
-    municipio: 120,
-    uf: 50,
-    endereco: 200,
-    metodoEntrega: 150,
-    requisicaoLoja: 80,
-    tipoEntrega: 120,
-    status: 100
-  });
-  const [resizingColumn, setResizingColumn] = useState<string | null>(null);
+  const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
+  const [columnWidths, setColumnWidths] = useState<Record<ProjectionColumnKey, number>>(
+    () =>
+      COLUMNS.reduce(
+        (acc, c) => {
+          acc[c.key] = c.width;
+          return acc;
+        },
+        {} as Record<ProjectionColumnKey, number>
+      )
+  );
+  const [resizingColumn, setResizingColumn] = useState<ProjectionColumnKey | null>(null);
   const resizeStartX = useRef<number>(0);
   const resizeStartWidth = useRef<number>(0);
-
-  const handleSort = (key: string, isCtrl: boolean) => {
-    setSortCriteria(prev => {
-      const existingIndex = prev.findIndex(s => s.key === key);
-      
-      if (isCtrl) {
-        if (existingIndex > -1) {
-          const newCriteria = [...prev];
-          newCriteria[existingIndex] = {
-            ...newCriteria[existingIndex],
-            direction: newCriteria[existingIndex].direction === 'asc' ? 'desc' : 'asc'
-          };
-          return newCriteria;
-        } else {
-          return [...prev, { key, direction: 'asc' }];
-        }
-      } else {
-        if (existingIndex > -1 && prev.length === 1) {
-          return [{ key, direction: prev[0].direction === 'asc' ? 'desc' : 'asc' }];
-        } else {
-          return [{ key, direction: 'asc' }];
-        }
-      }
-    });
-  };
-
-  const startResizing = (e: React.MouseEvent, key: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setResizingColumn(key);
-    resizeStartX.current = e.pageX;
-    resizeStartWidth.current = columnWidths[key];
-  };
+  const didResizeRef = useRef(false);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!resizingColumn) return;
       const diff = e.pageX - resizeStartX.current;
-      setColumnWidths(prev => ({
+      if (diff !== 0) didResizeRef.current = true;
+      setColumnWidths((prev) => ({
         ...prev,
-        [resizingColumn]: Math.max(50, resizeStartWidth.current + diff)
+        [resizingColumn]: Math.max(80, resizeStartWidth.current + diff),
       }));
     };
 
@@ -124,497 +131,223 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
     };
   }, [resizingColumn]);
 
-  const { uniqueTotal, uniqueInRoute, uniqueRoutesCount, uniqueGTTotal, uniqueGTHorizon, uniqueRequisicaoTotal, uniqueRequisicaoHorizon, uniqueRetiradaTotal, uniqueRetiradaHorizon, uniqueSemVinculoTotal, horizonLabel } = useMemo(() => {
-    // Filter out invalid orders (e.g., missing numeroPedido or codigoProduto, or zero quantities/price)
-    const validOrders = orders.filter(o => 
-      safeStr(o?.numeroPedido).trim() !== '' &&
-      safeStr(o?.codigoProduto).trim() !== '' &&
-      (safeNum(o?.qtdPedida) > 0 || safeNum(o?.qtdVinculada) > 0 || safeNum(o?.precoUnitario) > 0)
-    );
-
-    const allUniquePedidos = Array.from(new Set(validOrders.map(o => o.numeroPedido)));
-    const totalUnique = allUniquePedidos.length;
-
-    const horizon = getHorizonInfo();
-    const horizonDate = horizon.end;
-
-    const categorias = validOrders.map(o => {
-      const obs = safeStr(o.observacoesRomaneio).trim();
-      const categoria = getCategoriaFromObservacoes(obs);
-      const isRequisicaoRaw = obs === '5-Requisicao';
-      const isGtRaw = obs === '3-Entrega em Grande Teresina';
-      const isRetiradaRaw =
-        obs === '2-Retirada na So Moveis' || obs === '1-Retirada na So Aço';
-      const isSemVinculoRaw = obs === '4-Inserir em Romaneio';
-
-      return {
-        pedido: o.numeroPedido,
-        categoria,
-        dataEntrega: o.dataEntrega,
-        obs,
-        isRequisicaoRaw,
-        isGtRaw,
-        isRetiradaRaw,
-        isSemVinculoRaw,
-      };
-    });
-
-    // Pedidos em Rota: RM preenchido (campo RM -> codigoRomaneio)
-    const pedidosEmRota = new Set(
-      validOrders
-        .filter(o => safeStr(o.codigoRomaneio).trim() !== '' && safeStr(o.codigoRomaneio).trim() !== '&nbsp;')
-        .map(o => o.numeroPedido)
-    );
-    const uniqueInRouteSet = pedidosEmRota;
-    const inRouteCount = uniqueInRouteSet.size;
-
-    // Cálculo das rotas únicas criadas (categorias que representam rotas nomeadas)
-    const uniqueRoutesSet = new Set(
-      categorias
-        .filter(c => c.categoria && !isCategoriaEspecial(c.categoria))
-        .map(c => c.categoria)
-    );
-
-    // Indicadores G.Teresina
-    const gtOrders = categorias.filter(c => c.isGtRaw);
-    const uniqueGTTotal = new Set(gtOrders.map(o => o.pedido)).size;
-    
-    const uniqueGTHorizon = new Set(gtOrders.filter(o => {
-      const dEntrega = parseOrderDate(o.dataEntrega);
-      if (dEntrega) {
-        dEntrega.setHours(0, 0, 0, 0);
-        return dEntrega <= horizonDate;
-      }
-      return false;
-    }).map(o => o.pedido)).size;
-
-    // Indicadores Requisição
-    const requisicaoOrders = categorias.filter(c => c.isRequisicaoRaw);
-    const uniqueRequisicaoTotal = new Set(requisicaoOrders.map(o => o.pedido)).size;
-    const uniqueRequisicaoHorizon = new Set(requisicaoOrders.filter(o => {
-      const dEntrega = parseOrderDate(o.dataEntrega);
-      if (dEntrega) {
-        dEntrega.setHours(0, 0, 0, 0);
-        return dEntrega <= horizonDate;
-      }
-      return false;
-    }).map(o => o.pedido)).size;
-
-    // Indicadores Retirada
-    const retiradaOrders = categorias.filter(c => c.isRetiradaRaw);
-    const uniqueRetiradaTotal = new Set(retiradaOrders.map(o => o.pedido)).size;
-    const uniqueRetiradaHorizon = new Set(retiradaOrders.filter(o => {
-      const dEntrega = parseOrderDate(o.dataEntrega);
-      if (dEntrega) {
-        dEntrega.setHours(0, 0, 0, 0);
-        return dEntrega <= horizonDate;
-      }
-      return false;
-    }).map(o => o.pedido)).size;
-
-    // Indicadores Pedidos Sem Vínculo (Inserir em Romaneio)
-    const semVinculoOrders = categorias.filter(c => c.isSemVinculoRaw);
-    const uniqueSemVinculoTotal = new Set(semVinculoOrders.map(o => o.pedido)).size;
-
-    return {
-      uniqueTotal: totalUnique,
-      uniqueInRoute: inRouteCount,
-      uniqueRoutesCount: uniqueRoutesSet.size,
-      uniqueGTTotal,
-      uniqueGTHorizon,
-      uniqueRequisicaoTotal,
-      uniqueRequisicaoHorizon,
-      uniqueRetiradaTotal,
-      uniqueRetiradaHorizon,
-      uniqueSemVinculoTotal,
-      horizonLabel: horizon.label
-    };
-  }, [orders]);
-
-  const handleExportExcel = () => {
-    const headers = [
-      "Cód. Romaneio", "Obs. Romaneio", "Nº Pedido", "Cliente", "Cód. Produto", "Descrição", "U.M.", "Qtd. Pedida", "Qtd. Vinculada", "Preço Unit.", "Data Entrega", "Município", "UF", "Endereço", "Método Entrega", "Req. Loja", "Tipo Entrega", "Status"
-    ];
-    const colWidths = [14, 22, 12, 28, 14, 40, 6, 12, 14, 14, 12, 18, 4, 32, 20, 8, 24, 12];
-
-    const dataToExport = filteredOrders.map(order => {
-      const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
-      const isSemVinculo = categoria === CATEGORY_INSERIR_ROMANEIO;
-      const deliveryType = categoria || '-';
-      const hasRoute = categoria && !isSemVinculo;
-      const statusText = hasRoute ? 'VINCULADO' : 'SEM ROTA';
-
-      return [
-        safeStr(order.codigoRomaneio),
-        safeStr(order.observacoesRomaneio),
-        safeStr(order.numeroPedido),
-        safeStr(order.cliente),
-        safeStr(order.codigoProduto),
-        safeStr(order.descricao),
-        safeStr(order.um),
-        formatNum(order.qtdPedida),
-        formatNum(order.qtdVinculada),
-        safeNum(order.precoUnitario) > 0 ? safeNum(order.precoUnitario) : '-',
-        formatDate(safeStr(order.dataEntrega)),
-        safeStr(order.municipio),
-        safeStr(order.uf),
-        safeStr(order.endereco),
-        safeStr(order.metodoEntrega),
-        order.requisicaoLoja ? 'Sim' : 'Não',
-        deliveryType,
-        statusText
-      ];
-    });
-
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataToExport]);
-    ws['!cols'] = colWidths.map(w => ({ wch: w }));
-    if (ws['!ref']) ws['!autofilter'] = { ref: ws['!ref'] };
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Lista Detalhada Itens");
-    XLSX.writeFile(wb, "lista_detalhada_itens.xlsx");
+  const startResizing = (e: React.MouseEvent, key: ProjectionColumnKey) => {
+    e.preventDefault();
+    e.stopPropagation();
+    didResizeRef.current = false;
+    setResizingColumn(key);
+    resizeStartX.current = e.pageX;
+    resizeStartWidth.current = columnWidths[key];
   };
 
-  const filteredOrders = useMemo(() => {
-    let filtered = orders.filter(o => {
-      const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
-      const isRequisicao = categoria === CATEGORY_REQUISICAO;
-      const isGT = categoria === CATEGORY_ENTREGA_GT;
-      const isRetirada = categoria === CATEGORY_RETIRADA;
-      const isSemVinculo = categoria === CATEGORY_INSERIR_ROMANEIO;
-      const hasRm =
-        safeStr(o.codigoRomaneio).trim() !== '' &&
-        safeStr(o.codigoRomaneio).trim() !== '&nbsp;';
-      const isRotaCategoria = categoria && !isCategoriaEspecial(categoria);
+  const handleSort = (key: ProjectionColumnKey, isCtrl: boolean) => {
+    if (resizingColumn || didResizeRef.current) {
+      didResizeRef.current = false;
+      return;
+    }
 
-      const deliveryType = categoria || '-';
-
-      // KPI Filter Logic
-      if (filters.kpi !== 'all') {
-        if (filters.kpi === 'so_moveis' && !isRequisicao) return false;
-        if (filters.kpi === 'g_teresina' && !isGT) return false;
-        if (filters.kpi === 'cliente_busca' && !isRetirada) return false;
-        if (filters.kpi === 'em_rota') {
-          // Em rota = categoria de rota (não especial) E RM preenchido
-          if (!isRotaCategoria || !hasRm) return false;
+    setSortCriteria((prev) => {
+      const idx = prev.findIndex((s) => s.key === key);
+      if (isCtrl) {
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], direction: next[idx].direction === 'asc' ? 'desc' : 'asc' };
+          return next;
         }
-        if (filters.kpi === 'sem_vinculo') {
-           if (!isSemVinculo) return false;
-        }
+        return [...prev, { key, direction: 'asc' }];
       }
-
-      const matchPedido = safeStr(o.numeroPedido).toLowerCase().includes(filters.pedido.toLowerCase());
-      const matchCliente = safeStr(o.cliente).toLowerCase().includes(filters.cliente.toLowerCase());
-      const matchProduto = safeStr(o.codigoProduto).toLowerCase().includes(filters.produto.toLowerCase()) ||
-                           safeStr(o.descricao).toLowerCase().includes(filters.produto.toLowerCase());
-      const matchRota = deliveryType.toLowerCase().includes(filters.rota.toLowerCase());
-
-      const romaneioTerm = filters.romaneio.toLowerCase();
-      const matchRomaneio =
-        safeStr(o.codigoRomaneio).toLowerCase().includes(romaneioTerm) ||
-        safeStr(o.observacoesRomaneio).toLowerCase().includes(romaneioTerm);
-
-      const hasRoute = categoria && !isSemVinculo;
-      const statusText = hasRoute ? 'vinculado' : 'sem rota';
-      const matchStatus = filters.status === '' || statusText === filters.status;
-
-      return matchPedido && matchCliente && matchProduto && matchRota && matchRomaneio && matchStatus;
+      if (idx >= 0 && prev.length === 1) {
+        return [{ key, direction: prev[0].direction === 'asc' ? 'desc' : 'asc' }];
+      }
+      return [{ key, direction: 'asc' }];
     });
+  };
+
+  const filteredRows = useMemo(() => {
+    let rows = projection.filter((row) =>
+      FILTER_KEYS.every((key) => {
+        const term = safeStr(filters[key]).toLowerCase().trim();
+        if (!term) return true;
+        if (key === 'previsaoAtual') {
+          const br = formatDateBR(safeStr(row.previsaoAtual)).toLowerCase();
+          return br.includes(term) || safeStr(row.previsaoAtual).toLowerCase().includes(term);
+        }
+        return safeStr(row[key]).toLowerCase().includes(term);
+      })
+    );
 
     if (sortCriteria.length > 0) {
-      filtered.sort((a, b) => {
+      rows = [...rows].sort((a, b) => {
         for (const criterion of sortCriteria) {
-          let valA: any = a[criterion.key as keyof Order];
-          let valB: any = b[criterion.key as keyof Order];
+          let aVal: string | number = '';
+          let bVal: string | number = '';
 
-          // Custom sort logic for calculated fields
-          if (criterion.key === 'requisicaoLoja') {
-            valA = a.requisicaoLoja ? 'Sim' : 'Não';
-            valB = b.requisicaoLoja ? 'Sim' : 'Não';
-          } else if (criterion.key === 'tipoEntrega') {
-            const getDeliveryType = (o: Order) => {
-              const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
-              return categoria || '-';
-            };
-            valA = getDeliveryType(a);
-            valB = getDeliveryType(b);
-          } else if (criterion.key === 'status') {
-            const getStatus = (o: Order) => {
-              const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
-              const hasRoute = categoria && categoria !== CATEGORY_INSERIR_ROMANEIO;
-              return hasRoute ? 'VINCULADO' : 'SEM ROTA';
-            }
-            valA = getStatus(a);
-            valB = getStatus(b);
-          } else if (criterion.key === 'dataEntrega') {
-            valA = parseOrderDate(a.dataEntrega)?.getTime() || 0;
-            valB = parseOrderDate(b.dataEntrega)?.getTime() || 0;
+          if (criterion.key === 'qtdePendenteReal') {
+            aVal = safeNum(a.qtdePendenteReal);
+            bVal = safeNum(b.qtdePendenteReal);
+          } else if (criterion.key === 'previsaoAtual') {
+            aVal = parseOrderDate(safeStr(a.previsaoAtual))?.getTime() || 0;
+            bVal = parseOrderDate(safeStr(b.previsaoAtual))?.getTime() || 0;
+          } else {
+            aVal = safeStr(a[criterion.key]).toLowerCase();
+            bVal = safeStr(b[criterion.key]).toLowerCase();
           }
 
-          if (valA === valB) continue;
-          if (valA === undefined || valA === null) return 1;
-          if (valB === undefined || valB === null) return -1;
-
-          const comparison = valA < valB ? -1 : 1;
-          return criterion.direction === 'asc' ? comparison : -comparison;
+          if (aVal === bVal) continue;
+          const cmp = aVal < bVal ? -1 : 1;
+          return criterion.direction === 'asc' ? cmp : -cmp;
         }
         return 0;
       });
     }
 
-    return filtered;
-  }, [orders, filters, sortCriteria]);
+    return rows;
+  }, [projection, filters, sortCriteria]);
 
-  const hasActiveFilters = useMemo(() => {
-    return Object.values(filters).some(val => val !== '' && val !== 'all');
-  }, [filters]);
+  const hasActiveFilters = useMemo(
+    () => FILTER_KEYS.some((k) => safeStr(filters[k]).trim() !== ''),
+    [filters]
+  );
 
-  const clearFilters = () => setFilters({ pedido: '', cliente: '', produto: '', rota: '', romaneio: '', status: '', kpi: 'all' });
-
-  const formatDate = (dateStr: string) => {
-    const date = parseOrderDate(dateStr);
-    if (!date) return dateStr;
-    return date.toLocaleDateString('pt-BR');
+  const clearFilters = () => {
+    setFilters({
+      idChave: '',
+      observacoes: '',
+      rm: '',
+      pd: '',
+      cliente: '',
+      cod: '',
+      descricaoProduto: '',
+      setorProducao: '',
+      requisicaoLojaGrupo: '',
+      uf: '',
+      municipioEntrega: '',
+      qtdePendenteReal: '',
+      previsaoAtual: '',
+    });
   };
 
-  const renderSortIcon = (key: string) => {
-    const idx = sortCriteria.findIndex(s => s.key === key);
+  const renderSortIcon = (key: ProjectionColumnKey) => {
+    const idx = sortCriteria.findIndex((s) => s.key === key);
     if (idx === -1) return null;
     const criterion = sortCriteria[idx];
     return (
-      <div className="inline-flex items-center ml-1 text-secondary">
+      <div className="inline-flex items-center ml-1 text-[#FFAD00]">
         {criterion.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
         {sortCriteria.length > 1 && <span className="ml-0.5 text-[9px] font-bold">{idx + 1}</span>}
       </div>
     );
   };
 
-  const renderHeader = (key: string, label: string) => (
-    <th 
-      className="px-4 py-3 font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-[#333] transition-colors relative group select-none border-r border-gray-200 dark:border-gray-700"
-      style={{ width: columnWidths[key], minWidth: columnWidths[key] }}
-      onClick={(e) => handleSort(key, e.ctrlKey)}
-    >
-      <div className="flex items-center justify-between gap-1">
-        <span className="truncate">{label}</span>
-        {renderSortIcon(key)}
-      </div>
-      <div 
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-500 z-10 transition-colors"
-        onMouseDown={(e) => startResizing(e, key)}
-        onClick={(e) => e.stopPropagation()}
-      />
-    </th>
-  );
+  const exportExcel = () => {
+    const headers = COLUMNS.map((c) => c.label);
+    const rows = filteredRows.map((row) =>
+      COLUMNS.map((c) => {
+        if (c.key === 'previsaoAtual') return formatDateBR(safeStr(row.previsaoAtual));
+        return row[c.key];
+      })
+    );
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    ws['!cols'] = COLUMNS.map((c) => ({ wch: Math.max(12, Math.floor(columnWidths[c.key] / 8)) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Romaneio');
+    XLSX.writeFile(wb, 'romaneio_projecao.xlsx');
+  };
 
   return (
-    <div className="space-y-6">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-        <KpiCard 
-          icon={<ShoppingCart className="text-secondary" />} 
-          label="Total Pedidos Únicos" 
-          value={uniqueTotal} 
-          active={filters.kpi === 'all'}
-          onClick={() => setFilters(f => ({ ...f, kpi: 'all' }))}
-        />
-        
-        <KpiCard 
-          icon={<Store className="text-emerald-600" />} 
-          label="Requisições" 
-          value={uniqueRequisicaoTotal} 
-          subLabel={`No ${horizonLabel}`}
-          subValue={uniqueRequisicaoHorizon}
-          active={filters.kpi === 'so_moveis'}
-          onClick={() => setFilters(f => ({ ...f, kpi: 'so_moveis' }))}
-        />
-
-        <KpiCard 
-          icon={<MapPin className="text-blue-600" />} 
-          label="Entrega em Grande Teresina" 
-          value={uniqueGTTotal} 
-          subLabel={`No ${horizonLabel}`}
-          subValue={uniqueGTHorizon}
-          active={filters.kpi === 'g_teresina'}
-          onClick={() => setFilters(f => ({ ...f, kpi: 'g_teresina' }))}
-        />
-
-        <KpiCard 
-          icon={<User className="text-purple-600" />} 
-          label="Retirada" 
-          value={uniqueRetiradaTotal} 
-          subLabel={`No ${horizonLabel}`}
-          subValue={uniqueRetiradaHorizon}
-          active={filters.kpi === 'cliente_busca'}
-          onClick={() => setFilters(f => ({ ...f, kpi: 'cliente_busca' }))}
-        />
-
-        <KpiCard 
-          icon={<Truck className="text-blue-500" />} 
-          label="Pedidos em Rota" 
-          value={uniqueInRoute} 
-          subValue={uniqueRoutesCount}
-          active={filters.kpi === 'em_rota'}
-          onClick={() => setFilters(f => ({ ...f, kpi: 'em_rota' }))}
-        />
-
-        <KpiCard 
-          icon={<AlertCircle className="text-red-500" />} 
-          label="Pedidos Sem Vínculo" 
-          value={uniqueSemVinculoTotal} 
-          active={filters.kpi === 'sem_vinculo'}
-          onClick={() => setFilters(f => ({ ...f, kpi: 'sem_vinculo' }))}
-        />
-      </div>
-
-      <div className="flex flex-col gap-6">
-        {/* Table List */}
-        <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col h-full">
-          <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50/50 dark:bg-[#2a2a2a]">
-            <div className="flex items-center gap-4">
-              <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100">Lista Detalhada de Itens</h3>
-              <div className="text-[10px] text-neutral bg-white dark:bg-[#1a1a1a] px-2 py-0.5 rounded border border-gray-200 dark:border-gray-700">
-                Mostrando {filteredOrders.length} de {orders.length} itens
-              </div>
+    <div className="space-y-4">
+      <div className="rounded-xl border border-[#cfd8ea] dark:border-gray-700 overflow-hidden shadow-sm bg-[#f7f9fd] dark:bg-[#252525]">
+        <div className="p-4 border-b border-[#dce3f1] dark:border-gray-800 flex justify-between items-center bg-gradient-to-r from-[#041E42] to-[#1E22AA]">
+          <div className="flex items-center gap-4">
+            <h3 className="font-bold text-sm text-white">Romaneio / Pedidos (Espelho da Projeção)</h3>
+            <div className="text-[10px] text-white/90 bg-white/10 px-2 py-0.5 rounded border border-white/20">
+              Mostrando {filteredRows.length} de {projection.length} itens
             </div>
-            <div className="flex gap-4 items-center">
-              {hasActiveFilters && (
-                <button 
-                  onClick={clearFilters} 
-                  className="text-[10px] font-black text-red-600 hover:text-red-700 uppercase flex items-center gap-1.5 transition-all animate-in fade-in slide-in-from-right-2"
-                >
-                  <X className="w-3.5 h-3.5" /> LIMPAR FILTROS
-                </button>
-              )}
-              <button onClick={handleExportExcel} className="text-[11px] font-bold flex items-center gap-2 bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-4 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-[#333] transition-colors shadow-sm active:scale-95">
-                <Download className="w-3.5 h-3.5" /> Excel
+          </div>
+          <div className="flex gap-3 items-center">
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="text-[10px] font-black text-[#FFAD00] hover:text-yellow-300 uppercase flex items-center gap-1.5"
+              >
+                <X className="w-3.5 h-3.5" /> Limpar Filtros
               </button>
-            </div>
-          </div>
-
-          {/* Table Filters */}
-          <div className="p-3 bg-gray-100/50 dark:bg-[#1a1a1a] border-b border-gray-200 dark:border-gray-700 grid grid-cols-2 md:grid-cols-6 gap-2">
-            <FilterInput placeholder="Filtro Romaneio (Cód/Obs)" value={filters.romaneio} onChange={(v) => setFilters(f => ({...f, romaneio: v}))} />
-            <FilterInput placeholder="Filtro Pedido" value={filters.pedido} onChange={(v) => setFilters(f => ({...f, pedido: v}))} />
-            <FilterInput placeholder="Filtro Cliente" value={filters.cliente} onChange={(v) => setFilters(f => ({...f, cliente: v}))} />
-            <FilterInput placeholder="Filtro Produto" value={filters.produto} onChange={(v) => setFilters(f => ({...f, produto: v}))} />
-            <FilterInput placeholder="Filtro Entrega" value={filters.rota} onChange={(v) => setFilters(f => ({...f, rota: v}))} />
-            <select 
-              value={filters.status}
-              onChange={(e) => setFilters(f => ({...f, status: e.target.value}))}
-              className="bg-white dark:bg-[#2a2a2a] text-[10px] border border-gray-300 dark:border-gray-600 rounded px-2 py-1 outline-none text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-secondary transition-all"
+            )}
+            <button
+              onClick={exportExcel}
+              className="text-[11px] font-bold flex items-center gap-2 bg-white text-[#041E42] border border-white/30 px-4 py-1.5 rounded hover:bg-[#f3f6ff] transition-colors shadow-sm active:scale-95"
             >
-              <option value="">Todos Status</option>
-              <option value="vinculado">VINCULADO</option>
-              <option value="sem rota">SEM ROTA</option>
-            </select>
+              <Download className="w-3.5 h-3.5" /> Excel
+            </button>
           </div>
+        </div>
 
-          <div className="overflow-auto flex-1 max-h-[600px]">
-            <table className="w-full text-left text-xs border-separate border-spacing-0">
-              <thead className="bg-gray-50 dark:bg-[#1a1a1a] sticky top-0 z-20 text-gray-900 dark:text-gray-100 uppercase tracking-wider shadow-sm">
-                <tr>
-                  {renderHeader('codigoRomaneio', 'Cód. Romaneio')}
-                  {renderHeader('observacoesRomaneio', 'Obs. Romaneio')}
-                  {renderHeader('numeroPedido', 'Nº Pedido')}
-                  {renderHeader('cliente', 'Cliente')}
-                  {renderHeader('codigoProduto', 'Cód. Produto')}
-                  {renderHeader('descricao', 'Descrição')}
-                  {renderHeader('um', 'U.M.')}
-                  {renderHeader('qtdPedida', 'Qtd. Pedida')}
-                  {renderHeader('qtdVinculada', 'Qtd. Vinculada')}
-                  {renderHeader('precoUnitario', 'Preço Unit.')}
-                  {renderHeader('dataEntrega', 'Data Entrega')}
-                  {renderHeader('municipio', 'Município')}
-                  {renderHeader('uf', 'UF')}
-                  {renderHeader('endereco', 'Endereço')}
-                  {renderHeader('metodoEntrega', 'Método Entrega')}
-                  {renderHeader('requisicaoLoja', 'Req. Loja')}
-                  {renderHeader('tipoEntrega', 'Tipo Entrega')}
-                  {renderHeader('status', 'Status')}
+        <div className="p-3 bg-[#eef3fb] dark:bg-[#1a1a1a] border-b border-[#dce3f1] dark:border-gray-700 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+          {FILTER_KEYS.map((key) => {
+            const col = COLUMNS.find((c) => c.key === key)!;
+            return (
+              <input
+                key={`f-${col.key}`}
+                type="text"
+                placeholder={`Filtro ${col.label}`}
+                value={filters[col.key]}
+                onChange={(e) => setFilters((prev) => ({ ...prev, [col.key]: e.target.value }))}
+                className="bg-white dark:bg-[#2a2a2a] text-[10px] border border-[#c6d3ee] dark:border-gray-600 rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-[#1E22AA] text-gray-900 dark:text-gray-100 transition-all placeholder:text-gray-500"
+              />
+            );
+          })}
+        </div>
+
+        <div className="overflow-auto max-h-[650px]">
+          <table className="w-full text-left text-xs border-separate border-spacing-0">
+            <thead className="bg-[#041E42] sticky top-0 z-20 text-white uppercase tracking-wider shadow-sm">
+              <tr>
+                {COLUMNS.map((col) => (
+                  <th
+                    key={col.key}
+                    className="px-3 py-3 font-bold cursor-pointer hover:bg-[#1E22AA] transition-colors relative select-none border-r border-[#2d4472]"
+                    style={{ width: columnWidths[col.key], minWidth: columnWidths[col.key] }}
+                    onClick={(e) => handleSort(col.key, e.ctrlKey)}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="truncate">{col.label}</span>
+                      {renderSortIcon(col.key)}
+                    </div>
+                    <div
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-[#FFAD00]/40 transition-colors"
+                      onMouseDown={(e) => startResizing(e, col.key)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="text-gray-800 dark:text-gray-300">
+              {filteredRows.map((row, idx) => (
+                <tr
+                  key={`${row.idChave}-${idx}`}
+                  className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-[#f4f7fc] dark:bg-[#2a2a2a]'} hover:bg-[#e8eefb] dark:hover:bg-gray-800/30 transition-colors`}
+                >
+                  {COLUMNS.map((col) => (
+                    <td key={`${row.idChave}-${col.key}-${idx}`} className="px-3 py-2 border-b border-[#e2e8f4] dark:border-gray-800 whitespace-nowrap">
+                      {col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
+                    </td>
+                  ))}
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
-                {filteredOrders.map((order, i) => {
-                  const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
-                  const isSemVinculo = categoria === CATEGORY_INSERIR_ROMANEIO;
-                  const deliveryType = categoria || '-';
-                  const hasRoute = categoria && !isSemVinculo;
-
-                  return (
-                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.codigoRomaneio)}</td>
-                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.observacoesRomaneio }}>{safeStr(order.observacoesRomaneio)}</td>
-                      <td className="px-4 py-3 font-medium font-mono border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.numeroPedido)}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.cliente }}>{safeStr(order.cliente)}</td>
-                      <td className="px-4 py-3 font-mono border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.codigoProduto)}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.descricao }}>{safeStr(order.descricao)}</td>
-                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.um)}</td>
-                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{formatNum(order.qtdPedida)}</td>
-                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{formatNum(order.qtdVinculada)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">
-                        {safeNum(order.precoUnitario) > 0 ? safeNum(order.precoUnitario).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
-                      </td>
-                      <td className="px-4 py-3 text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{formatDate(safeStr(order.dataEntrega))}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.municipio }}>{safeStr(order.municipio)}</td>
-                      <td className="px-4 py-3 text-center border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{safeStr(order.uf)}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.endereco }}>{safeStr(order.endereco)}</td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.metodoEntrega }}>{safeStr(order.metodoEntrega)}</td>
-                      <td className="px-4 py-3 text-center text-[10px] border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">{order.requisicaoLoja ? 'SIM' : 'NÃO'}</td>
-                      <td className="px-4 py-3 text-[10px] font-bold border-b border-gray-100 dark:border-gray-800 whitespace-normal leading-tight" style={{ width: columnWidths.tipoEntrega }}>
-                        <span className={categoria === CATEGORY_REQUISICAO ? 'text-emerald-600 dark:text-emerald-400' : categoria === CATEGORY_RETIRADA ? 'text-purple-600 dark:text-purple-400' : categoria === CATEGORY_ENTREGA_GT ? 'text-blue-600 dark:text-blue-400' : safeStr(order.observacoesRomaneio).trim() !== '' ? 'text-blue-500' : 'text-neutral italic font-normal'}>
-                          {deliveryType}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 whitespace-nowrap">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${hasRoute ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-500'}`}>
-                          {hasRoute ? 'VINCULADO' : 'SEM ROTA'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filteredOrders.length === 0 && (
-                  <tr>
-                    <td colSpan={18} className="px-4 py-12 text-center text-neutral italic">Nenhum item corresponde aos filtros.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+              ))}
+              {filteredRows.length === 0 && (
+                <tr>
+                  <td colSpan={COLUMNS.length} className="px-4 py-12 text-center text-neutral italic">
+                    Nenhum item corresponde aos filtros.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
   );
 };
-
-const FilterInput: React.FC<{ placeholder: string; value: string; onChange: (v: string) => void }> = ({ placeholder, value, onChange }) => (
-  <input 
-    type="text" 
-    placeholder={placeholder}
-    value={value}
-    onChange={(e) => onChange(e.target.value)}
-    className="bg-white dark:bg-[#2a2a2a] text-[10px] border border-gray-300 dark:border-gray-600 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-secondary text-gray-900 dark:text-gray-100 transition-all placeholder:text-gray-400"
-  />
-);
-
-const KpiCard: React.FC<{ icon: React.ReactNode; label: string; value: string | number; subValue?: string | number; subLabel?: string; active?: boolean; onClick?: () => void }> = ({ icon, label, value, subValue, subLabel, active, onClick }) => (
-  <div 
-    onClick={onClick}
-    className={`bg-white dark:bg-[#252525] p-4 rounded-xl border shadow-sm flex items-center gap-4 group transition-all cursor-pointer ${active ? 'border-secondary ring-1 ring-secondary' : 'border-gray-200 dark:border-gray-700 hover:border-secondary'}`}
-  >
-    <div className={`p-3 rounded-lg transition-colors ${active ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-gray-50 dark:bg-[#2a2a2a] group-hover:bg-blue-50 dark:group-hover:bg-blue-900/10'}`}>
-      {icon}
-    </div>
-    <div className="flex-1">
-      <p className={`text-[10px] font-bold uppercase tracking-wider ${active ? 'text-secondary' : 'text-neutral'}`}>{label}</p>
-      <p className="text-xl font-black text-gray-900 dark:text-gray-100">{value}</p>
-      {subValue !== undefined && (
-        <p className="text-[10px] text-neutral mt-0.5 leading-none">
-          {subLabel || 'Total de rotas'}: <span className="font-bold">{subValue}</span>
-        </p>
-      )}
-    </div>
-  </div>
-);
 
 export default OrdersView;

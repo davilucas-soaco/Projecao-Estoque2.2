@@ -319,12 +319,24 @@ function projecaoImportadaToRow(p: ProjecaoImportada): Record<string, unknown> {
 
 export async function fetchProjecaoImportada(): Promise<ProjecaoImportada[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase
-    .from('projecao_importada')
-    .select('*')
-    .order('emissao', { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data || []).map((row) => rowToProjecaoImportada(row as ProjecaoImportadaRow));
+  const pageSize = 1000;
+  let from = 0;
+  const rows: ProjecaoImportadaRow[] = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('projecao_importada')
+      .select('*')
+      .order('emissao', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    const chunk = (data || []) as ProjecaoImportadaRow[];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows.map((row) => rowToProjecaoImportada(row));
 }
 
 export async function replaceProjecaoImportada(rows: ProjecaoImportada[]): Promise<void> {
@@ -332,10 +344,20 @@ export async function replaceProjecaoImportada(rows: ProjecaoImportada[]): Promi
 
   const ids = Array.from(new Set(rows.map((r) => r.idChave).filter((v) => v && v.trim() !== '')));
 
-  const { data: existing, error: existingError } = await supabase
-    .from('projecao_importada')
-    .select('id_chave');
-  if (existingError) throw new Error(existingError.message);
+  const pageSize = 1000;
+  let from = 0;
+  const existing: { id_chave: string }[] = [];
+  while (true) {
+    const { data, error } = await supabase
+      .from('projecao_importada')
+      .select('id_chave')
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    const chunk = (data || []) as { id_chave: string }[];
+    existing.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
 
   const existingKeys = new Set((existing || []).map((r: { id_chave: string }) => r.id_chave));
   const incomingKeys = new Set(ids);
