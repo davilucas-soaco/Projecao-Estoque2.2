@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Download, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, Download, MapPin, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
 import { ProjecaoImportada } from '../types';
-import { parseOrderDate } from '../utils';
+import { CATEGORY_ENTREGA_GT, CATEGORY_INSERIR_ROMANEIO, CATEGORY_REQUISICAO, CATEGORY_RETIRADA, getCategoriaFromObservacoes, getHorizonInfo, isCategoriaEspecial, parseOrderDate } from '../utils';
 import * as XLSX from 'xlsx';
 
 interface Props {
@@ -27,6 +27,8 @@ interface SortCriterion {
   key: ProjectionColumnKey;
   direction: 'asc' | 'desc';
 }
+
+type KpiFilterType = 'all' | 'so_moveis' | 'g_teresina' | 'cliente_busca' | 'em_rota' | 'sem_vinculo';
 
 const COLUMNS: { key: ProjectionColumnKey; label: string; width: number }[] = [
   { key: 'idChave', label: 'idChave', width: 200 },
@@ -88,6 +90,7 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     previsaoAtual: '',
   });
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
+  const [kpiFilter, setKpiFilter] = useState<KpiFilterType>('all');
   const [columnWidths, setColumnWidths] = useState<Record<ProjectionColumnKey, number>>(
     () =>
       COLUMNS.reduce(
@@ -176,6 +179,21 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
       })
     );
 
+    rows = rows.filter((row) => {
+      if (kpiFilter === 'all') return true;
+
+      const categoria = getCategoriaFromObservacoes(row.observacoes);
+      const hasRm = safeStr(row.rm).trim() !== '' && safeStr(row.rm).trim() !== '&nbsp;';
+      const isRotaCategoria = categoria && !isCategoriaEspecial(categoria);
+
+      if (kpiFilter === 'so_moveis') return categoria === CATEGORY_REQUISICAO;
+      if (kpiFilter === 'g_teresina') return categoria === CATEGORY_ENTREGA_GT;
+      if (kpiFilter === 'cliente_busca') return categoria === CATEGORY_RETIRADA;
+      if (kpiFilter === 'em_rota') return Boolean(isRotaCategoria && hasRm);
+      if (kpiFilter === 'sem_vinculo') return categoria === CATEGORY_INSERIR_ROMANEIO;
+      return true;
+    });
+
     if (sortCriteria.length > 0) {
       rows = [...rows].sort((a, b) => {
         for (const criterion of sortCriteria) {
@@ -202,11 +220,63 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     }
 
     return rows;
-  }, [projection, filters, sortCriteria]);
+  }, [projection, filters, sortCriteria, kpiFilter]);
+
+  const kpis = useMemo(() => {
+    const horizon = getHorizonInfo();
+    const horizonDate = horizon.end;
+
+    const uniqueTotal = new Set(projection.map((r) => safeStr(r.pd).trim()).filter(Boolean)).size;
+
+    const rows = projection.map((r) => {
+      const categoria = getCategoriaFromObservacoes(r.observacoes);
+      const d = parseOrderDate(safeStr(r.previsaoAtual));
+      if (d) d.setHours(0, 0, 0, 0);
+      return {
+        pedido: safeStr(r.pd).trim(),
+        categoria,
+        hasRm: safeStr(r.rm).trim() !== '' && safeStr(r.rm).trim() !== '&nbsp;',
+        dEntrega: d,
+      };
+    });
+
+    const inHorizon = (d: Date | null) => !!d && d <= horizonDate;
+    const onlyWithPedido = rows.filter((r) => r.pedido);
+
+    const reqRows = onlyWithPedido.filter((r) => r.categoria === CATEGORY_REQUISICAO);
+    const gtRows = onlyWithPedido.filter((r) => r.categoria === CATEGORY_ENTREGA_GT);
+    const retRows = onlyWithPedido.filter((r) => r.categoria === CATEGORY_RETIRADA);
+    const semVincRows = onlyWithPedido.filter((r) => r.categoria === CATEGORY_INSERIR_ROMANEIO);
+    const rotaRows = onlyWithPedido.filter((r) => r.categoria && !isCategoriaEspecial(r.categoria) && r.hasRm);
+
+    const reqTotal = new Set(reqRows.map((r) => r.pedido)).size;
+    const reqHorizon = new Set(reqRows.filter((r) => inHorizon(r.dEntrega)).map((r) => r.pedido)).size;
+    const gtTotal = new Set(gtRows.map((r) => r.pedido)).size;
+    const gtHorizon = new Set(gtRows.filter((r) => inHorizon(r.dEntrega)).map((r) => r.pedido)).size;
+    const retTotal = new Set(retRows.map((r) => r.pedido)).size;
+    const retHorizon = new Set(retRows.filter((r) => inHorizon(r.dEntrega)).map((r) => r.pedido)).size;
+    const rotaTotal = new Set(rotaRows.map((r) => r.pedido)).size;
+    const rotasUnicas = new Set(rotaRows.map((r) => r.categoria)).size;
+    const semVincTotal = new Set(semVincRows.map((r) => r.pedido)).size;
+
+    return {
+      uniqueTotal,
+      reqTotal,
+      reqHorizon,
+      gtTotal,
+      gtHorizon,
+      retTotal,
+      retHorizon,
+      rotaTotal,
+      rotasUnicas,
+      semVincTotal,
+      horizonLabel: horizon.label,
+    };
+  }, [projection]);
 
   const hasActiveFilters = useMemo(
-    () => FILTER_KEYS.some((k) => safeStr(filters[k]).trim() !== ''),
-    [filters]
+    () => FILTER_KEYS.some((k) => safeStr(filters[k]).trim() !== '') || kpiFilter !== 'all',
+    [filters, kpiFilter]
   );
 
   const clearFilters = () => {
@@ -225,6 +295,7 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
       qtdePendenteReal: '',
       previsaoAtual: '',
     });
+    setKpiFilter('all');
   };
 
   const renderSortIcon = (key: ProjectionColumnKey) => {
@@ -257,6 +328,15 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-[#cfd8ea] dark:border-gray-700 overflow-hidden shadow-sm bg-[#f7f9fd] dark:bg-[#252525]">
+        <div className="p-4 grid grid-cols-1 md:grid-cols-6 gap-3 bg-[#f1f5ff] dark:bg-[#1a1a1a] border-b border-[#dce3f1] dark:border-gray-800">
+          <KpiCard icon={<ShoppingCart className="text-[#1E22AA]" />} label="Total Pedidos Únicos" value={kpis.uniqueTotal} active={kpiFilter === 'all'} onClick={() => setKpiFilter('all')} />
+          <KpiCard icon={<Store className="text-emerald-600" />} label="Requisições" value={kpis.reqTotal} subLabel={`No Horizonte: ${kpis.horizonLabel.replace('Horizonte: ', '')}`} subValue={kpis.reqHorizon} active={kpiFilter === 'so_moveis'} onClick={() => setKpiFilter('so_moveis')} />
+          <KpiCard icon={<MapPin className="text-blue-600" />} label="Entrega em Grande Teresina" value={kpis.gtTotal} subLabel={`No Horizonte: ${kpis.horizonLabel.replace('Horizonte: ', '')}`} subValue={kpis.gtHorizon} active={kpiFilter === 'g_teresina'} onClick={() => setKpiFilter('g_teresina')} />
+          <KpiCard icon={<User className="text-purple-600" />} label="Retirada" value={kpis.retTotal} subLabel={`No Horizonte: ${kpis.horizonLabel.replace('Horizonte: ', '')}`} subValue={kpis.retHorizon} active={kpiFilter === 'cliente_busca'} onClick={() => setKpiFilter('cliente_busca')} />
+          <KpiCard icon={<Truck className="text-blue-500" />} label="Pedidos em Rota" value={kpis.rotaTotal} subLabel="Total de rotas" subValue={kpis.rotasUnicas} active={kpiFilter === 'em_rota'} onClick={() => setKpiFilter('em_rota')} />
+          <KpiCard icon={<AlertCircle className="text-red-500" />} label="Pedidos Sem Vínculo" value={kpis.semVincTotal} active={kpiFilter === 'sem_vinculo'} onClick={() => setKpiFilter('sem_vinculo')} />
+        </div>
+
         <div className="p-4 border-b border-[#dce3f1] dark:border-gray-800 flex justify-between items-center bg-gradient-to-r from-[#041E42] to-[#1E22AA]">
           <div className="flex items-center gap-4">
             <h3 className="font-bold text-sm text-white">Romaneio / Pedidos (Espelho da Projeção)</h3>
@@ -299,7 +379,12 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
         </div>
 
         <div className="overflow-auto max-h-[650px]">
-          <table className="w-full text-left text-xs border-separate border-spacing-0">
+          <table className="w-full text-left text-xs border-separate border-spacing-0 table-fixed">
+            <colgroup>
+              {COLUMNS.map((col) => (
+                <col key={`col-${col.key}`} style={{ width: `${columnWidths[col.key]}px` }} />
+              ))}
+            </colgroup>
             <thead className="bg-[#041E42] sticky top-0 z-20 text-white uppercase tracking-wider shadow-sm">
               <tr>
                 {COLUMNS.map((col) => (
@@ -329,7 +414,12 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
                   className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-[#f4f7fc] dark:bg-[#2a2a2a]'} hover:bg-[#e8eefb] dark:hover:bg-gray-800/30 transition-colors`}
                 >
                   {COLUMNS.map((col) => (
-                    <td key={`${row.idChave}-${col.key}-${idx}`} className="px-3 py-2 border-b border-[#e2e8f4] dark:border-gray-800 whitespace-nowrap">
+                    <td
+                      key={`${row.idChave}-${col.key}-${idx}`}
+                      style={{ width: `${columnWidths[col.key]}px`, minWidth: `${columnWidths[col.key]}px`, maxWidth: `${columnWidths[col.key]}px` }}
+                      className="px-3 py-2 border-b border-[#e2e8f4] dark:border-gray-800 whitespace-nowrap truncate"
+                      title={col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
+                    >
                       {col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
                     </td>
                   ))}
@@ -349,5 +439,36 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     </div>
   );
 };
+
+const KpiCard: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  subLabel?: string;
+  subValue?: number;
+  active?: boolean;
+  onClick?: () => void;
+}> = ({ icon, label, value, subLabel, subValue, active, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`text-left bg-white dark:bg-[#252525] rounded-xl border px-3 py-2 shadow-sm transition-all ${
+      active ? 'border-[#1E22AA] ring-1 ring-[#1E22AA]' : 'border-[#d7dfee] dark:border-gray-700 hover:border-[#1E22AA]/60'
+    }`}
+  >
+    <div className="flex items-center gap-2">
+      <div className="p-2 rounded-lg bg-[#f4f7ff] dark:bg-[#1a1a1a]">{icon}</div>
+      <div className="min-w-0">
+        <p className="text-[9px] uppercase tracking-wider font-bold text-neutral truncate">{label}</p>
+        <p className="text-xl font-black text-[#041E42] dark:text-gray-100 leading-none">{value}</p>
+        {subValue !== undefined && (
+          <p className="text-[9px] text-neutral leading-none mt-1 truncate">
+            {subLabel}: <span className="font-bold">{subValue}</span>
+          </p>
+        )}
+      </div>
+    </div>
+  </button>
+);
 
 export default OrdersView;

@@ -31,6 +31,8 @@ interface Props {
   orders: Order[];
   horizonLabel?: string;
   dateColumns?: DateColumn[];
+  /** Se false, a coluna "Só Móveis" não é renderizada (exclusivo da simulação) */
+  considerarRequisicoes?: boolean;
 }
 
 const formatCellNum = (v: unknown): string | number => {
@@ -40,7 +42,7 @@ const formatCellNum = (v: unknown): string | number => {
   return n % 1 === 0 ? Math.round(n) : Math.round(n * 100) / 100;
 };
 
-const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColumns = [] }) => {
+const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColumns = [], considerarRequisicoes = true }) => {
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [descriptionWidth, setDescriptionWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
@@ -236,8 +238,8 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
   };
 
   const allColumns = [
-    { key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true },
-    ...dateColumns.map(c => ({ key: c.key, label: c.label, isSoMoveis: false })),
+    ...(considerarRequisicoes ? [{ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true as const }] : []),
+    ...dateColumns.map(c => ({ key: c.key, label: c.label, isSoMoveis: false as const })),
   ];
   const allColumnsSelected = selectedColumnKeys.size === allColumns.length && allColumns.length > 0;
   const selectedCountLabel = allColumnsSelected
@@ -569,7 +571,13 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
       <div className="bg-white dark:bg-[#252525] p-2 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-3 text-[10px] text-neutral italic shrink-0">
         <Info className="w-3.5 h-3.5 text-secondary" />
         <span>
-          <strong>Dica Operacional:</strong> A coluna <strong>Só Móveis</strong> é prioridade fixa nº 1. As demais colunas são por data de saída (<strong>previsao_atual</strong>). Clique em <strong>P</strong> para ver o detalhamento por destino.
+          <strong>Dica Operacional:</strong>{' '}
+          {considerarRequisicoes ? (
+            <>A coluna <strong>Só Móveis</strong> é prioridade fixa nº 1. As demais colunas são por data de saída (<strong>previsao_atual</strong>).</>
+          ) : (
+            <>Colunas por data de saída (<strong>previsao_atual</strong>). Requisições não consideradas.</>
+          )}{' '}
+          Clique em <strong>P</strong> para ver o detalhamento por destino.
         </span>
       </div>
     </div>

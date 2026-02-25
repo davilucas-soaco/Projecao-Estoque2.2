@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
-import { getHorizonInfo, getCategoriaFromObservacoes, CATEGORY_REQUISICAO, CATEGORY_INSERIR_ROMANEIO, getDateColumns, getTodayStart, dateToKey, formatDestinoForTooltip, parseOrderDate } from './utils';
+import { getHorizonInfo, getDateColumns, getTodayStart } from './utils';
 import { fetchStock } from './api';
 import {
   supabase,
@@ -38,20 +38,46 @@ import { useQueryClient } from '@tanstack/react-query';
 import ProjectionTable from './components/ProjectionTable';
 import OrdersView from './components/OrdersView';
 import ImportModal from './components/ImportModal';
+import ImportSimulationModal from './components/ImportSimulationModal';
 import Login from './components/Login';
 import UserManagement from './components/UserManagement';
+import { buildConsolidatedData } from './consolidation';
 
 const STORAGE_KEYS = {
   USERS: 'sa_industrial_accounts_v2',
   SHELF_FICHA: 'sa_industrial_shelf_ficha_v2',
   USER_SESSION: 'sa_industrial_user_session_v2',
   LOGO: 'sa_industrial_company_logo_v1',
+  SIMULATION: 'sa_industrial_simulation_v1',
+};
+
+type ProjectionSubMode = 'PADRAO' | 'SIMULADO';
+
+interface SimulationState {
+  data: ProjecaoImportada[];
+  considerarRequisicoes: boolean;
+}
+
+const loadSimulationFromStorage = (): SimulationState => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.SIMULATION);
+    if (!saved) return { data: [], considerarRequisicoes: true };
+    const parsed = JSON.parse(saved);
+    return {
+      data: Array.isArray(parsed?.data) ? parsed.data : [],
+      considerarRequisicoes: typeof parsed?.considerarRequisicoes === 'boolean' ? parsed.considerarRequisicoes : true,
+    };
+  } catch {
+    return { data: [], considerarRequisicoes: true };
+  }
 };
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'PROJECAO' | 'ROMANEIO' | 'USUARIOS'>('PROJECAO');
+  const [projectionSubMode, setProjectionSubMode] = useState<ProjectionSubMode>('PADRAO');
   const [darkMode, setDarkMode] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isImportSimulationModalOpen, setIsImportSimulationModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
@@ -94,6 +120,18 @@ const App: React.FC = () => {
   });
   const projection: ProjecaoImportada[] = supabase ? projectionFromSupabase : projectionLocal;
   const orders: Order[] = useMemo(() => mapProjecaoImportadaToOrders(projection), [projection]);
+
+  // Simulação: totalmente isolada, apenas LocalStorage
+  const [simulationState, setSimulationState] = useState<SimulationState>(loadSimulationFromStorage);
+  const ordersSimulation: Order[] = useMemo(() => mapProjecaoImportadaToOrders(simulationState.data), [simulationState.data]);
+
+  useEffect(() => {
+    if (simulationState.data.length > 0 || simulationState.considerarRequisicoes !== true) {
+      localStorage.setItem(STORAGE_KEYS.SIMULATION, JSON.stringify(simulationState));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.SIMULATION);
+    }
+  }, [simulationState]);
 
   const queryClient = useQueryClient();
 
@@ -279,6 +317,15 @@ const App: React.FC = () => {
     }
   };
 
+  const handleImportSimulation = (rows: ProjecaoImportada[], considerarRequisicoes: boolean) => {
+    setSimulationState({ data: rows, considerarRequisicoes });
+  };
+
+  const handleClearSimulation = () => {
+    setSimulationState({ data: [], considerarRequisicoes: true });
+    localStorage.removeItem(STORAGE_KEYS.SIMULATION);
+  };
+
   const handleImportShelfFicha = async (newFicha: ShelfFicha[]) => {
     if (supabase) {
       try {
@@ -324,208 +371,21 @@ const App: React.FC = () => {
   const dateColumns = useMemo(() => getDateColumns(), []);
   const todayStart = useMemo(() => getTodayStart(), []);
 
-  const consolidatedData = useMemo(() => {
-    const productMap = new Map<string, ProductConsolidated>();
-    const shelfFichaMap = new Map<string, ShelfFicha>();
-    shelfFicha.forEach(f => {
-      if (f.codigoEstante) {
-        shelfFichaMap.set(f.codigoEstante.trim().toUpperCase(), f);
-      }
-    });
+  const consolidatedData = useMemo(
+    () => buildConsolidatedData(orders, stock, shelfFicha, searchTerm, dateColumns, todayStart, { considerarRequisicoes: true }),
+    [orders, stock, shelfFicha, searchTerm, dateColumns, todayStart]
+  );
 
-    const horizon = getHorizonInfo();
-    const horizonDate = horizon.end;
-    const dateKeysSet = new Set(dateColumns.filter(c => !c.isAtrasados).map(c => c.key));
-
-    const parseOrderDateLocal = (dateStr: string) => {
-      const d = parseOrderDate(dateStr);
-      if (d) {
-        d.setHours(0, 0, 0, 0);
-        return d;
-      }
-      return null;
-    };
-
-    const ensureProduct = (codigo: string, descricao: string) => {
-      if (!productMap.has(codigo)) {
-        const normalizedCode = codigo.trim().toUpperCase();
-        const ficha = shelfFichaMap.get(normalizedCode);
-        productMap.set(codigo, {
-          codigo,
-          descricao,
-          estoqueAtual: 0,
-          totalPedido: 0,
-          pendenteProducao: 0,
-          routeData: {},
-          isShelf: !!ficha,
-          components: ficha ? [
-            { codigo: ficha.codColuna, descricao: ficha.descColuna, estoqueAtual: 0, totalPedido: 0, falta: 0, routeData: {} },
-            { codigo: ficha.codBandeja, descricao: ficha.descBandeja, estoqueAtual: 0, totalPedido: 0, falta: 0, routeData: {} }
-          ] : undefined
-        });
-      }
-      return productMap.get(codigo)!;
-    };
-
-    const addToDateColumn = (obj: { routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }> }, colKey: string, qty: number, destinoDisplay: string) => {
-      if (!obj.routeData[colKey]) obj.routeData[colKey] = { pedido: 0, falta: 0, breakdown: [] };
-      obj.routeData[colKey].pedido += qty;
-      const existing = obj.routeData[colKey].breakdown!.find(b => b.destino === destinoDisplay);
-      if (existing) existing.qty += qty;
-      else obj.routeData[colKey].breakdown!.push({ destino: destinoDisplay, qty });
-    };
-
-    const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
-
-    orders.forEach(order => {
-      const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
-      const dEntrega = parseOrderDateLocal(order.dataEntrega);
-      const orderQty = order.qtdVinculada || order.qtdPedida;
-      const destDisplay = formatDestinoForTooltip(categoria || order.observacoesRomaneio);
-
-      // Regra: "4-Inserir em Romaneio" não entra na projeção.
-      if (categoria === CATEGORY_INSERIR_ROMANEIO) return;
-      if (!dEntrega) return;
-      if (lastFutureDate && dEntrega > lastFutureDate) return;
-
-      const prod = ensureProduct(order.codigoProduto, order.descricao);
-      prod.totalPedido += orderQty;
-      if (prod.isShelf && prod.components) {
-        const normalizedCode = prod.codigo.trim().toUpperCase();
-        const ficha = shelfFichaMap.get(normalizedCode)!;
-        prod.components[0].totalPedido += orderQty * ficha.qtdColuna;
-        prod.components[1].totalPedido += orderQty * ficha.qtdBandeja;
-      }
-
-      // 1. Só Móveis (Requisição) — horizonte próprio, prioridade fixa nº 1
-      if (categoria === CATEGORY_REQUISICAO && dEntrega && dEntrega <= horizonDate) {
-        const routeName = CATEGORY_REQUISICAO;
-        if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
-        prod.routeData[routeName].pedido += orderQty;
-        const existing = prod.routeData[routeName].breakdown!.find(b => b.destino === 'Requisição');
-        if (existing) existing.qty += orderQty;
-        else prod.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty });
-
-        if (prod.isShelf && prod.components) {
-          const normalizedCode = prod.codigo.trim().toUpperCase();
-          const ficha = shelfFichaMap.get(normalizedCode)!;
-          const col = prod.components[0];
-          if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
-          col.routeData[routeName].pedido += orderQty * ficha.qtdColuna;
-          const colExisting = col.routeData[routeName].breakdown!.find(b => b.destino === 'Requisição');
-          if (colExisting) colExisting.qty += orderQty * ficha.qtdColuna;
-          else col.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * ficha.qtdColuna });
-          const ban = prod.components[1];
-          if (!ban.routeData[routeName]) ban.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
-          ban.routeData[routeName].pedido += orderQty * ficha.qtdBandeja;
-          const banExisting = ban.routeData[routeName].breakdown!.find(b => b.destino === 'Requisição');
-          if (banExisting) banExisting.qty += orderQty * ficha.qtdBandeja;
-          else ban.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * ficha.qtdBandeja });
-        }
-      }
-
-      // 2. Colunas por data (Atrasados + 15 dias)
-      // Atrasados: não considerar Requisição para evitar duplicidade com Só Móveis.
-      if (dEntrega <= todayStart && categoria !== CATEGORY_REQUISICAO) {
-        addToDateColumn(prod, 'ATRASADOS', orderQty, destDisplay);
-        if (prod.isShelf && prod.components) {
-          const normalizedCode = prod.codigo.trim().toUpperCase();
-          const ficha = shelfFichaMap.get(normalizedCode)!;
-          addToDateColumn(prod.components[0], 'ATRASADOS', orderQty * ficha.qtdColuna, destDisplay);
-          addToDateColumn(prod.components[1], 'ATRASADOS', orderQty * ficha.qtdBandeja, destDisplay);
-        }
-      } else if (dEntrega > todayStart) {
-        const key = dateToKey(dEntrega);
-        if (dateKeysSet.has(key)) {
-          addToDateColumn(prod, key, orderQty, destDisplay);
-          if (prod.isShelf && prod.components) {
-            const normalizedCode = prod.codigo.trim().toUpperCase();
-            const ficha = shelfFichaMap.get(normalizedCode)!;
-            addToDateColumn(prod.components[0], key, orderQty * ficha.qtdColuna, destDisplay);
-            addToDateColumn(prod.components[1], key, orderQty * ficha.qtdBandeja, destDisplay);
-          }
-        }
-      }
-    });
-
-    // Mapeamento de estoque para produtos e componentes
-    const stockMap = new Map<string, number>();
-    stock.forEach(s => stockMap.set(s.codigo, s.saldoSetorFinal));
-
-    productMap.forEach(prod => {
-      if (!prod.isShelf) {
-        prod.estoqueAtual = stockMap.get(prod.codigo) || 0;
-      } else if (prod.components) {
-        prod.components.forEach(comp => {
-          comp.estoqueAtual = stockMap.get(comp.codigo) || 0;
-        });
-      }
-    });
-
-    // Consumo de estoque: 1) Só Móveis 2) Atrasados 3) datas em ordem
-    const consumptionOrder = [CATEGORY_REQUISICAO, 'ATRASADOS', ...dateColumns.filter(c => !c.isAtrasados).map(c => c.key)];
-
-    productMap.forEach(prod => {
-      if (!prod.isShelf) {
-        let runningBalance = Math.max(0, prod.estoqueAtual);
-        let totalFalta = 0;
-
-        for (const colKey of consumptionOrder) {
-          const rd = prod.routeData[colKey];
-          if (!rd) continue;
-          const needed = rd.pedido;
-          if (runningBalance >= needed) {
-            rd.falta = 0;
-            runningBalance -= needed;
-          } else {
-            const missing = needed - runningBalance;
-            rd.falta = -missing;
-            totalFalta += rd.falta;
-            runningBalance = 0;
-          }
-        }
-        prod.pendenteProducao = totalFalta;
-      } else if (prod.components) {
-        let shelfTotalFalta = 0;
-
-        prod.components.forEach(comp => {
-          let runningBalance = Math.max(0, comp.estoqueAtual);
-          let compTotalFalta = 0;
-
-          for (const colKey of consumptionOrder) {
-            const rd = comp.routeData[colKey];
-            if (!rd) continue;
-            const needed = rd.pedido;
-            if (runningBalance >= needed) {
-              rd.falta = 0;
-              runningBalance -= needed;
-            } else {
-              const missing = needed - runningBalance;
-              rd.falta = -missing;
-              compTotalFalta += rd.falta;
-              runningBalance = 0;
-            }
-            if (!prod.routeData[colKey]) prod.routeData[colKey] = { pedido: 0, falta: 0 };
-            prod.routeData[colKey].falta = Math.min(prod.routeData[colKey].falta ?? 0, rd.falta);
-          }
-
-          comp.falta = compTotalFalta;
-          shelfTotalFalta = Math.min(shelfTotalFalta, compTotalFalta);
-        });
-
-        prod.pendenteProducao = shelfTotalFalta;
-      }
-    });
-
-    let result = Array.from(productMap.values());
-    if (searchTerm) {
-      const lowerSearch = searchTerm.toLowerCase();
-      result = result.filter(p => p.codigo.toLowerCase().includes(lowerSearch) || p.descricao.toLowerCase().includes(lowerSearch));
-    }
-    return result;
-  }, [orders, stock, shelfFicha, searchTerm, dateColumns, todayStart]);
+  const consolidatedDataSimulation = useMemo(
+    () =>
+      buildConsolidatedData(ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
+        considerarRequisicoes: simulationState.considerarRequisicoes,
+      }),
+    [ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, simulationState.considerarRequisicoes]
+  );
 
   const uniqueOrdersCount = useMemo(() => new Set(orders.map(o => o.numeroPedido)).size, [orders]);
+  const uniqueOrdersCountSimulation = useMemo(() => new Set(ordersSimulation.map(o => o.numeroPedido)).size, [ordersSimulation]);
 
   if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
 
@@ -601,23 +461,109 @@ const App: React.FC = () => {
         {currentUser.profile === 'ADMIN' && ( <TabButton active={activeTab === 'USUARIOS'} onClick={() => setActiveTab('USUARIOS')} icon={<Users className="w-4 h-4" />} label="Gestão" /> )}
       </nav>
 
+      {activeTab === 'PROJECAO' && (
+        <div className="bg-gray-100 dark:bg-[#1f1f1f] border-b border-gray-200 dark:border-gray-700 px-4 py-2 flex gap-2 items-center sticky top-[120px] z-[54]">
+          <span className="text-[11px] font-bold text-neutral uppercase tracking-wider mr-2">Guia Projeção:</span>
+          <button
+            onClick={() => setProjectionSubMode('PADRAO')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              projectionSubMode === 'PADRAO'
+                ? 'bg-secondary text-white shadow-md'
+                : 'bg-white dark:bg-[#252525] text-neutral hover:bg-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            Projeção Estoque Padrão
+          </button>
+          <button
+            onClick={() => setProjectionSubMode('SIMULADO')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              projectionSubMode === 'SIMULADO'
+                ? 'bg-secondary text-white shadow-md'
+                : 'bg-white dark:bg-[#252525] text-neutral hover:bg-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            Projeção Estoque Simulado
+          </button>
+        </div>
+      )}
+
       <main className="flex-1 p-6 overflow-auto">
-        {activeTab === 'PROJECAO' && (
-          <ProjectionTable
-            data={consolidatedData}
-            orders={orders}
-            horizonLabel={getHorizonInfo().label}
-            dateColumns={dateColumns}
-          />
+        {activeTab === 'PROJECAO' && projectionSubMode === 'PADRAO' && (
+          <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
+            <ProjectionTable
+              data={consolidatedData}
+              orders={orders}
+              horizonLabel={getHorizonInfo().label}
+              dateColumns={dateColumns}
+              considerarRequisicoes={true}
+            />
+          </div>
+        )}
+        {activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' && (
+          <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button
+                onClick={() => setIsImportSimulationModalOpen(true)}
+                className="flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold text-sm text-white transition-all active:scale-95 shadow-md"
+              >
+                <Upload className="w-4 h-4" />
+                Importar Simulação
+              </button>
+              <button
+                onClick={handleClearSimulation}
+                disabled={simulationState.data.length === 0}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+                  simulationState.data.length === 0
+                    ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-red-600 hover:bg-red-700 text-white active:scale-95 shadow-md'
+                }`}
+              >
+                Limpar Simulação
+              </button>
+              {simulationState.data.length > 0 && (
+                <span className="text-[11px] text-neutral self-center">
+                  {simulationState.data.length} registros • Requisições: {simulationState.considerarRequisicoes ? 'Sim' : 'Não'}
+                </span>
+              )}
+            </div>
+            {simulationState.data.length === 0 ? (
+              <div className="py-16 text-center text-neutral border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl">
+                <p className="text-sm font-medium mb-2">Nenhuma simulação carregada.</p>
+                <p className="text-[11px] mb-4">Use &quot;Importar Simulação&quot; para carregar um arquivo com o mesmo layout da projeção oficial.</p>
+                <button
+                  onClick={() => setIsImportSimulationModalOpen(true)}
+                  className="inline-flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold text-sm text-white"
+                >
+                  <Upload className="w-4 h-4" />
+                  Importar Simulação
+                </button>
+              </div>
+            ) : (
+              <ProjectionTable
+                data={consolidatedDataSimulation}
+                orders={ordersSimulation}
+                horizonLabel={getHorizonInfo().label}
+                dateColumns={dateColumns}
+                considerarRequisicoes={simulationState.considerarRequisicoes}
+              />
+            )}
+          </div>
         )}
         {activeTab === 'ROMANEIO' && ( <OrdersView projection={projection} /> )}
-        {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} companyLogo={effectiveLogo} onLogoChange={handleLogoChange} /> )}
+        {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && (
+          <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
+            <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} companyLogo={effectiveLogo} onLogoChange={handleLogoChange} />
+          </div>
+        )}
       </main>
 
       <footer className="bg-white dark:bg-[#252525] border-t border-gray-200 dark:border-gray-700 p-2 px-6 flex justify-between text-[11px] text-neutral">
         <div className="flex gap-4">
-          <span>Pedidos Únicos: <b>{uniqueOrdersCount}</b></span>
-          <span>Produtos: <b>{consolidatedData.length}</b></span>
+          <span>Pedidos Únicos: <b>{activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' ? uniqueOrdersCountSimulation : uniqueOrdersCount}</b></span>
+          <span>Produtos: <b>{activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' ? consolidatedDataSimulation.length : consolidatedData.length}</b></span>
+          {activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' && simulationState.data.length > 0 && (
+            <span className="text-amber-600 dark:text-amber-400 font-semibold">[Simulação]</span>
+          )}
         </div>
         <div><span>&copy; 2025 Só Aço Industrial</span></div>
       </footer>
@@ -630,6 +576,13 @@ const App: React.FC = () => {
           onImportProjection={handleImportProjection}
           lastProjectionUploadAt={projectionMeta?.lastUploadAt ?? null}
           lastProjectionUploadUser={projectionMeta?.lastUploadUser ?? null}
+        />
+      )}
+
+      {isImportSimulationModalOpen && (
+        <ImportSimulationModal
+          onClose={() => setIsImportSimulationModalOpen(false)}
+          onImportSimulation={handleImportSimulation}
         />
       )}
 
