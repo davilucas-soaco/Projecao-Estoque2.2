@@ -126,13 +126,24 @@ export interface ShelfFicha {
   qtdBandeja: number;
 }
 
+export interface DestinoBreakdown {
+  destino: string;
+  qty: number;
+}
+
+export interface RouteCellData {
+  pedido: number;
+  falta: number;
+  breakdown?: DestinoBreakdown[];
+}
+
 export interface ComponentData {
   codigo: string;
   descricao: string;
   estoqueAtual: number;
   totalPedido: number;
   falta: number;
-  routeData: Record<string, { pedido: number; falta: number }>;
+  routeData: Record<string, RouteCellData>;
 }
 
 export interface ProductConsolidated {
@@ -141,7 +152,15 @@ export interface ProductConsolidated {
   estoqueAtual: number;
   totalPedido: number;
   pendenteProducao: number;
-  routeData: Record<string, { pedido: number; falta: number }>;
+  routeData: Record<string, RouteCellData>;
   isShelf?: boolean;
   components?: ComponentData[];
+}
+
+/** Coluna de data na projeção (Atrasados ou data específica) */
+export interface DateColumn {
+  key: string;
+  label: string;
+  date: Date | null; // null para Atrasados
+  isAtrasados: boolean;
 }

@@ -1,21 +1,16 @@
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ProductConsolidated, Route, Order } from '../types';
-import { ROUTE_SO_MOVEIS, ROUTE_G_TERESINA, ROUTE_CLIENTE_BUSCA, getCategoriaFromObservacoes, CATEGORY_REQUISICAO, isCategoriaEspecial } from '../utils';
-import { 
-  AlertTriangle, 
-  TrendingDown, 
-  Filter, 
-  X, 
-  Search, 
-  ChevronDown, 
-  ArrowUp, 
+import { ProductConsolidated, Order, ComponentData } from '../types';
+import { ROUTE_SO_MOVEIS } from '../utils';
+import {
+  AlertTriangle,
+  TrendingDown,
+  ArrowUp,
   ArrowDown,
   Info,
-  GripVertical,
   Plus,
   Minus,
-  CornerDownRight
+  CornerDownRight,
+  X,
 } from 'lucide-react';
 
 interface SortCriterion {
@@ -23,14 +18,18 @@ interface SortCriterion {
   direction: 'asc' | 'desc';
 }
 
+interface DateColumn {
+  key: string;
+  label: string;
+  date: Date | null;
+  isAtrasados: boolean;
+}
+
 interface Props {
   data: ProductConsolidated[];
-  routes: Route[];
   orders: Order[];
-  onRoutesReorder: (routes: Route[]) => void;
-  selectedRoutes: string[];
-  onFilterRoutes: (routeNames: string[]) => void;
   horizonLabel?: string;
+  dateColumns?: DateColumn[];
 }
 
 const formatCellNum = (v: unknown): string | number => {
@@ -40,15 +39,21 @@ const formatCellNum = (v: unknown): string | number => {
   return n % 1 === 0 ? Math.round(n) : Math.round(n * 100) / 100;
 };
 
-const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes, onFilterRoutes, horizonLabel }) => {
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [filterSearch, setFilterSearch] = useState('');
+const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColumns = [] }) => {
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
-  
   const [descriptionWidth, setDescriptionWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
   const [expandedShelves, setExpandedShelves] = useState<Set<string>>(new Set());
+  const [tooltip, setTooltip] = useState<{
+    codigo: string;
+    colKey: string;
+    colLabel: string;
+    breakdown: { destino: string; qty: number }[];
+    pedido: number;
+    anchorRect: DOMRect;
+  } | null>(null);
   const resizeRef = useRef<number>(0);
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
   const toggleShelf = (codigo: string) => {
     setExpandedShelves(prev => {
@@ -59,25 +64,10 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
     });
   };
 
-  const sortedRoutes = useMemo(() => [...routes].sort((a, b) => a.order - b.order), [routes]);
-
-  // TODO: quando a projeção por datas for finalizada, este filtro será refeito.
-  // Por enquanto, mantemos rotas ordenadas e desativamos a filtragem dinâmica,
-  // apenas para evitar erros de referência em tempo de execução.
-  const allFilterableRoutes = useMemo(
-    () => sortedRoutes.map(r => ({ id: r.id, name: r.name })),
-    [sortedRoutes]
-  );
-  const filteredRoutesOptions = allFilterableRoutes;
-  const isRouteVisible = (_name: string) => true;
-  const routesToDisplay = sortedRoutes;
-  const toggleRoute = (_name: string) => {};
-
   const handleSort = (columnKey: string, isCtrl: boolean) => {
     if (isResizing) return;
     setSortCriteria(prev => {
       const existingIndex = prev.findIndex(s => s.column === columnKey);
-      
       if (isCtrl) {
         if (existingIndex > -1) {
           const newCriteria = [...prev];
@@ -106,6 +96,40 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
     resizeRef.current = e.pageX;
   };
 
+  const handlePClick = (
+    e: React.MouseEvent,
+    item: ProductConsolidated | ComponentData,
+    colKey: string,
+    colLabel: string
+  ) => {
+    e.stopPropagation();
+    const rd = item.routeData[colKey];
+    if (!rd || rd.pedido === 0) return;
+    const breakdown = rd.breakdown && rd.breakdown.length > 0 ? rd.breakdown : [{ destino: 'Total', qty: rd.pedido }];
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setTooltip({
+      codigo: item.codigo,
+      colKey,
+      colLabel,
+      breakdown,
+      pedido: rd.pedido,
+      anchorRect: rect,
+    });
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tooltip && tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('td[data-tooltip-cell]')) {
+          setTooltip(null);
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [tooltip]);
+
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
@@ -113,17 +137,12 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
       setDescriptionWidth(prev => Math.max(150, Math.min(800, prev + delta)));
       resizeRef.current = e.pageX;
     };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
+    const handleMouseUp = () => setIsResizing(false);
     if (isResizing) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = 'col-resize';
     }
-
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
@@ -133,12 +152,10 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
 
   const sortedData = useMemo(() => {
     if (sortCriteria.length === 0) return data;
-
     return [...data].sort((a, b) => {
       for (const criterion of sortCriteria) {
-        let valA: any;
-        let valB: any;
-
+        let valA: unknown;
+        let valB: unknown;
         if (criterion.column.startsWith('route:')) {
           const parts = criterion.column.split(':');
           const routeName = parts[1];
@@ -146,21 +163,20 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
           valA = a.routeData[routeName]?.[field] || 0;
           valB = b.routeData[routeName]?.[field] || 0;
         } else {
-          valA = (a as any)[criterion.column] ?? '';
-          valB = (b as any)[criterion.column] ?? '';
+          valA = (a as unknown as Record<string, unknown>)[criterion.column] ?? '';
+          valB = (b as unknown as Record<string, unknown>)[criterion.column] ?? '';
         }
-
         const isAsc = criterion.direction === 'asc';
-
         if (typeof valA === 'string' && typeof valB === 'string') {
           const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
           if (cmp !== 0) return isAsc ? cmp : -cmp;
           continue;
         }
-
+        const numA = Number(valA);
+        const numB = Number(valB);
         if (valA === valB) continue;
-        if (valA < valB) return isAsc ? -1 : 1;
-        if (valA > valB) return isAsc ? 1 : -1;
+        if (numA < numB) return isAsc ? -1 : 1;
+        if (numA > numB) return isAsc ? 1 : -1;
       }
       return 0;
     });
@@ -178,81 +194,21 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
     );
   };
 
+  const allColumns = [
+    { key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true },
+    ...dateColumns.map(c => ({ key: c.key, label: c.label, isSoMoveis: false })),
+  ];
+
+  const totalColSpan = 5 + allColumns.length * 2;
+
   return (
     <div className="space-y-4 h-full flex flex-col">
-      <div className="flex items-center gap-4 bg-white dark:bg-[#252525] p-2 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm shrink-0">
-        <div className="relative">
-          <button 
-            onClick={() => setIsFilterOpen(!isFilterOpen)}
-            className="flex items-center gap-2 bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-[#333] transition-colors"
-          >
-            <Filter className="w-3.5 h-3.5 text-secondary" />
-            <span>Filtro de Colunas ({selectedRoutes.length || allFilterableRoutes.length})</span>
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isFilterOpen ? 'rotate-180' : ''}`} />
-          </button>
-
-          {isFilterOpen && (
-            <div className="absolute top-full left-0 mt-1 w-80 bg-white dark:bg-[#252525] border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-[100] overflow-hidden">
-              <div className="p-2 border-b border-gray-100 dark:border-gray-800">
-                <div className="relative">
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
-                  <input 
-                    type="text"
-                    placeholder="Pesquisar rota..."
-                    value={filterSearch}
-                    onChange={(e) => setFilterSearch(e.target.value)}
-                    className="w-full pl-7 pr-3 py-1 text-[11px] bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 rounded outline-none text-gray-900 dark:text-gray-100"
-                  />
-                </div>
-              </div>
-              <div className="max-h-60 overflow-auto p-1">
-                {filteredRoutesOptions.map(route => (
-                  <label key={route.id} className="flex items-center gap-2 p-1.5 hover:bg-gray-50 dark:hover:bg-[#2a2a2a] rounded cursor-pointer transition-colors">
-                    <input 
-                      type="checkbox"
-                      checked={selectedRoutes.includes(route.name)}
-                      onChange={() => toggleRoute(route.name)}
-                      className="rounded border-gray-300 text-secondary focus:ring-secondary h-3.5 w-3.5"
-                    />
-                    <span className={`text-[11px] truncate ${route.name === ROUTE_G_TERESINA ? 'font-bold text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                      {route.name}
-                    </span>
-                  </label>
-                ))}
-              </div>
-              {selectedRoutes.length > 0 && (
-                <div className="p-1 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-[#2a2a2a]">
-                  <button 
-                    onClick={() => onFilterRoutes([])}
-                    className="w-full text-[9px] font-bold text-red-500 uppercase py-1.5 hover:underline"
-                  >
-                    Exibir Todas as Colunas
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 max-h-12 overflow-y-auto pr-2 flex-1 items-center">
-          {selectedRoutes.map(name => (
-            <span key={name} className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold ${name === ROUTE_G_TERESINA ? 'bg-blue-600 text-white' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'}`}>
-              {name}
-              <button onClick={() => toggleRoute(name)}><X className="w-2.5 h-2.5 hover:opacity-70" /></button>
-            </span>
-          ))}
-          {selectedRoutes.length === 0 && (
-            <span className="text-[11px] text-neutral italic">Todas as colunas visíveis</span>
-          )}
-        </div>
-      </div>
-
       <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0">
         <div className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-250px)]">
           <table className="w-full text-left text-sm border-separate border-spacing-0 min-w-max">
             <thead className="sticky top-0 z-[70]">
               <tr className="bg-primary text-white">
-                <th 
+                <th
                   onClick={(e) => handleSort('codigo', e.ctrlKey)}
                   className="px-3 py-2 sticky left-0 top-0 z-[80] bg-primary border-b border-white/10 w-[110px] shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors"
                 >
@@ -261,7 +217,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                     {renderSortIndicator('codigo')}
                   </div>
                 </th>
-                <th 
+                <th
                   onClick={(e) => handleSort('descricao', e.ctrlKey)}
                   style={{ width: `${descriptionWidth}px`, minWidth: `${descriptionWidth}px` }}
                   className="px-3 py-2 sticky left-[110px] top-0 z-[80] bg-primary border-b border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors relative"
@@ -270,7 +226,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                     <span className="truncate">Descrição</span>
                     {renderSortIndicator('descricao')}
                   </div>
-                  <div 
+                  <div
                     onMouseDown={startResizing}
                     className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-highlight/50 transition-colors z-[90] flex items-center justify-center"
                     title="Arraste para redimensionar"
@@ -278,7 +234,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                     <div className="w-0.5 h-4 bg-white/20"></div>
                   </div>
                 </th>
-                <th 
+                <th
                   onClick={(e) => handleSort('estoqueAtual', e.ctrlKey)}
                   className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-l border-white/10 sticky top-0 z-[70] cursor-pointer hover:bg-[#083a80] transition-colors"
                 >
@@ -287,7 +243,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                     {renderSortIndicator('estoqueAtual')}
                   </div>
                 </th>
-                <th 
+                <th
                   onClick={(e) => handleSort('totalPedido', e.ctrlKey)}
                   className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 sticky top-0 z-[70] cursor-pointer hover:bg-[#083a80] transition-colors"
                 >
@@ -296,7 +252,7 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                     {renderSortIndicator('totalPedido')}
                   </div>
                 </th>
-                <th 
+                <th
                   onClick={(e) => handleSort('pendenteProducao', e.ctrlKey)}
                   className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-r border-white/10 sticky top-0 z-[70] cursor-pointer hover:bg-[#083a80] transition-colors"
                 >
@@ -306,95 +262,30 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                   </div>
                 </th>
 
-                {/* Coluna FIXA: Só Móveis (Condicional ao Filtro) */}
-                {isRouteVisible(ROUTE_SO_MOVEIS) && (
-                  <th className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
-                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">{horizonLabel || "Rota Fixa"}</div>
-                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
-                      Só Móveis
+                {allColumns.map(col => (
+                  <th
+                    key={col.key}
+                    className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[90px] sticky top-0 z-[70]"
+                    colSpan={2}
+                  >
+                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">
+                      {col.isSoMoveis ? (horizonLabel || 'Horizonte') : 'Data'}
+                    </div>
+                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[85px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
+                      {col.label}
                     </div>
                     <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_SO_MOVEIS}:pedido`, e.ctrlKey); }}
+                      <div
+                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${col.key}:pedido`, e.ctrlKey); }}
                         className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
-                        P {renderSortIndicator(`route:${ROUTE_SO_MOVEIS}:pedido`)}
+                        P {renderSortIndicator(`route:${col.key}:pedido`)}
                       </div>
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_SO_MOVEIS}:falta`, e.ctrlKey); }}
+                      <div
+                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${col.key}:falta`, e.ctrlKey); }}
                         className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
-                        F {renderSortIndicator(`route:${ROUTE_SO_MOVEIS}:falta`)}
-                      </div>
-                    </div>
-                  </th>
-                )}
-
-                {/* Coluna FIXA: Entrega G.Teresina (Condicional ao Filtro) */}
-                {isRouteVisible(ROUTE_G_TERESINA) && (
-                  <th className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
-                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">{horizonLabel || "Rota Fixa"}</div>
-                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
-                      Entrega G.Teresina
-                    </div>
-                    <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_G_TERESINA}:pedido`, e.ctrlKey); }}
-                        className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
-                      >
-                        P {renderSortIndicator(`route:${ROUTE_G_TERESINA}:pedido`)}
-                      </div>
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_G_TERESINA}:falta`, e.ctrlKey); }}
-                        className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
-                      >
-                        F {renderSortIndicator(`route:${ROUTE_G_TERESINA}:falta`)}
-                      </div>
-                    </div>
-                  </th>
-                )}
-                {/* Coluna FIXA: Cliente vem buscar (Condicional ao Filtro) */}
-                {isRouteVisible(ROUTE_CLIENTE_BUSCA) && (
-                  <th className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
-                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">{horizonLabel || "Rota Fixa"}</div>
-                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
-                      Cliente vem buscar
-                    </div>
-                    <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_CLIENTE_BUSCA}:pedido`, e.ctrlKey); }}
-                        className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
-                      >
-                        P {renderSortIndicator(`route:${ROUTE_CLIENTE_BUSCA}:pedido`)}
-                      </div>
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${ROUTE_CLIENTE_BUSCA}:falta`, e.ctrlKey); }}
-                        className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
-                      >
-                        F {renderSortIndicator(`route:${ROUTE_CLIENTE_BUSCA}:falta`)}
-                      </div>
-                    </div>
-                  </th>
-                )}
-                
-                {routesToDisplay.map(route => (
-                  <th key={route.id} className="px-2 py-3 text-center bg-secondary border-b border-white/10 border-l border-white/10 min-w-[130px] sticky top-0 z-[70]" colSpan={2}>
-                    <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">Rota {route.order}</div>
-                    <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[125px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
-                      {route.name}
-                    </div>
-                    <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${route.name}:pedido`, e.ctrlKey); }}
-                        className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
-                      >
-                        P {renderSortIndicator(`route:${route.name}:pedido`)}
-                      </div>
-                      <div 
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${route.name}:falta`, e.ctrlKey); }}
-                        className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
-                      >
-                        F {renderSortIndicator(`route:${route.name}:falta`)}
+                        F {renderSortIndicator(`route:${col.key}:falta`)}
                       </div>
                     </div>
                   </th>
@@ -403,18 +294,14 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
             </thead>
             <tbody className="text-gray-900 dark:text-gray-100">
               {sortedData.map((item, idx) => {
-                const gtData = item.routeData[ROUTE_G_TERESINA] || { pedido: 0, falta: 0 };
-                const smData = item.routeData[ROUTE_SO_MOVEIS] || { pedido: 0, falta: 0 };
-                const cbData = item.routeData[ROUTE_CLIENTE_BUSCA] || { pedido: 0, falta: 0 };
                 const isExpanded = expandedShelves.has(item.codigo);
-                
                 return (
                   <React.Fragment key={item.codigo}>
                     <tr className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group`}>
                       <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                         <div className="flex items-center gap-2">
                           {item.isShelf && (
-                            <button 
+                            <button
                               onClick={() => toggleShelf(item.codigo)}
                               className="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
                             >
@@ -424,21 +311,18 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                           {item.codigo}
                         </div>
                       </td>
-                      <td 
+                      <td
                         style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
                         className="px-3 py-1.5 text-[11px] sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate"
                       >
                         {item.descricao}
                       </td>
-                      
                       <td className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${item.estoqueAtual < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                        {item.isShelf ? '-' : (item.estoqueAtual === 0 ? '-' : item.estoqueAtual)}
+                        {item.isShelf ? '-' : item.estoqueAtual}
                       </td>
-                      
                       <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
                         {item.totalPedido === 0 ? '-' : item.totalPedido}
                       </td>
-  
                       <td className={`px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${item.pendenteProducao < 0 ? 'text-highlight' : 'text-green-600 dark:text-green-400'}`}>
                         {item.isShelf ? '-' : (item.pendenteProducao < 0 ? (
                           <div className="flex items-center justify-center gap-1">
@@ -448,47 +332,15 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                         ) : '-')}
                       </td>
 
-                      {/* Renderização da Rota Fixa Só Móveis (Condicional) */}
-                      {isRouteVisible(ROUTE_SO_MOVEIS) && (
-                        <React.Fragment>
-                          <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px]">
-                            {formatCellNum(smData.pedido)}
-                          </td>
-                          <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${smData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                            {item.isShelf ? '-' : formatCellNum(smData.falta)}
-                          </td>
-                        </React.Fragment>
-                      )}
-
-                      {/* Renderização da Rota Fixa Entrega G.Teresina (Condicional) */}
-                      {isRouteVisible(ROUTE_G_TERESINA) && (
-                        <React.Fragment>
-                          <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-blue-400 font-bold text-[11px]">
-                            {formatCellNum(gtData.pedido)}
-                          </td>
-                          <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${gtData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                            {item.isShelf ? '-' : formatCellNum(gtData.falta)}
-                          </td>
-                        </React.Fragment>
-                      )}
-
-                      {/* Renderização da Rota Fixa Cliente vem buscar (Condicional) */}
-                      {isRouteVisible(ROUTE_CLIENTE_BUSCA) && (
-                        <React.Fragment>
-                          <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-purple-400 font-bold text-[11px]">
-                            {formatCellNum(cbData.pedido)}
-                          </td>
-                          <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${cbData.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                            {item.isShelf ? '-' : formatCellNum(cbData.falta)}
-                          </td>
-                        </React.Fragment>
-                      )}
-
-                      {routesToDisplay.map(route => {
-                        const rd = item.routeData[route.name] || { pedido: 0, falta: 0 };
+                      {allColumns.map(col => {
+                        const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
                         return (
-                          <React.Fragment key={route.id}>
-                            <td className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-medium text-[11px]">
+                          <React.Fragment key={col.key}>
+                            <td
+                              data-tooltip-cell
+                              onClick={(e) => handlePClick(e, item, col.key, col.label)}
+                              className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
+                            >
                               {formatCellNum(rd.pedido)}
                             </td>
                             <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
@@ -499,94 +351,55 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
                       })}
                     </tr>
 
-                    {/* Sublinhas dos Componentes */}
-                    {item.isShelf && isExpanded && item.components?.map((comp, cIdx) => {
-                      const cGtData = comp.routeData[ROUTE_G_TERESINA] || { pedido: 0, falta: 0 };
-                      const cSmData = comp.routeData[ROUTE_SO_MOVEIS] || { pedido: 0, falta: 0 };
-                      const cCbData = comp.routeData[ROUTE_CLIENTE_BUSCA] || { pedido: 0, falta: 0 };
+                    {item.isShelf && isExpanded && item.components?.map((comp) => (
+                      <tr key={`${item.codigo}-${comp.codigo}`} className="bg-gray-100/30 dark:bg-gray-800/20 border-l-4 border-secondary animate-in slide-in-from-top-1 duration-200">
+                        <td className="px-3 py-1 text-[10px] font-mono sticky left-0 z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)]">
+                          <div className="flex items-center gap-2 pl-4">
+                            <CornerDownRight className="w-3 h-3 text-neutral opacity-50" />
+                            {comp.codigo}
+                          </div>
+                        </td>
+                        <td
+                          style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
+                          className="px-3 py-1 text-[10px] sticky left-[110px] z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)] truncate italic text-neutral"
+                        >
+                          {comp.descricao}
+                        </td>
+                        <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400 border-l border-gray-100 dark:border-gray-800">
+                          {comp.estoqueAtual}
+                        </td>
+                        <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400">
+                          {comp.totalPedido === 0 ? '-' : comp.totalPedido}
+                        </td>
+                        <td className={`px-3 py-1 text-center font-bold text-[10px] border-r border-gray-100 dark:border-gray-800 ${comp.falta < 0 ? 'text-highlight' : 'text-green-600'}`}>
+                          {formatCellNum(comp.falta)}
+                        </td>
 
-                      return (
-                        <tr key={`${item.codigo}-${comp.codigo}`} className="bg-gray-100/30 dark:bg-gray-800/20 border-l-4 border-secondary animate-in slide-in-from-top-1 duration-200">
-                          <td className="px-3 py-1 text-[10px] font-mono sticky left-0 z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)]">
-                            <div className="flex items-center gap-2 pl-4">
-                              <CornerDownRight className="w-3 h-3 text-neutral opacity-50" />
-                              {comp.codigo}
-                            </div>
-                          </td>
-                          <td 
-                            style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
-                            className="px-3 py-1 text-[10px] sticky left-[110px] z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)] truncate italic text-neutral"
-                          >
-                            {comp.descricao}
-                          </td>
-                          <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400 border-l border-gray-100 dark:border-gray-800">
-                            {comp.estoqueAtual === 0 ? '-' : comp.estoqueAtual}
-                          </td>
-                          <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400">
-                            {comp.totalPedido === 0 ? '-' : comp.totalPedido}
-                          </td>
-                          <td className={`px-3 py-1 text-center font-bold text-[10px] border-r border-gray-100 dark:border-gray-800 ${comp.falta < 0 ? 'text-highlight' : 'text-green-600'}`}>
-                            {formatCellNum(comp.falta)}
-                          </td>
-
-                          {/* Componente: Só Móveis */}
-                          {isRouteVisible(ROUTE_SO_MOVEIS) && (
-                            <React.Fragment>
-                              <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
-                                {formatCellNum(cSmData.pedido)}
+                        {allColumns.map(col => {
+                          const cRd = comp.routeData[col.key] || { pedido: 0, falta: 0 };
+                          return (
+                            <React.Fragment key={col.key}>
+                              <td
+                                data-tooltip-cell
+                                onClick={(e) => handlePClick(e, comp, col.key, col.label)}
+                                className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
+                              >
+                                {formatCellNum(cRd.pedido)}
                               </td>
-                              <td className={`px-2 py-1 text-center font-bold text-[10px] ${cSmData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
-                                {formatCellNum(cSmData.falta)}
+                              <td className={`px-2 py-1 text-center font-bold text-[10px] ${cRd.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
+                                {formatCellNum(cRd.falta)}
                               </td>
                             </React.Fragment>
-                          )}
-
-                          {/* Componente: G.Teresina */}
-                          {isRouteVisible(ROUTE_G_TERESINA) && (
-                            <React.Fragment>
-                              <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
-                                {formatCellNum(cGtData.pedido)}
-                              </td>
-                              <td className={`px-2 py-1 text-center font-bold text-[10px] ${cGtData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
-                                {formatCellNum(cGtData.falta)}
-                              </td>
-                            </React.Fragment>
-                          )}
-
-                          {/* Componente: Cliente Vem Buscar */}
-                          {isRouteVisible(ROUTE_CLIENTE_BUSCA) && (
-                            <React.Fragment>
-                              <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px]">
-                                {formatCellNum(cCbData.pedido)}
-                              </td>
-                              <td className={`px-2 py-1 text-center font-bold text-[10px] ${cCbData.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
-                                {formatCellNum(cCbData.falta)}
-                              </td>
-                            </React.Fragment>
-                          )}
-
-                          {routesToDisplay.map(route => {
-                            const rd = comp.routeData[route.name] || { pedido: 0, falta: 0 };
-                            return (
-                              <React.Fragment key={route.id}>
-                                <td className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-gray-500 font-medium text-[10px]">
-                                  {formatCellNum(rd.pedido)}
-                                </td>
-                                <td className={`px-2 py-1 text-center font-bold text-[10px] ${rd.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
-                                  {rd.falta || '-'}
-                                </td>
-                              </React.Fragment>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
+                          );
+                        })}
+                      </tr>
+                    ))}
                   </React.Fragment>
                 );
               })}
               {sortedData.length === 0 && (
                 <tr>
-                  <td colSpan={7 + routesToDisplay.length * 2 + (isRouteVisible(ROUTE_CLIENTE_BUSCA) ? 2 : 0)} className="px-4 py-16 text-center text-neutral">
+                  <td colSpan={totalColSpan} className="px-4 py-16 text-center text-neutral">
                     <div className="flex flex-col items-center gap-2">
                       <AlertTriangle className="w-10 h-10 opacity-20" />
                       <p className="text-gray-500 dark:text-gray-400 text-sm">Nenhum dado encontrado para exibição.</p>
@@ -599,10 +412,46 @@ const ProjectionTable: React.FC<Props> = ({ data, routes, orders, selectedRoutes
         </div>
       </div>
 
+      {tooltip && (
+        <div
+          ref={tooltipRef}
+          className="fixed z-[100] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[220px] max-w-[320px]"
+          style={{
+            left: Math.min(tooltip.anchorRect.right, window.innerWidth - 260),
+            top: tooltip.anchorRect.bottom + 8,
+          }}
+        >
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-[#1f2933]">
+            <div className="flex flex-col">
+              <span className="text-[11px] font-bold text-neutral uppercase tracking-widest">{tooltip.codigo}</span>
+              <span className="text-[10px] text-gray-600 dark:text-gray-400">{tooltip.colLabel}</span>
+            </div>
+            <button
+              onClick={() => setTooltip(null)}
+              className="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-[10px] text-neutral mb-2">Quantidade pedida: <strong>{tooltip.pedido}</strong></p>
+            <p className="text-[9px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Destinos:</p>
+            <ul className="space-y-1">
+              {tooltip.breakdown.map((b, i) => (
+                <li key={i} className="text-[11px] flex justify-between gap-4">
+                  <span>{b.destino}</span>
+                  <span className="font-bold text-secondary">{b.qty}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-[#252525] p-2 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-3 text-[10px] text-neutral italic shrink-0">
         <Info className="w-3.5 h-3.5 text-secondary" />
         <span>
-          <strong>Dica Operacional:</strong> Use o filtro <strong>Colunas </strong> para alternar a exibição da <strong>Entrega G.Teresina</strong> e outras carradas dinâmicas.
+          <strong>Dica Operacional:</strong> A coluna <strong>Só Móveis</strong> é prioridade fixa nº 1. As demais colunas são por data de saída (<strong>previsao_atual</strong>). Clique em <strong>P</strong> para ver o detalhamento por destino.
         </span>
       </div>
     </div>

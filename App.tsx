@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -14,16 +13,13 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { UserProfile, Order, StockItem, Route, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
-import { getHorizonInfo, ROUTE_G_TERESINA, ROUTE_SO_MOVEIS, ROUTE_CLIENTE_BUSCA, getCategoriaFromObservacoes, isCategoriaEspecial, CATEGORY_REQUISICAO, CATEGORY_INSERIR_ROMANEIO, CATEGORY_ENTREGA_GT, CATEGORY_RETIRADA } from './utils';
+import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
+import { getHorizonInfo, getCategoriaFromObservacoes, CATEGORY_REQUISICAO, getDateColumns, getTodayStart, dateToKey, formatDestinoForTooltip, parseOrderDate } from './utils';
 import { fetchStock } from './api';
 import {
   supabase,
   fetchShelfFicha,
   upsertShelfFicha,
-  fetchDeliverySequence,
-  syncDeliverySequenceFull,
-  subscribeDeliverySequence,
   fetchUserAccounts,
   upsertUserAccount,
   deleteUserAccount,
@@ -40,7 +36,6 @@ import {
 } from './supabaseClient';
 import { useQueryClient } from '@tanstack/react-query';
 import ProjectionTable from './components/ProjectionTable';
-import SequenceTable from './components/SequenceTable';
 import OrdersView from './components/OrdersView';
 import ImportModal from './components/ImportModal';
 import Login from './components/Login';
@@ -48,18 +43,16 @@ import UserManagement from './components/UserManagement';
 
 const STORAGE_KEYS = {
   USERS: 'sa_industrial_accounts_v2',
-  ROUTES: 'sa_industrial_routes_v2',
   SHELF_FICHA: 'sa_industrial_shelf_ficha_v2',
   USER_SESSION: 'sa_industrial_user_session_v2',
   LOGO: 'sa_industrial_company_logo_v1',
 };
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'PROJECAO' | 'SEQUENCIA' | 'ROMANEIO' | 'USUARIOS'>('PROJECAO');
+  const [activeTab, setActiveTab] = useState<'PROJECAO' | 'ROMANEIO' | 'USUARIOS'>('PROJECAO');
   const [darkMode, setDarkMode] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedRouteNames, setSelectedRouteNames] = useState<string[]>([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
   const [showErpPanel, setShowErpPanel] = useState(false);
@@ -101,11 +94,6 @@ const App: React.FC = () => {
   const projection: ProjecaoImportada[] = supabase ? projectionFromSupabase : projectionLocal;
   const orders: Order[] = useMemo(() => mapProjecaoImportadaToOrders(projection), [projection]);
 
-  const [routes, setRoutes] = useState<Route[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.ROUTES);
-    return saved ? JSON.parse(saved) : [];
-  });
-
   const queryClient = useQueryClient();
 
   // Supabase: usuários (com real-time)
@@ -131,15 +119,6 @@ const App: React.FC = () => {
     initialData: undefined,
   });
   const usersFromSupabase = usersQuery.data;
-
-  // Supabase: sequenciamento de entrega (com real-time)
-  const routesQuery = useQuery({
-    queryKey: ['delivery_sequence'],
-    queryFn: fetchDeliverySequence,
-    enabled: !!supabase,
-    initialData: undefined,
-  });
-  const routesFromSupabase = routesQuery.data;
 
   const shelfFichaQuery = useQuery({
     queryKey: ['shelf_ficha'],
@@ -179,16 +158,12 @@ const App: React.FC = () => {
 
   // Fonte de dados: Supabase ou localStorage
   const effectiveUsers = supabase && usersFromSupabase ? usersFromSupabase : users;
-  const effectiveRoutes = supabase && routesFromSupabase !== undefined ? routesFromSupabase : routes;
   const effectiveLogo = supabase && logoFromSupabase !== undefined ? logoFromSupabase : companyLogo;
 
 
   useEffect(() => {
     if (!supabase) localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
   }, [supabase, users]);
-  useEffect(() => {
-    if (!supabase) localStorage.setItem(STORAGE_KEYS.ROUTES, JSON.stringify(routes));
-  }, [supabase, routes]);
   useEffect(() => {
     if (!supabase) localStorage.setItem(STORAGE_KEYS.SHELF_FICHA, JSON.stringify(shelfFichaLocal));
   }, [supabase, shelfFichaLocal]);
@@ -206,50 +181,14 @@ const App: React.FC = () => {
     const unsubUsers = subscribeUserAccounts((list) => {
       queryClient.setQueryData(['user_accounts'], list);
     });
-    const unsubRoutes = subscribeDeliverySequence((list) => {
-      queryClient.setQueryData(['delivery_sequence'], list);
-    });
     const unsubLogo = subscribeCompanyLogo((logo) => {
       queryClient.setQueryData(['company_logo'], logo);
     });
     return () => {
       unsubUsers();
-      unsubRoutes();
       unsubLogo();
     };
   }, [supabase, queryClient]);
-
-  // Sincroniza rotas quando os pedidos (projeção) carregam (merge com rotas existentes)
-  useEffect(() => {
-    const source = orders;
-    if (source.length === 0) return;
-    if (supabase && routesFromSupabase === undefined) return; // Aguarda carregar do Supabase
-    const routeNamesInData = Array.from(
-      new Set(
-        source.map((o) => {
-          const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
-          if (isCategoriaEspecial(categoria)) return null;
-          return categoria || o.observacoesRomaneio;
-        })
-      )
-    ).filter((n): n is string => n !== null && n.trim() !== '' && n !== '&nbsp;');
-    const prev = supabase ? (routesFromSupabase ?? []) : routes;
-    const filtered = prev.filter((r) => routeNamesInData.includes(r.name));
-    const existingNames = new Set(filtered.map((r) => r.name));
-    const newNames = routeNamesInData.filter((n) => !existingNames.has(n));
-    const added: Route[] = newNames.map((name) => ({
-      id: uuidv4(),
-      name,
-      date: new Date().toISOString().split('T')[0],
-      order: 0,
-    }));
-    const merged = [...filtered, ...added].map((r, i) => ({ ...r, order: i + 1 }));
-    if (supabase) {
-      syncDeliverySequenceFull(merged).catch(console.error);
-    } else {
-      setRoutes(merged);
-    }
-  }, [orders, supabase, routesFromSupabase, routes, queryClient]);
 
   useEffect(() => {
     if (darkMode) document.documentElement.classList.add('dark');
@@ -305,15 +244,6 @@ const App: React.FC = () => {
     }
   };
 
-  const setRoutesWithSync = (newRoutes: Route[] | ((prev: Route[]) => Route[])) => {
-    const resolved = typeof newRoutes === 'function' ? newRoutes(effectiveRoutes) : newRoutes;
-    if (supabase) {
-      syncDeliverySequenceFull(resolved).catch(console.error);
-    } else {
-      setRoutes(resolved);
-    }
-  };
-
   const handleImportProjection = async (rows: ProjecaoImportada[]) => {
     if (supabase) {
       await replaceProjecaoImportada(rows);
@@ -344,7 +274,7 @@ const App: React.FC = () => {
   };
 
   const handleExportData = () => {
-    const backup = { users: effectiveUsers, stock, routes: effectiveRoutes, shelfFicha, exportedAt: new Date().toISOString() };
+    const backup = { users: effectiveUsers, stock, shelfFicha, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -364,21 +294,15 @@ const App: React.FC = () => {
       }
     }
     if (json.stock) setStockOverlay(json.stock);
-    if (json.routes) {
-      if (supabase) {
-        syncDeliverySequenceFull(json.routes)
-          .then(() => queryClient.invalidateQueries({ queryKey: ['delivery_sequence'] }))
-          .catch(console.error);
-      } else {
-        setRoutes(json.routes);
-      }
-    }
     if (json.shelfFicha && !supabase) setShelfFichaLocal(json.shelfFicha);
     if (json.shelfFicha && supabase) {
       upsertShelfFicha(json.shelfFicha).then(() => queryClient.invalidateQueries({ queryKey: ['shelf_ficha'] })).catch(console.error);
     }
     alert('Sistema restaurado com sucesso!');
   };
+
+  const dateColumns = useMemo(() => getDateColumns(), []);
+  const todayStart = useMemo(() => getTodayStart(), []);
 
   const consolidatedData = useMemo(() => {
     const productMap = new Map<string, ProductConsolidated>();
@@ -391,37 +315,24 @@ const App: React.FC = () => {
 
     const horizon = getHorizonInfo();
     const horizonDate = horizon.end;
-
+    const dateKeysSet = new Set(dateColumns.filter(c => !c.isAtrasados).map(c => c.key));
 
     const parseOrderDateLocal = (dateStr: string) => {
-      if (!dateStr) return null;
-      const d = new Date(dateStr);
-      if (!isNaN(d.getTime())) return d;
-      const parts = dateStr.split('/');
-      if (parts.length === 3) {
-        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      const d = parseOrderDate(dateStr);
+      if (d) {
+        d.setHours(0, 0, 0, 0);
+        return d;
       }
       return null;
     };
-    
-    orders.forEach(order => {
-      const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
 
-      // Validação do Horizonte para todos os pedidos (com base na data de entrega)
-      let isInHorizon = false;
-      const dEntrega = parseOrderDateLocal(order.dataEntrega);
-      if (dEntrega) {
-        dEntrega.setHours(0, 0, 0, 0);
-        isInHorizon = dEntrega <= horizonDate;
-      }
-      if (!isInHorizon) return;
-
-      if (!productMap.has(order.codigoProduto)) {
-        const normalizedCode = order.codigoProduto.trim().toUpperCase();
+    const ensureProduct = (codigo: string, descricao: string) => {
+      if (!productMap.has(codigo)) {
+        const normalizedCode = codigo.trim().toUpperCase();
         const ficha = shelfFichaMap.get(normalizedCode);
-        productMap.set(order.codigoProduto, {
-          codigo: order.codigoProduto,
-          descricao: order.descricao,
+        productMap.set(codigo, {
+          codigo,
+          descricao,
           estoqueAtual: 0,
           totalPedido: 0,
           pendenteProducao: 0,
@@ -433,32 +344,77 @@ const App: React.FC = () => {
           ] : undefined
         });
       }
-      const prod = productMap.get(order.codigoProduto)!;
-      const orderQty = order.qtdVinculada || order.qtdPedida;
-      prod.totalPedido += orderQty;
-      
-      const routeName = categoria || order.observacoesRomaneio;
-      
-      if (routeName && routeName !== '&nbsp;') {
-        if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0 };
-        prod.routeData[routeName].pedido += orderQty;
+      return productMap.get(codigo)!;
+    };
 
-        // Se for estante, replica para os componentes
+    const addToDateColumn = (obj: { routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }> }, colKey: string, qty: number, destinoDisplay: string) => {
+      if (!obj.routeData[colKey]) obj.routeData[colKey] = { pedido: 0, falta: 0, breakdown: [] };
+      obj.routeData[colKey].pedido += qty;
+      const existing = obj.routeData[colKey].breakdown!.find(b => b.destino === destinoDisplay);
+      if (existing) existing.qty += qty;
+      else obj.routeData[colKey].breakdown!.push({ destino: destinoDisplay, qty });
+    };
+
+    orders.forEach(order => {
+      const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
+      const dEntrega = parseOrderDateLocal(order.dataEntrega);
+      const orderQty = order.qtdVinculada || order.qtdPedida;
+      const destDisplay = formatDestinoForTooltip(categoria || order.observacoesRomaneio);
+
+      const prod = ensureProduct(order.codigoProduto, order.descricao);
+      prod.totalPedido += orderQty;
+
+      // 1. Só Móveis (Requisição) — horizonte próprio, prioridade fixa nº 1
+      if (categoria === CATEGORY_REQUISICAO && dEntrega && dEntrega <= horizonDate) {
+        const routeName = CATEGORY_REQUISICAO;
+        if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
+        prod.routeData[routeName].pedido += orderQty;
+        const existing = prod.routeData[routeName].breakdown!.find(b => b.destino === 'Requisição');
+        if (existing) existing.qty += orderQty;
+        else prod.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty });
+
         if (prod.isShelf && prod.components) {
           const normalizedCode = prod.codigo.trim().toUpperCase();
           const ficha = shelfFichaMap.get(normalizedCode)!;
-          
-          // Coluna
           const col = prod.components[0];
           col.totalPedido += orderQty * ficha.qtdColuna;
-          if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0 };
+          if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
           col.routeData[routeName].pedido += orderQty * ficha.qtdColuna;
-
-          // Bandeja
+          const colExisting = col.routeData[routeName].breakdown!.find(b => b.destino === 'Requisição');
+          if (colExisting) colExisting.qty += orderQty * ficha.qtdColuna;
+          else col.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * ficha.qtdColuna });
           const ban = prod.components[1];
           ban.totalPedido += orderQty * ficha.qtdBandeja;
-          if (!ban.routeData[routeName]) ban.routeData[routeName] = { pedido: 0, falta: 0 };
+          if (!ban.routeData[routeName]) ban.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
           ban.routeData[routeName].pedido += orderQty * ficha.qtdBandeja;
+          const banExisting = ban.routeData[routeName].breakdown!.find(b => b.destino === 'Requisição');
+          if (banExisting) banExisting.qty += orderQty * ficha.qtdBandeja;
+          else ban.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * ficha.qtdBandeja });
+        }
+      }
+
+      // 2. Colunas por data (Atrasados + 15 dias)
+      const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
+      if (dEntrega && lastFutureDate && dEntrega > lastFutureDate) return;
+
+      if (!dEntrega || dEntrega <= todayStart) {
+        addToDateColumn(prod, 'ATRASADOS', orderQty, destDisplay);
+        if (prod.isShelf && prod.components) {
+          const normalizedCode = prod.codigo.trim().toUpperCase();
+          const ficha = shelfFichaMap.get(normalizedCode)!;
+          addToDateColumn(prod.components[0], 'ATRASADOS', orderQty * ficha.qtdColuna, destDisplay);
+          addToDateColumn(prod.components[1], 'ATRASADOS', orderQty * ficha.qtdBandeja, destDisplay);
+        }
+      } else {
+        const key = dateToKey(dEntrega);
+        if (dateKeysSet.has(key)) {
+          addToDateColumn(prod, key, orderQty, destDisplay);
+          if (prod.isShelf && prod.components) {
+            const normalizedCode = prod.codigo.trim().toUpperCase();
+            const ficha = shelfFichaMap.get(normalizedCode)!;
+            addToDateColumn(prod.components[0], key, orderQty * ficha.qtdColuna, destDisplay);
+            addToDateColumn(prod.components[1], key, orderQty * ficha.qtdBandeja, destDisplay);
+          }
         }
       }
     });
@@ -477,16 +433,39 @@ const App: React.FC = () => {
       }
     });
 
-    const sortedRoutes = [...effectiveRoutes].sort((a, b) => a.order - b.order);
-    
+    // Consumo de estoque: 1) Só Móveis 2) Atrasados 3) datas em ordem
+    const consumptionOrder = [CATEGORY_REQUISICAO, 'ATRASADOS', ...dateColumns.filter(c => !c.isAtrasados).map(c => c.key)];
+
     productMap.forEach(prod => {
       if (!prod.isShelf) {
         let runningBalance = Math.max(0, prod.estoqueAtual);
         let totalFalta = 0;
 
-        const processRoute = (routeName: string) => {
-          const rd = prod.routeData[routeName];
-          if (rd) {
+        for (const colKey of consumptionOrder) {
+          const rd = prod.routeData[colKey];
+          if (!rd) continue;
+          const needed = rd.pedido;
+          if (runningBalance >= needed) {
+            rd.falta = 0;
+            runningBalance -= needed;
+          } else {
+            const missing = needed - runningBalance;
+            rd.falta = -missing;
+            totalFalta += rd.falta;
+            runningBalance = 0;
+          }
+        }
+        prod.pendenteProducao = totalFalta;
+      } else if (prod.components) {
+        let shelfTotalFalta = 0;
+
+        prod.components.forEach(comp => {
+          let runningBalance = Math.max(0, comp.estoqueAtual);
+          let compTotalFalta = 0;
+
+          for (const colKey of consumptionOrder) {
+            const rd = comp.routeData[colKey];
+            if (!rd) continue;
             const needed = rd.pedido;
             if (runningBalance >= needed) {
               rd.falta = 0;
@@ -494,56 +473,12 @@ const App: React.FC = () => {
             } else {
               const missing = needed - runningBalance;
               rd.falta = -missing;
-              totalFalta += rd.falta;
+              compTotalFalta += rd.falta;
               runningBalance = 0;
             }
+            if (!prod.routeData[colKey]) prod.routeData[colKey] = { pedido: 0, falta: 0 };
+            prod.routeData[colKey].falta = Math.min(prod.routeData[colKey].falta ?? 0, rd.falta);
           }
-        };
-
-        processRoute(CATEGORY_REQUISICAO);
-        processRoute(CATEGORY_INSERIR_ROMANEIO);
-        processRoute(CATEGORY_ENTREGA_GT);
-        processRoute(CATEGORY_RETIRADA);
-        sortedRoutes.forEach(r => processRoute(r.name));
-        
-        prod.pendenteProducao = totalFalta;
-      } else if (prod.components) {
-        // Processamento para componentes da estante
-        let shelfTotalFalta = 0;
-
-        prod.components.forEach(comp => {
-          let runningBalance = Math.max(0, comp.estoqueAtual);
-          let compTotalFalta = 0;
-
-          const processCompRoute = (routeName: string) => {
-            const rd = comp.routeData[routeName];
-            if (rd) {
-              const needed = rd.pedido;
-              if (runningBalance >= needed) {
-                rd.falta = 0;
-                runningBalance -= needed;
-              } else {
-                const missing = needed - runningBalance;
-                rd.falta = -missing;
-                compTotalFalta += rd.falta;
-                runningBalance = 0;
-              }
-              
-              // Atualiza a falta na rota principal do produto pai para visualização
-              if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0 };
-              // A falta do pai é a soma das faltas dos componentes? 
-              // O requisito diz: "exibir informações dos componentes"
-              // Vamos manter a falta do pai como 0 ou baseada no componente mais crítico?
-              // Geralmente se falta 1 componente, falta a estante.
-              prod.routeData[routeName].falta = Math.min(prod.routeData[routeName].falta || 0, rd.falta);
-            }
-          };
-
-          processCompRoute(CATEGORY_REQUISICAO);
-          processCompRoute(CATEGORY_INSERIR_ROMANEIO);
-          processCompRoute(CATEGORY_ENTREGA_GT);
-          processCompRoute(CATEGORY_RETIRADA);
-          sortedRoutes.forEach(r => processCompRoute(r.name));
 
           comp.falta = compTotalFalta;
           shelfTotalFalta = Math.min(shelfTotalFalta, compTotalFalta);
@@ -559,41 +494,9 @@ const App: React.FC = () => {
       result = result.filter(p => p.codigo.toLowerCase().includes(lowerSearch) || p.descricao.toLowerCase().includes(lowerSearch));
     }
     return result;
-  }, [orders, stock, effectiveRoutes, shelfFicha, searchTerm]);
-
-  const displayData = useMemo(() => {
-    if (selectedRouteNames.length === 0) return consolidatedData;
-    return consolidatedData.filter(p => selectedRouteNames.some(routeName => p.routeData[routeName] && p.routeData[routeName].pedido > 0));
-  }, [consolidatedData, selectedRouteNames]);
+  }, [orders, stock, shelfFicha, searchTerm, dateColumns, todayStart]);
 
   const uniqueOrdersCount = useMemo(() => new Set(orders.map(o => o.numeroPedido)).size, [orders]);
-  const uniqueOrdersInRouteCount = useMemo(() => {
-    const horizon = getHorizonInfo();
-    const horizonDate = horizon.end;
-    const parseOrderDateLocal = (dateStr: string) => {
-      if (!dateStr) return null;
-      const d = new Date(dateStr);
-      if (!isNaN(d.getTime())) return d;
-      const parts = dateStr.split('/');
-      if (parts.length === 3) {
-        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-      }
-      return null;
-    };
-
-    return new Set(
-      orders
-        .filter(o => {
-          const categoria = getCategoriaFromObservacoes(o.observacoesRomaneio);
-          if (!categoria) return false;
-          const dEntrega = parseOrderDateLocal(o.dataEntrega);
-          if (!dEntrega) return false;
-          dEntrega.setHours(0, 0, 0, 0);
-          return dEntrega <= horizonDate;
-        })
-        .map(o => o.numeroPedido)
-    ).size;
-  }, [orders]);
 
   if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
 
@@ -661,7 +564,6 @@ const App: React.FC = () => {
 
       <nav className="bg-white dark:bg-[#252525] border-b border-gray-200 dark:border-gray-700 px-4 flex gap-1 sticky top-[72px] z-[55]">
         <TabButton active={activeTab === 'PROJECAO'} onClick={() => setActiveTab('PROJECAO')} icon={<BarChart3 className="w-4 h-4" />} label="Projeção de Estoque" />
-        <TabButton active={activeTab === 'SEQUENCIA'} onClick={() => setActiveTab('SEQUENCIA')} icon={<ArrowRightLeft className="w-4 h-4" />} label="Sequência de Entrega" />
         <TabButton active={activeTab === 'ROMANEIO'} onClick={() => setActiveTab('ROMANEIO')} icon={<ClipboardList className="w-4 h-4" />} label="Romaneio / Pedidos" />
         {currentUser.profile === 'ADMIN' && ( <TabButton active={activeTab === 'USUARIOS'} onClick={() => setActiveTab('USUARIOS')} icon={<Users className="w-4 h-4" />} label="Gestão" /> )}
       </nav>
@@ -669,16 +571,12 @@ const App: React.FC = () => {
       <main className="flex-1 p-6 overflow-auto">
         {activeTab === 'PROJECAO' && (
           <ProjectionTable
-            data={displayData}
-            routes={effectiveRoutes}
+            data={consolidatedData}
             orders={orders}
-            onRoutesReorder={setRoutesWithSync}
-            selectedRoutes={selectedRouteNames}
-            onFilterRoutes={setSelectedRouteNames}
             horizonLabel={getHorizonInfo().label}
+            dateColumns={dateColumns}
           />
         )}
-        {activeTab === 'SEQUENCIA' && ( <SequenceTable routes={effectiveRoutes} orders={orders} onReorder={setRoutesWithSync} isAdmin={currentUser.profile !== 'CONSULTA'} /> )}
         {activeTab === 'ROMANEIO' && ( <OrdersView orders={orders} /> )}
         {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && ( <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} companyLogo={effectiveLogo} onLogoChange={handleLogoChange} /> )}
       </main>
@@ -686,8 +584,7 @@ const App: React.FC = () => {
       <footer className="bg-white dark:bg-[#252525] border-t border-gray-200 dark:border-gray-700 p-2 px-6 flex justify-between text-[11px] text-neutral">
         <div className="flex gap-4">
           <span>Pedidos Únicos: <b>{uniqueOrdersCount}</b></span>
-          <span>Produtos: <b>{displayData.length}</b></span>
-          <span>Rotas Ativas: <b>{effectiveRoutes.length}</b></span>
+          <span>Produtos: <b>{consolidatedData.length}</b></span>
         </div>
         <div><span>&copy; 2025 Só Aço Industrial</span></div>
       </footer>

@@ -186,7 +186,7 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
         return dEntrega <= horizonDate;
       }
       return false;
-    }).map(o => o.numeroPedido)).size;
+    }).map(o => o.pedido)).size;
 
     // Indicadores Requisição
     const requisicaoOrders = categorias.filter(c => c.isRequisicaoRaw);
@@ -198,7 +198,7 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
         return dEntrega <= horizonDate;
       }
       return false;
-    }).map(o => o.numeroPedido)).size;
+    }).map(o => o.pedido)).size;
 
     // Indicadores Retirada
     const retiradaOrders = categorias.filter(c => c.isRetiradaRaw);
@@ -210,7 +210,7 @@ const OrdersView: React.FC<Props> = ({ orders: ordersProp }) => {
         return dEntrega <= horizonDate;
       }
       return false;
-    }).map(o => o.numeroPedido)).size;
+    }).map(o => o.pedido)).size;
 
     // Indicadores Pedidos Sem Vínculo (Inserir em Romaneio)
     const semVinculoOrders = categorias.filter(c => c.isSemVinculoRaw);

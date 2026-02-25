@@ -258,7 +258,7 @@ const UserManagement: React.FC<Props> = ({ users, onAddUser, onDeleteUser, onUpd
               className="w-full bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 rounded-xl py-2 px-4 outline-none focus:ring-2 focus:ring-secondary text-sm font-bold"
             >
               <option value="CONSULTA">CONSULTA (Apenas Leitura)</option>
-              <option value="PCP">PCP (Edição + Sequência)</option>
+              <option value="PCP">PCP (Edição)</option>
               <option value="ADMIN">ADMINISTRADOR (Acesso Total)</option>
             </select>
           </div>

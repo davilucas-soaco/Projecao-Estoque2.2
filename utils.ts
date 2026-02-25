@@ -79,3 +79,43 @@ export const getHorizonInfo = () => {
     label: `Horizonte: ${formatDate(start)} até ${formatDate(end)}`
   };
 };
+
+/** Retorna a data de hoje zerada (meia-noite) */
+export const getTodayStart = (): Date => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+/** Gera colunas de data para projeção: Atrasados + 15 dias futuros */
+export const getDateColumns = (): { key: string; label: string; date: Date | null; isAtrasados: boolean }[] => {
+  const today = getTodayStart();
+  const cols: { key: string; label: string; date: Date | null; isAtrasados: boolean }[] = [
+    { key: 'ATRASADOS', label: 'Atrasados até hoje', date: null, isAtrasados: true }
+  ];
+  for (let i = 1; i <= 15; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const key = d.toISOString().slice(0, 10);
+    cols.push({
+      key,
+      label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }),
+      date: d,
+      isAtrasados: false
+    });
+  }
+  return cols;
+};
+
+/** Normaliza data para chave YYYY-MM-DD */
+export const dateToKey = (d: Date): string => d.toISOString().slice(0, 10);
+
+/** Formata destino para exibição no tooltip */
+export const formatDestinoForTooltip = (categoria: string): string => {
+  if (!categoria || categoria === '&nbsp;') return 'Sem vínculo';
+  if (categoria === CATEGORY_ENTREGA_GT) return 'Entrega em Grande Teresina';
+  if (categoria === CATEGORY_RETIRADA) return 'Retirar';
+  if (categoria === CATEGORY_REQUISICAO) return 'Requisição';
+  if (categoria === CATEGORY_INSERIR_ROMANEIO) return 'Inserir em Romaneio';
+  return categoria;
+};
