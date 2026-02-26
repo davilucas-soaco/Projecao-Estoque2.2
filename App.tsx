@@ -41,7 +41,7 @@ import ImportModal from './components/ImportModal';
 import ImportSimulationModal from './components/ImportSimulationModal';
 import Login from './components/Login';
 import UserManagement from './components/UserManagement';
-import { buildConsolidatedData } from './consolidation';
+import { buildConsolidatedData, countEligibleProjectionRows } from './consolidation';
 
 const STORAGE_KEYS = {
   USERS: 'sa_industrial_accounts_v2',
@@ -383,6 +383,13 @@ const App: React.FC = () => {
       }),
     [ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, simulationState.considerarRequisicoes]
   );
+  const simulationEligibleRowsCount = useMemo(
+    () =>
+      countEligibleProjectionRows(ordersSimulation, dateColumns, {
+        considerarRequisicoes: simulationState.considerarRequisicoes,
+      }),
+    [ordersSimulation, dateColumns, simulationState.considerarRequisicoes]
+  );
 
   const uniqueOrdersCount = useMemo(() => new Set(orders.map(o => o.numeroPedido)).size, [orders]);
   const uniqueOrdersCountSimulation = useMemo(() => new Set(ordersSimulation.map(o => o.numeroPedido)).size, [ordersSimulation]);
@@ -522,7 +529,7 @@ const App: React.FC = () => {
               </button>
               {simulationState.data.length > 0 && (
                 <span className="text-[11px] text-neutral self-center">
-                  {simulationState.data.length} registros • Requisições: {simulationState.considerarRequisicoes ? 'Sim' : 'Não'}
+                  {simulationEligibleRowsCount} registros considerados • Requisições: {simulationState.considerarRequisicoes ? 'Sim' : 'Não'}
                 </span>
               )}
             </div>

@@ -25,7 +25,7 @@ export const getCategoriaFromObservacoes = (observacoes: string | undefined | nu
   const prefixMatch = original.match(/^\d+\s*[-–]\s*(.*)$/);
   const base = prefixMatch ? prefixMatch[1] : original;
 
-  const norm = normalizeText(base);
+  const norm = normalizeText(base).replace(/[^A-Z0-9]/g, '');
   if (!norm) return '';
 
   if (norm === 'REQUISICAO') return CATEGORY_REQUISICAO;

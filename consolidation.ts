@@ -5,11 +5,45 @@ import {
   getCategoriaFromObservacoes,
   CATEGORY_REQUISICAO,
   CATEGORY_INSERIR_ROMANEIO,
-  getTodayStart,
   dateToKey,
   formatDestinoForTooltip,
   parseOrderDate,
 } from './utils';
+
+interface ConsolidationFilterOptions {
+  considerarRequisicoes?: boolean;
+}
+
+const isOrderEligibleForProjection = (
+  order: Order,
+  lastFutureDate: Date | null | undefined,
+  options?: ConsolidationFilterOptions
+): boolean => {
+  const considerarRequisicoes = options?.considerarRequisicoes ?? true;
+  const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
+  const dEntrega = parseOrderDate(order.dataEntrega);
+  if (dEntrega) dEntrega.setHours(0, 0, 0, 0);
+
+  if (categoria === CATEGORY_INSERIR_ROMANEIO) return false;
+  if (!considerarRequisicoes && categoria === CATEGORY_REQUISICAO) return false;
+  if (!dEntrega) return false;
+  if (lastFutureDate && dEntrega > lastFutureDate) return false;
+  return true;
+};
+
+export function countEligibleProjectionRows(
+  orders: Order[],
+  dateColumns: DateColumn[],
+  options?: ConsolidationFilterOptions
+): number {
+  const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
+  return orders.reduce((acc, order) => {
+    if (isOrderEligibleForProjection(order, lastFutureDate, options)) {
+      return acc + 1;
+    }
+    return acc;
+  }, 0);
+}
 
 export function buildConsolidatedData(
   orders: Order[],
@@ -18,7 +52,7 @@ export function buildConsolidatedData(
   searchTerm: string,
   dateColumns: DateColumn[],
   todayStart: Date,
-  options?: { considerarRequisicoes?: boolean }
+  options?: ConsolidationFilterOptions
 ): ProductConsolidated[] {
   const considerarRequisicoes = options?.considerarRequisicoes ?? true;
 
@@ -82,15 +116,13 @@ export function buildConsolidatedData(
   const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
 
   orders.forEach((order) => {
+    if (!isOrderEligibleForProjection(order, lastFutureDate, options)) return;
+
     const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
     const dEntrega = parseOrderDateLocal(order.dataEntrega);
+    if (!dEntrega) return;
     const orderQty = order.qtdVinculada || order.qtdPedida;
     const destDisplay = formatDestinoForTooltip(categoria || order.observacoesRomaneio);
-
-    if (categoria === CATEGORY_INSERIR_ROMANEIO) return;
-    if (!considerarRequisicoes && categoria === CATEGORY_REQUISICAO) return;
-    if (!dEntrega) return;
-    if (lastFutureDate && dEntrega > lastFutureDate) return;
 
     const prod = ensureProduct(order.codigoProduto, order.descricao);
     prod.totalPedido += orderQty;
