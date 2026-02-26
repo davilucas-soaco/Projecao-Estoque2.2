@@ -12,6 +12,8 @@ import {
 
 interface ConsolidationFilterOptions {
   considerarRequisicoes?: boolean;
+  /** Quando true, produtos acabados (shelf) não são exibidos; apenas componentes (ex.: PA 6895 → PI 0761, MP 2788) */
+  flattenShelfProducts?: boolean;
 }
 
 const isOrderEligibleForProjection = (
@@ -45,6 +47,22 @@ export function countEligibleProjectionRows(
   }, 0);
 }
 
+/** Retorna a quantidade de pedidos únicos elegíveis para projeção (para indicador do rodapé) */
+export function getEligibleUniqueOrderCount(
+  orders: Order[],
+  dateColumns: DateColumn[],
+  options?: ConsolidationFilterOptions
+): number {
+  const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
+  const seen = new Set<string>();
+  orders.forEach((order) => {
+    if (isOrderEligibleForProjection(order, lastFutureDate, options)) {
+      seen.add(order.numeroPedido);
+    }
+  });
+  return seen.size;
+}
+
 export function buildConsolidatedData(
   orders: Order[],
   stock: StockItem[],
@@ -55,12 +73,16 @@ export function buildConsolidatedData(
   options?: ConsolidationFilterOptions
 ): ProductConsolidated[] {
   const considerarRequisicoes = options?.considerarRequisicoes ?? true;
+  const flattenShelfProducts = options?.flattenShelfProducts ?? false;
 
   const productMap = new Map<string, ProductConsolidated>();
   const shelfFichaMap = new Map<string, ShelfFicha>();
+  const componentCodesSet = new Set<string>();
   shelfFicha.forEach((f) => {
     if (f.codigoEstante) {
       shelfFichaMap.set(f.codigoEstante.trim().toUpperCase(), f);
+      componentCodesSet.add((f.codColuna || '').trim().toUpperCase());
+      componentCodesSet.add((f.codBandeja || '').trim().toUpperCase());
     }
   });
 
@@ -77,7 +99,25 @@ export function buildConsolidatedData(
     return null;
   };
 
-  const ensureProduct = (codigo: string, descricao: string) => {
+  /** Produto simples (sem hierarquia) - usado quando flattenShelfProducts ou para componentes */
+  const ensureSimpleProduct = (codigo: string, descricao: string): ProductConsolidated => {
+    if (!productMap.has(codigo)) {
+      productMap.set(codigo, {
+        codigo,
+        descricao,
+        estoqueAtual: 0,
+        totalPedido: 0,
+        pendenteProducao: 0,
+        routeData: {},
+      });
+    }
+    return productMap.get(codigo)!;
+  };
+
+  const ensureProduct = (codigo: string, descricao: string): ProductConsolidated => {
+    if (flattenShelfProducts) {
+      return ensureSimpleProduct(codigo, descricao);
+    }
     if (!productMap.has(codigo)) {
       const normalizedCode = codigo.trim().toUpperCase();
       const ficha = shelfFichaMap.get(normalizedCode);
@@ -101,16 +141,20 @@ export function buildConsolidatedData(
   };
 
   const addToDateColumn = (
-    obj: { routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }> },
+    obj: { routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number; numeroPedido?: string }[] }> },
     colKey: string,
     qty: number,
-    destinoDisplay: string
+    destinoDisplay: string,
+    numeroPedido?: string
   ) => {
     if (!obj.routeData[colKey]) obj.routeData[colKey] = { pedido: 0, falta: 0, breakdown: [] };
     obj.routeData[colKey].pedido += qty;
-    const existing = obj.routeData[colKey].breakdown!.find((b) => b.destino === destinoDisplay);
+    const ped = numeroPedido ?? '';
+    const existing = obj.routeData[colKey].breakdown!.find(
+      (b) => b.destino === destinoDisplay && (b.numeroPedido ?? '') === ped
+    );
     if (existing) existing.qty += qty;
-    else obj.routeData[colKey].breakdown!.push({ destino: destinoDisplay, qty });
+    else obj.routeData[colKey].breakdown!.push({ destino: destinoDisplay, qty, ...(numeroPedido ? { numeroPedido } : {}) });
   };
 
   const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
@@ -123,59 +167,91 @@ export function buildConsolidatedData(
     if (!dEntrega) return;
     const orderQty = order.qtdVinculada || order.qtdPedida;
     const destDisplay = formatDestinoForTooltip(categoria || order.observacoesRomaneio);
+    const normalizedCodigo = order.codigoProduto.trim().toUpperCase();
+    const ficha = shelfFichaMap.get(normalizedCodigo);
+    const isComponentOfAnother = componentCodesSet.has(normalizedCodigo);
+
+    if (flattenShelfProducts && ficha && !isComponentOfAnother) {
+      const col = ensureSimpleProduct(ficha.codColuna, ficha.descColuna);
+      const ban = ensureSimpleProduct(ficha.codBandeja, ficha.descBandeja);
+      const qtyCol = orderQty * ficha.qtdColuna;
+      const qtyBan = orderQty * ficha.qtdBandeja;
+      col.totalPedido += qtyCol;
+      ban.totalPedido += qtyBan;
+      if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && dEntrega <= horizonDate) {
+        const routeName = CATEGORY_REQUISICAO;
+        if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
+        col.routeData[routeName].pedido += qtyCol;
+        const colEx = col.routeData[routeName].breakdown!.find((b) => b.destino === 'Requisição' && (b.numeroPedido ?? '') === (order.numeroPedido ?? ''));
+        if (colEx) colEx.qty += qtyCol;
+        else col.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: qtyCol, numeroPedido: order.numeroPedido });
+        if (!ban.routeData[routeName]) ban.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
+        ban.routeData[routeName].pedido += qtyBan;
+        const banEx = ban.routeData[routeName].breakdown!.find((b) => b.destino === 'Requisição' && (b.numeroPedido ?? '') === (order.numeroPedido ?? ''));
+        if (banEx) banEx.qty += qtyBan;
+        else ban.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: qtyBan, numeroPedido: order.numeroPedido });
+      }
+      if (dEntrega <= todayStart && categoria !== CATEGORY_REQUISICAO) {
+        addToDateColumn(col, 'ATRASADOS', qtyCol, destDisplay, order.numeroPedido);
+        addToDateColumn(ban, 'ATRASADOS', qtyBan, destDisplay, order.numeroPedido);
+      } else if (dEntrega > todayStart) {
+        const key = dateToKey(dEntrega);
+        if (dateKeysSet.has(key)) {
+          addToDateColumn(col, key, qtyCol, destDisplay, order.numeroPedido);
+          addToDateColumn(ban, key, qtyBan, destDisplay, order.numeroPedido);
+        }
+      }
+      return;
+    }
 
     const prod = ensureProduct(order.codigoProduto, order.descricao);
     prod.totalPedido += orderQty;
-    if (prod.isShelf && prod.components) {
-      const normalizedCode = prod.codigo.trim().toUpperCase();
-      const ficha = shelfFichaMap.get(normalizedCode)!;
-      prod.components[0].totalPedido += orderQty * ficha.qtdColuna;
-      prod.components[1].totalPedido += orderQty * ficha.qtdBandeja;
+    if (!flattenShelfProducts && prod.isShelf && prod.components) {
+      const fic = shelfFichaMap.get(prod.codigo.trim().toUpperCase())!;
+      prod.components[0].totalPedido += orderQty * fic.qtdColuna;
+      prod.components[1].totalPedido += orderQty * fic.qtdBandeja;
     }
 
-    if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && dEntrega && dEntrega <= horizonDate) {
+    if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && dEntrega <= horizonDate) {
       const routeName = CATEGORY_REQUISICAO;
       if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
       prod.routeData[routeName].pedido += orderQty;
-      const existing = prod.routeData[routeName].breakdown!.find((b) => b.destino === 'Requisição');
+      const existing = prod.routeData[routeName].breakdown!.find((b) => b.destino === 'Requisição' && (b.numeroPedido ?? '') === (order.numeroPedido ?? ''));
       if (existing) existing.qty += orderQty;
-      else prod.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty });
+      else prod.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty, numeroPedido: order.numeroPedido });
 
-      if (prod.isShelf && prod.components) {
-        const normalizedCode = prod.codigo.trim().toUpperCase();
-        const ficha = shelfFichaMap.get(normalizedCode)!;
+      if (!flattenShelfProducts && prod.isShelf && prod.components) {
+        const fic = shelfFichaMap.get(prod.codigo.trim().toUpperCase())!;
         const col = prod.components[0];
         if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
-        col.routeData[routeName].pedido += orderQty * ficha.qtdColuna;
-        const colExisting = col.routeData[routeName].breakdown!.find((b) => b.destino === 'Requisição');
-        if (colExisting) colExisting.qty += orderQty * ficha.qtdColuna;
-        else col.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * ficha.qtdColuna });
+        col.routeData[routeName].pedido += orderQty * fic.qtdColuna;
+        const colExisting = col.routeData[routeName].breakdown!.find((b) => b.destino === 'Requisição' && (b.numeroPedido ?? '') === (order.numeroPedido ?? ''));
+        if (colExisting) colExisting.qty += orderQty * fic.qtdColuna;
+        else col.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * fic.qtdColuna, numeroPedido: order.numeroPedido });
         const ban = prod.components[1];
         if (!ban.routeData[routeName]) ban.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
-        ban.routeData[routeName].pedido += orderQty * ficha.qtdBandeja;
-        const banExisting = ban.routeData[routeName].breakdown!.find((b) => b.destino === 'Requisição');
-        if (banExisting) banExisting.qty += orderQty * ficha.qtdBandeja;
-        else ban.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * ficha.qtdBandeja });
+        ban.routeData[routeName].pedido += orderQty * fic.qtdBandeja;
+        const banExisting = ban.routeData[routeName].breakdown!.find((b) => b.destino === 'Requisição' && (b.numeroPedido ?? '') === (order.numeroPedido ?? ''));
+        if (banExisting) banExisting.qty += orderQty * fic.qtdBandeja;
+        else ban.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: orderQty * fic.qtdBandeja, numeroPedido: order.numeroPedido });
       }
     }
 
     if (dEntrega <= todayStart && categoria !== CATEGORY_REQUISICAO) {
-      addToDateColumn(prod, 'ATRASADOS', orderQty, destDisplay);
-      if (prod.isShelf && prod.components) {
-        const normalizedCode = prod.codigo.trim().toUpperCase();
-        const ficha = shelfFichaMap.get(normalizedCode)!;
-        addToDateColumn(prod.components[0], 'ATRASADOS', orderQty * ficha.qtdColuna, destDisplay);
-        addToDateColumn(prod.components[1], 'ATRASADOS', orderQty * ficha.qtdBandeja, destDisplay);
+      addToDateColumn(prod, 'ATRASADOS', orderQty, destDisplay, order.numeroPedido);
+      if (!flattenShelfProducts && prod.isShelf && prod.components) {
+        const fic = shelfFichaMap.get(prod.codigo.trim().toUpperCase())!;
+        addToDateColumn(prod.components[0], 'ATRASADOS', orderQty * fic.qtdColuna, destDisplay, order.numeroPedido);
+        addToDateColumn(prod.components[1], 'ATRASADOS', orderQty * fic.qtdBandeja, destDisplay, order.numeroPedido);
       }
     } else if (dEntrega > todayStart) {
       const key = dateToKey(dEntrega);
       if (dateKeysSet.has(key)) {
-        addToDateColumn(prod, key, orderQty, destDisplay);
-        if (prod.isShelf && prod.components) {
-          const normalizedCode = prod.codigo.trim().toUpperCase();
-          const ficha = shelfFichaMap.get(normalizedCode)!;
-          addToDateColumn(prod.components[0], key, orderQty * ficha.qtdColuna, destDisplay);
-          addToDateColumn(prod.components[1], key, orderQty * ficha.qtdBandeja, destDisplay);
+        addToDateColumn(prod, key, orderQty, destDisplay, order.numeroPedido);
+        if (!flattenShelfProducts && prod.isShelf && prod.components) {
+          const fic = shelfFichaMap.get(prod.codigo.trim().toUpperCase())!;
+          addToDateColumn(prod.components[0], key, orderQty * fic.qtdColuna, destDisplay, order.numeroPedido);
+          addToDateColumn(prod.components[1], key, orderQty * fic.qtdBandeja, destDisplay, order.numeroPedido);
         }
       }
     }

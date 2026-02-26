@@ -38,7 +38,7 @@ export const getCategoriaFromObservacoes = (observacoes: string | undefined | nu
     return CATEGORY_ENTREGA_GT;
   }
 
-  if (norm.includes('RETIRADA')) {
+  if (norm.includes('RETIRADA') || norm === 'RETIRAR') {
     return CATEGORY_RETIRADA;
   }
 

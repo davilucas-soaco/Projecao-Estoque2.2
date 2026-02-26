@@ -41,7 +41,7 @@ import ImportModal from './components/ImportModal';
 import ImportSimulationModal from './components/ImportSimulationModal';
 import Login from './components/Login';
 import UserManagement from './components/UserManagement';
-import { buildConsolidatedData, countEligibleProjectionRows } from './consolidation';
+import { buildConsolidatedData, countEligibleProjectionRows, getEligibleUniqueOrderCount } from './consolidation';
 
 const STORAGE_KEYS = {
   USERS: 'sa_industrial_accounts_v2',
@@ -372,7 +372,11 @@ const App: React.FC = () => {
   const todayStart = useMemo(() => getTodayStart(), []);
 
   const consolidatedData = useMemo(
-    () => buildConsolidatedData(orders, stock, shelfFicha, searchTerm, dateColumns, todayStart, { considerarRequisicoes: true }),
+    () =>
+      buildConsolidatedData(orders, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
+        considerarRequisicoes: true,
+        flattenShelfProducts: true,
+      }),
     [orders, stock, shelfFicha, searchTerm, dateColumns, todayStart]
   );
 
@@ -380,6 +384,7 @@ const App: React.FC = () => {
     () =>
       buildConsolidatedData(ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
         considerarRequisicoes: simulationState.considerarRequisicoes,
+        flattenShelfProducts: true,
       }),
     [ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, simulationState.considerarRequisicoes]
   );
@@ -391,8 +396,17 @@ const App: React.FC = () => {
     [ordersSimulation, dateColumns, simulationState.considerarRequisicoes]
   );
 
-  const uniqueOrdersCount = useMemo(() => new Set(orders.map(o => o.numeroPedido)).size, [orders]);
-  const uniqueOrdersCountSimulation = useMemo(() => new Set(ordersSimulation.map(o => o.numeroPedido)).size, [ordersSimulation]);
+  const uniqueOrdersCount = useMemo(
+    () => getEligibleUniqueOrderCount(orders, dateColumns, { considerarRequisicoes: true }),
+    [orders, dateColumns]
+  );
+  const uniqueOrdersCountSimulation = useMemo(
+    () =>
+      getEligibleUniqueOrderCount(ordersSimulation, dateColumns, {
+        considerarRequisicoes: simulationState.considerarRequisicoes,
+      }),
+    [ordersSimulation, dateColumns, simulationState.considerarRequisicoes]
+  );
 
   if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
 

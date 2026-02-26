@@ -53,7 +53,7 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
     codigo: string;
     colKey: string;
     colLabel: string;
-    breakdown: { destino: string; qty: number }[];
+    breakdown: { destino: string; qty: number; numeroPedido?: string }[];
     pedido: number;
     anchorRect: DOMRect;
   } | null>(null);
@@ -116,7 +116,7 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
     e.stopPropagation();
     const rd = item.routeData[colKey];
     if (!rd || rd.pedido === 0) return;
-    const breakdown = rd.breakdown && rd.breakdown.length > 0 ? rd.breakdown : [{ destino: 'Total', qty: rd.pedido }];
+    const breakdown = rd.breakdown && rd.breakdown.length > 0 ? rd.breakdown : [{ destino: 'Total', qty: rd.pedido } as { destino: string; qty: number; numeroPedido?: string }];
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setTooltip({
       codigo: item.codigo,
@@ -556,11 +556,16 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
           <div className="px-4 py-3">
             <p className="text-[10px] text-neutral mb-2">Quantidade pedida: <strong>{tooltip.pedido}</strong></p>
             <p className="text-[9px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Destinos:</p>
-            <ul className="space-y-1">
+            <ul className="space-y-2">
               {tooltip.breakdown.map((b, i) => (
-                <li key={i} className="text-[11px] flex justify-between gap-4">
-                  <span>{b.destino}</span>
-                  <span className="font-bold text-secondary">{b.qty}</span>
+                <li key={i} className="text-[11px]">
+                  <div className="flex justify-between gap-4 items-baseline">
+                    <span>{b.destino}</span>
+                    <span className="font-bold text-secondary">{b.qty}</span>
+                  </div>
+                  {b.numeroPedido && (
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 pl-0">Pedido: {b.numeroPedido}</p>
+                  )}
                 </li>
               ))}
             </ul>

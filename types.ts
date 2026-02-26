@@ -129,6 +129,7 @@ export interface ShelfFicha {
 export interface DestinoBreakdown {
   destino: string;
   qty: number;
+  numeroPedido?: string;
 }
 
 export interface RouteCellData {
