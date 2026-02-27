@@ -54,6 +54,7 @@ const STORAGE_KEYS = {
 };
 
 type ProjectionSubMode = 'PADRAO' | 'SIMULADO';
+type HorizonDays = 15 | 30 | 45 | 60;
 
 interface SimulationState {
   data: ProjecaoImportada[];
@@ -126,6 +127,7 @@ const App: React.FC = () => {
 
   // Simulação: totalmente isolada, apenas LocalStorage
   const [simulationState, setSimulationState] = useState<SimulationState>(loadSimulationFromStorage);
+  const [horizonDays, setHorizonDays] = useState<HorizonDays>(60);
   const ordersSimulation: Order[] = useMemo(() => mapProjecaoImportadaToOrders(simulationState.data), [simulationState.data]);
 
   useEffect(() => {
@@ -371,7 +373,8 @@ const App: React.FC = () => {
     alert('Sistema restaurado com sucesso!');
   };
 
-  const dateColumns = useMemo(() => getDateColumns(), []);
+  const dateColumns = useMemo(() => getDateColumns(horizonDays), [horizonDays]);
+  const horizonInfo = useMemo(() => getHorizonInfo(horizonDays), [horizonDays]);
   const todayStart = useMemo(() => getTodayStart(), []);
 
   const consolidatedData = useMemo(
@@ -537,9 +540,11 @@ const App: React.FC = () => {
             <ProjectionTable
               data={consolidatedData}
               orders={orders}
-              horizonLabel={getHorizonInfo().label}
+              horizonLabel={horizonInfo.label}
               dateColumns={dateColumns}
               considerarRequisicoes={true}
+              horizonDays={horizonDays}
+              onHorizonDaysChange={setHorizonDays}
             />
           </div>
         </div>
@@ -598,9 +603,11 @@ const App: React.FC = () => {
               <ProjectionTable
                 data={consolidatedDataSimulation}
                 orders={ordersSimulation}
-                horizonLabel={getHorizonInfo().label}
+                horizonLabel={horizonInfo.label}
                 dateColumns={dateColumns}
                 considerarRequisicoes={simulationState.considerarRequisicoes}
+                horizonDays={horizonDays}
+                onHorizonDaysChange={setHorizonDays}
               />
             )}
           </div>
@@ -649,7 +656,7 @@ const App: React.FC = () => {
           onClose={() => setIsPdfModalOpen(false)}
           getDataForPdf={getDataForPdf}
           dateColumns={dateColumns}
-          horizonLabel={getHorizonInfo().label}
+          horizonLabel={horizonInfo.label}
           companyLogo={effectiveLogo}
           currentUserName={currentUser.name}
           reportTitle={

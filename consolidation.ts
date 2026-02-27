@@ -1,7 +1,6 @@
 import type { Order, ProductConsolidated, ShelfFicha, StockItem } from './types';
 import type { DateColumn } from './types';
 import {
-  getHorizonInfo,
   getCategoriaFromObservacoes,
   CATEGORY_REQUISICAO,
   CATEGORY_INSERIR_ROMANEIO,
@@ -86,8 +85,7 @@ export function buildConsolidatedData(
     }
   });
 
-  const horizon = getHorizonInfo();
-  const horizonDate = horizon.end;
+  const horizonDate = dateColumns[dateColumns.length - 1]?.date;
   const dateKeysSet = new Set(dateColumns.filter((c) => !c.isAtrasados).map((c) => c.key));
 
   const parseOrderDateLocal = (dateStr: string) => {
@@ -178,7 +176,7 @@ export function buildConsolidatedData(
       const qtyBan = orderQty * ficha.qtdBandeja;
       col.totalPedido += qtyCol;
       ban.totalPedido += qtyBan;
-      if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && dEntrega <= horizonDate) {
+      if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && (!horizonDate || dEntrega <= horizonDate)) {
         const routeName = CATEGORY_REQUISICAO;
         if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
         col.routeData[routeName].pedido += qtyCol;
@@ -212,7 +210,7 @@ export function buildConsolidatedData(
       prod.components[1].totalPedido += orderQty * fic.qtdBandeja;
     }
 
-    if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && dEntrega <= horizonDate) {
+    if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && (!horizonDate || dEntrega <= horizonDate)) {
       const routeName = CATEGORY_REQUISICAO;
       if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
       prod.routeData[routeName].pedido += orderQty;

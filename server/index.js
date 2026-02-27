@@ -23,16 +23,27 @@ const dbConfig = {
   database: process.env.DB_NAME || process.env.DB_DATABASE,
 };
 
-// CORS: restrito à origem do frontend em dev
-const corsOptions = {
-  origin: [
-    'http://localhost:5173',
-    'http://10.80.1.15:5173',
-    'http://192.168.18.155:5173'
-  ],
-  optionsSuccessStatus: 200,
-};
-app.use(cors(corsOptions));
+// CORS (dev): permite localhost e faixas de rede local comuns no Vite (porta 5173)
+const allowedOriginPatterns = [
+  /^http:\/\/localhost:5173$/,
+  /^http:\/\/127\.0\.0\.1:5173$/,
+  /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}:5173$/,
+  /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}:5173$/,
+  /^http:\/\/172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}:5173$/,
+];
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Permite requests sem Origin (curl, health checks locais)
+      if (!origin) return callback(null, true);
+      const allowed = allowedOriginPatterns.some((pattern) => pattern.test(origin));
+      if (allowed) return callback(null, true);
+      return callback(new Error('Origem não permitida pelo CORS'));
+    },
+    optionsSuccessStatus: 200,
+  })
+);
 app.use(express.json());
 
 // Rota de saúde: abrir http://localhost:3000 no navegador mostra que a API está no ar

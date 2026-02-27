@@ -503,3 +503,262 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
   const fileName = `Projecao_Estoque_V2_${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(fileName);
 }
+
+interface GeneratePdfV3Options {
+  data: ProductConsolidated[];
+  visibleColumns: ColOption[];
+  horizonLabel: string;
+  companyLogo: string | null;
+  currentUserName: string;
+  reportTitle: string;
+  orientation: 'p' | 'l';
+}
+
+export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Promise<void> {
+  const {
+    data,
+    visibleColumns,
+    horizonLabel,
+    companyLogo,
+    currentUserName,
+    reportTitle,
+    orientation,
+  } = options;
+
+  const doc = new jsPDF({
+    orientation,
+    unit: 'pt',
+    format: 'a4',
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 25;
+  const headerHeight = 80;
+  let startY = margin;
+
+  const addHeader = (continuationLabel?: string) => {
+    doc.setFillColor(4, 17, 38);
+    doc.rect(0, 0, pageWidth, headerHeight, 'F');
+
+    const logoWidth = 50;
+    const logoHeight = 28;
+    const logoTop = (headerHeight - logoHeight) / 2;
+    const logoTextGap = 24;
+    const textStartX = companyLogo ? margin + logoWidth + logoTextGap : margin;
+
+    if (companyLogo) {
+      try {
+        doc.addImage(companyLogo, 'PNG', margin, logoTop, logoWidth, logoHeight);
+      } catch {
+        // ignora erro da imagem
+      }
+    }
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(reportTitle + (continuationLabel ? ` — ${continuationLabel}` : ''), textStartX, logoTop + 8);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    const now = new Date();
+    doc.text(
+      `Emissão: ${now.toLocaleString('pt-BR')} | Usuário: ${currentUserName} | ${horizonLabel}`,
+      textStartX,
+      logoTop + 22
+    );
+
+    startY = headerHeight + 12;
+  };
+
+  addHeader();
+
+  const selectedKeys = new Set(visibleColumns.map((c) => c.key));
+  const dataFiltered = data.filter((item) => {
+    const itemHasPedido = Object.entries(item.routeData).some(
+      ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
+    );
+    if (itemHasPedido) return true;
+    if (item.isShelf && item.components) {
+      return item.components.some((comp) =>
+        Object.entries(comp.routeData).some(
+          ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
+        )
+      );
+    }
+    return false;
+  });
+
+  const flattenRows = (): Array<ProductConsolidated | ComponentData> => {
+    const rows: Array<ProductConsolidated | ComponentData> = [];
+    for (const item of dataFiltered) {
+      rows.push(item);
+      if (item.isShelf && item.components) {
+        for (const comp of item.components) rows.push(comp);
+      }
+    }
+    return rows;
+  };
+
+  const allRows = flattenRows();
+
+  const isLandscape = orientation === 'l';
+  const dateColsPerPage = Math.max(1, isLandscape ? visibleColumns.length : Math.min(visibleColumns.length, 10));
+  const colChunks: ColOption[][] = [];
+  for (let i = 0; i < visibleColumns.length; i += dateColsPerPage) {
+    colChunks.push(visibleColumns.slice(i, i + dateColsPerPage));
+  }
+
+  for (let chunkIdx = 0; chunkIdx < colChunks.length; chunkIdx++) {
+    const cols = colChunks[chunkIdx];
+    if (chunkIdx > 0) {
+      doc.addPage(orientation === 'l' ? 'a4' : 'a4', orientation);
+      addHeader(`Continuação ${chunkIdx + 1}/${colChunks.length}`);
+    }
+
+    const head: (string | { content: string; colSpan: number })[][] = [
+      [
+        'Código',
+        'Descrição',
+        'Estoque',
+        'Pedido',
+        'Falta',
+        ...cols.map((c) => ({ content: c.label, colSpan: 2 })),
+      ],
+      [
+        '',
+        '',
+        '',
+        '',
+        '',
+        ...cols.flatMap(() => ['P', 'F']),
+      ],
+    ];
+
+    const body: string[][] = [];
+    for (const item of allRows) {
+      const isComponent = 'falta' in item && !('isShelf' in item);
+      const codigo = isComponent ? `  └ ${item.codigo}` : item.codigo;
+      const isShelf = 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
+      const estoque = isShelf ? '-' : String(item.estoqueAtual);
+      const pedido = item.totalPedido === 0 ? '-' : String(item.totalPedido);
+      const pendente =
+        isShelf
+          ? '-'
+          : 'pendenteProducao' in item
+            ? (item as ProductConsolidated).pendenteProducao
+            : (item as ComponentData).falta;
+      const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
+
+      const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
+      for (const col of cols) {
+        const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
+        row.push(formatCellNum(rd.pedido), formatCellNum(rd.falta));
+      }
+      body.push(row);
+    }
+
+    const tableMargin = margin;
+    const usableWidth = pageWidth - tableMargin * 2;
+    const pairCount = Math.max(1, cols.length);
+
+    const codeWidth = usableWidth * 0.1;
+    const estoqueWidth = usableWidth * 0.07;
+    const pedidoWidth = usableWidth * 0.07;
+    const faltaWidth = usableWidth * 0.07;
+    const baseRemaining = usableWidth - (codeWidth + estoqueWidth + pedidoWidth + faltaWidth);
+
+    const descBias =
+      pairCount <= 3 ? 0.62 :
+      pairCount <= 7 ? 0.52 :
+      0.42;
+
+    const minDescWidth = usableWidth * 0.2;
+    const minSubColWidth = usableWidth * 0.026;
+
+    let descWidth = baseRemaining * descBias;
+    let subColWidth = (baseRemaining - descWidth) / (pairCount * 2);
+
+    if (subColWidth < minSubColWidth) {
+      subColWidth = minSubColWidth;
+      descWidth = Math.max(minDescWidth, baseRemaining - subColWidth * pairCount * 2);
+    }
+    if (descWidth < minDescWidth) {
+      descWidth = minDescWidth;
+      subColWidth = Math.max(minSubColWidth, (baseRemaining - descWidth) / (pairCount * 2));
+    }
+
+    const descChars = Math.max(18, Math.floor(descWidth / 5.1));
+    const bodyResponsive = body.map((row) => {
+      const wrapped = wrapDescription(row[1], descChars).join('\n');
+      const next = [...row];
+      next[1] = wrapped;
+      return next;
+    });
+
+    autoTable(doc, {
+      head,
+      body: bodyResponsive,
+      startY,
+      margin: { left: tableMargin, right: tableMargin },
+      theme: 'grid',
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: {
+        fillColor: PRIMARY,
+        textColor: 255,
+        fontStyle: 'bold',
+        fontSize: 7,
+      },
+      columnStyles: (() => {
+        const s: Record<string, object> = {
+          0: { cellWidth: codeWidth, fontStyle: 'bold' },
+          1: { cellWidth: descWidth },
+          2: { cellWidth: estoqueWidth, halign: 'center' },
+          3: { cellWidth: pedidoWidth, halign: 'center' },
+          4: { cellWidth: faltaWidth, halign: 'center' },
+        };
+        for (let i = 5; i < 5 + pairCount * 2; i++) {
+          s[String(i)] = { cellWidth: subColWidth, halign: 'center' };
+        }
+        return s;
+      })(),
+      didParseCell: ((cellData: { column: { index: number }; row: { index: number }; section: string; cell: { styles: Record<string, unknown> } }) => {
+        const colIndex = cellData.column.index;
+        if (colIndex >= 5) cellData.cell.styles.halign = 'center';
+        if (cellData.section === 'body') {
+          const rowIdx = cellData.row.index;
+          const item = allRows[rowIdx];
+          const isShelf = item && 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
+          if (item && !isShelf && colIndex === 2 && item.estoqueAtual < 0) {
+            cellData.cell.styles.textColor = [220, 38, 38];
+          }
+          if (item && !isShelf && colIndex === 4) {
+            const pend =
+              'pendenteProducao' in item
+                ? (item as ProductConsolidated).pendenteProducao
+                : (item as ComponentData).falta;
+            if (pend < 0) cellData.cell.styles.textColor = [245, 158, 11];
+          }
+          if (colIndex >= 5) {
+            const routeIdx = Math.floor((colIndex - 5) / 2);
+            const colKey = cols[routeIdx]?.key;
+            if (colKey && item) {
+              const rd = item.routeData[colKey];
+              const faltaVal = rd?.falta ?? 0;
+              if (faltaVal < 0 && colIndex % 2 === 1) {
+                cellData.cell.styles.textColor = [245, 158, 11];
+                cellData.cell.styles.fillColor = [255, 237, 213];
+              }
+            }
+          }
+        }
+      }) as any,
+      showHead: 'everyPage',
+      pageBreak: 'auto',
+      rowPageBreak: 'auto',
+    });
+  }
+
+  const fileName = `Projecao_Estoque_V3_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(fileName);
+}

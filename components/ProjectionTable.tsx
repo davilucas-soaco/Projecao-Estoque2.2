@@ -33,6 +33,8 @@ interface Props {
   dateColumns?: DateColumn[];
   /** Se false, a coluna "Só Móveis" não é renderizada (exclusivo da simulação) */
   considerarRequisicoes?: boolean;
+  horizonDays?: 15 | 30 | 45 | 60;
+  onHorizonDaysChange?: (days: 15 | 30 | 45 | 60) => void;
 }
 
 const formatCellNum = (v: unknown): string | number => {
@@ -42,7 +44,15 @@ const formatCellNum = (v: unknown): string | number => {
   return n % 1 === 0 ? Math.round(n) : Math.round(n * 100) / 100;
 };
 
-const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColumns = [], considerarRequisicoes = true }) => {
+const ProjectionTable: React.FC<Props> = ({
+  data,
+  orders,
+  horizonLabel,
+  dateColumns = [],
+  considerarRequisicoes = true,
+  horizonDays = 60,
+  onHorizonDaysChange,
+}) => {
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [descriptionWidth, setDescriptionWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
@@ -267,7 +277,7 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
   return (
     <div className="space-y-4 h-full flex flex-col">
       <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0">
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-start">
+        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
           <div className="relative" ref={columnFilterRef}>
             <button
               type="button"
@@ -322,6 +332,19 @@ const ProjectionTable: React.FC<Props> = ({ data, orders, horizonLabel, dateColu
                 </div>
               </div>
             )}
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-neutral">Horizonte</label>
+            <select
+              value={horizonDays}
+              onChange={(e) => onHorizonDaysChange?.(Number(e.target.value) as 15 | 30 | 45 | 60)}
+              className="px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#252525] text-xs font-semibold text-gray-700 dark:text-gray-200"
+            >
+              <option value={15}>15 dias</option>
+              <option value={30}>30 dias</option>
+              <option value={45}>45 dias</option>
+              <option value={60}>60 dias</option>
+            </select>
           </div>
         </div>
         <div className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-250px)]">

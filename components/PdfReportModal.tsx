@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { X, FileDown, SlidersHorizontal } from 'lucide-react';
 import { ProductConsolidated, ComponentData } from '../types';
 import { ROUTE_SO_MOVEIS } from '../utils';
-import { generateProjectionPdf, generateProjectionPdfV2 } from '../utils/pdfReport';
+import { generateProjectionPdf, generateProjectionPdfV2, generateProjectionPdfV3 } from '../utils/pdfReport';
 
 interface DateColumn {
   key: string;
@@ -36,7 +36,7 @@ const PdfReportModal: React.FC<Props> = ({
   currentUserName,
   reportTitle = 'Relatório de Projeção de Estoque',
 }) => {
-  const [pdfVersion, setPdfVersion] = useState<'v1' | 'v2'>('v1');
+  const [pdfVersion, setPdfVersion] = useState<'v1' | 'v2' | 'v3'>('v1');
   const [considerarRequisicoes, setConsiderarRequisicoes] = useState<boolean | null>(null);
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<Set<string>>(new Set());
   const [orientation, setOrientation] = useState<'p' | 'l'>('l');
@@ -94,6 +94,16 @@ const PdfReportModal: React.FC<Props> = ({
           companyLogo,
           currentUserName,
           reportTitle,
+        });
+      } else if (pdfVersion === 'v3') {
+        await generateProjectionPdfV3({
+          data,
+          visibleColumns: colOpts,
+          horizonLabel,
+          companyLogo,
+          currentUserName,
+          reportTitle,
+          orientation,
         });
       } else {
         await generateProjectionPdf({
@@ -154,6 +164,15 @@ const PdfReportModal: React.FC<Props> = ({
                 />
                 <span className="text-sm">V.2 — Formato vertical por data (compacto, retrato A4)</span>
               </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pdfVersion"
+                  checked={pdfVersion === 'v3'}
+                  onChange={() => setPdfVersion('v3')}
+                />
+                <span className="text-sm">V.3 — Itens de carradas (horizontal responsivo)</span>
+              </label>
             </div>
           </div>
 
@@ -190,7 +209,7 @@ const PdfReportModal: React.FC<Props> = ({
 
           {considerarRequisicoes !== null && (
             <>
-              {pdfVersion === 'v1' && (
+              {(pdfVersion === 'v1' || pdfVersion === 'v3') && (
                 <div>
                   <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
                     Orientação do relatório
