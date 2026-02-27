@@ -66,6 +66,35 @@ export const parseOrderDate = (dateStr: string) => {
   return null;
 };
 
+/**
+ * Valida se algum RM possui múltiplas datas de "Previsão atual" diferentes.
+ * Retorna mensagem de erro com RM e idChave(s) afetados, ou null se válido.
+ */
+export function validateRmPrevisaoUnica(
+  rows: { rm?: string; previsaoAtual?: string; idChave?: string }[]
+): string | null {
+  const byRm = new Map<string, Map<number, string[]>>();
+  for (const r of rows) {
+    const rm = (r.rm ?? '').toString().trim();
+    if (!rm) continue;
+    const raw = (r.previsaoAtual ?? '').toString().trim();
+    const d = parseOrderDate(raw);
+    const ts = d ? (d.setHours(0, 0, 0, 0), d.getTime()) : -1;
+    if (!byRm.has(rm)) byRm.set(rm, new Map());
+    const dateMap = byRm.get(rm)!;
+    if (!dateMap.has(ts)) dateMap.set(ts, []);
+    dateMap.get(ts)!.push(r.idChave ?? '');
+  }
+  for (const [rm, dateMap] of byRm) {
+    if (dateMap.size > 1) {
+      const idChaves = Array.from(dateMap.values()).flat().filter(Boolean);
+      const idChavesStr = idChaves.length > 0 ? idChaves.join(', ') : '(sem idChave)';
+      return `RM "${rm}" possui datas de Previsão atual diferentes. idChave(s) afetado(s): ${idChavesStr}. Corrija o arquivo antes de importar.`;
+    }
+  }
+  return null;
+}
+
 export const getHorizonInfo = (daysAhead: number = 60) => {
   const today = new Date();
   const start = new Date(today);
@@ -120,3 +149,136 @@ export const formatDestinoForTooltip = (categoria: string): string => {
   if (categoria === CATEGORY_INSERIR_ROMANEIO) return 'Inserir em Romaneio';
   return categoria;
 };
+
+/** Chaves de categorias para relatório de supervisão */
+export const SUPERVISAO_SO_MOVEIS = 'Requisição';
+export const SUPERVISAO_ENTREGA_GT = 'Entrega em Grande Teresina';
+export const SUPERVISAO_RETIRADA = 'Retirar';
+
+export interface RotaSupervisao {
+  key: string;
+  label: string;
+  routeName: string;
+  /** Data de previsão para ordenação (mais recentes primeiro) */
+  previsaoDate: Date | null;
+}
+
+/** Extrai rotas dinâmicas da projeção: linhas com Observacoes começando por "ROTA" e RM preenchido.
+ * Ordenação: Previsão atual, mais antigas primeiro (atrasadas primeiro, depois futuras em ordem crescente). */
+export function extractRotasFromProjection(
+  projection: { observacoes?: string; rm?: string; previsaoAtual?: string }[]
+): RotaSupervisao[] {
+  const seen = new Map<string, RotaSupervisao>();
+  for (const row of projection) {
+    const obs = (row.observacoes ?? '').toString().trim();
+    const rm = (row.rm ?? '').toString().trim();
+    if (!rm) continue;
+    const prefixMatch = obs.match(/^\d+\s*[-–]\s*(.*)$/);
+    const base = prefixMatch ? prefixMatch[1] : obs;
+    if (!base.toUpperCase().startsWith('ROTA')) continue;
+    const previsao = (row.previsaoAtual ?? '').toString().trim();
+    let dataFormatada = '';
+    let previsaoDate: Date | null = null;
+    if (previsao) {
+      const d = parseOrderDate(previsao);
+      if (d) {
+        previsaoDate = d;
+        dataFormatada = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      }
+    }
+    const label = dataFormatada ? `${base} - ${dataFormatada}` : base;
+    const key = `rota|${base}`;
+    if (!seen.has(key)) seen.set(key, { key, label, routeName: base, previsaoDate });
+  }
+  return Array.from(seen.values()).sort((a, b) => {
+    const da = a.previsaoDate?.getTime() ?? 0;
+    const db = b.previsaoDate?.getTime() ?? 0;
+    return da - db;
+  });
+}
+
+/** Converte categoriaKey (do filtro) para o destino usado no breakdown */
+function getDestinoFromCategoriaKey(categoriaKey: string): string {
+  if (categoriaKey.startsWith('rota|')) return categoriaKey.slice(5);
+  return categoriaKey;
+}
+
+/**
+ * Ordem de consumo: Requisição, ATRASADOS, depois colunas de data (por data).
+ */
+function getConsumptionOrder(colKeys: string[]): string[] {
+  return colKeys.slice().sort((a, b) => {
+    if (a === 'Requisição') return -1;
+    if (b === 'Requisição') return 1;
+    if (a === 'ATRASADOS') return -1;
+    if (b === 'ATRASADOS') return 1;
+    return a.localeCompare(b);
+  });
+}
+
+/**
+ * Retorna { pedido, falta } para uma categoria de supervisão em um item.
+ * Simula consumo por destino na ordem de prioridade: Requisição → ATRASADOS → colunas por data.
+ * Dentro de cada coluna, cada destino consome na ordem do breakdown (prioridade por pedido).
+ * Assim, um destino que vem depois na ordem consome o saldo restante corretamente (ex.: -8 em vez de -9).
+ */
+export function getSupervisaoCellForItem(
+  item: {
+    routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }>;
+    estoqueAtual?: number;
+  },
+  categoriaKey: string
+): { pedido: number; falta: number } {
+  const destino = getDestinoFromCategoriaKey(categoriaKey);
+  if (destino === SUPERVISAO_SO_MOVEIS) {
+    const rd = item.routeData['Requisição'];
+    return rd ? { pedido: Math.round(rd.pedido), falta: Math.round(rd.falta) } : { pedido: 0, falta: 0 };
+  }
+
+  const colKeys = Object.keys(item.routeData);
+  const consumptionOrder = getConsumptionOrder(colKeys);
+  let runningBalance = Math.max(0, item.estoqueAtual ?? 0);
+  let pedido = 0;
+  let falta = 0;
+
+  for (const colKey of consumptionOrder) {
+    const rd = item.routeData[colKey];
+    if (!rd?.breakdown) continue;
+    for (const b of rd.breakdown) {
+      if (b.destino === destino) {
+        pedido += b.qty;
+        const needed = b.qty;
+        if (runningBalance >= needed) {
+          runningBalance -= needed;
+        } else {
+          const missing = needed - runningBalance;
+          falta += -missing;
+          runningBalance = 0;
+        }
+      } else {
+        runningBalance = Math.max(0, runningBalance - b.qty);
+      }
+    }
+  }
+  return { pedido: Math.round(pedido), falta: Math.round(falta) };
+}
+
+/** Verifica se o item tem pedido em alguma das categorias de supervisão selecionadas */
+export function itemHasPedidoInSupervisaoCategorias(
+  item: { routeData: Record<string, { pedido: number; breakdown?: { destino: string }[] }> },
+  categoriaKeys: Set<string>
+): boolean {
+  for (const key of categoriaKeys) {
+    const destino = getDestinoFromCategoriaKey(key);
+    if (destino === SUPERVISAO_SO_MOVEIS) {
+      const rd = item.routeData['Requisição'];
+      if (rd?.pedido > 0) return true;
+      continue;
+    }
+    for (const rd of Object.values(item.routeData)) {
+      if (!rd.breakdown || rd.pedido <= 0) continue;
+      if (rd.breakdown.some((b) => b.destino === destino)) return true;
+    }
+  }
+  return false;
+}

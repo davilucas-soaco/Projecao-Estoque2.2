@@ -1,10 +1,13 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { ProductConsolidated, ComponentData } from '../types';
+import { itemHasPedidoInSupervisaoCategorias, getSupervisaoCellForItem } from '../utils';
 
 const PRIMARY = '#041126';
 const SECONDARY = '#1E22AA';
 const HIGHLIGHT = '#FFAD00';
+const FONT_AMARELO = [248, 182, 53] as const;
+const BG_AMARELO_CLARO = [255, 237, 214] as const;
 
 interface ColOption {
   key: string;
@@ -26,7 +29,7 @@ const formatCellNum = (v: unknown): string => {
   if (v === undefined || v === null) return '-';
   const n = Number(v);
   if (Number.isNaN(n) || n === 0) return '-';
-  return n % 1 === 0 ? String(Math.round(n)) : String(Math.round(n * 100) / 100);
+  return String(Math.round(n));
 };
 
 /** Quebra descrição em linhas para largura fixa (aprox. 35 caracteres por linha) */
@@ -737,17 +740,22 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
               'pendenteProducao' in item
                 ? (item as ProductConsolidated).pendenteProducao
                 : (item as ComponentData).falta;
-            if (pend < 0) cellData.cell.styles.textColor = [245, 158, 11];
+            if (pend < 0) cellData.cell.styles.textColor = FONT_AMARELO;
           }
           if (colIndex >= 5) {
             const routeIdx = Math.floor((colIndex - 5) / 2);
             const colKey = cols[routeIdx]?.key;
             if (colKey && item) {
               const rd = item.routeData[colKey];
+              const pedidoVal = rd?.pedido ?? 0;
               const faltaVal = rd?.falta ?? 0;
-              if (faltaVal < 0 && colIndex % 2 === 1) {
-                cellData.cell.styles.textColor = [245, 158, 11];
-                cellData.cell.styles.fillColor = [255, 237, 213];
+              if (colIndex % 2 === 0) {
+                if (pedidoVal > 0) {
+                  cellData.cell.styles.fillColor = BG_AMARELO_CLARO;
+                  cellData.cell.styles.textColor = FONT_AMARELO;
+                }
+              } else if (faltaVal < 0) {
+                cellData.cell.styles.textColor = FONT_AMARELO;
               }
             }
           }
@@ -760,5 +768,331 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
   }
 
   const fileName = `Projecao_Estoque_V3_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(fileName);
+}
+
+interface SupervisaoColOption {
+  key: string;
+  label: string;
+}
+
+interface GeneratePdfV3SupervisaoOptions {
+  data: ProductConsolidated[];
+  visibleColumns: SupervisaoColOption[];
+  colunaPrincipal: string;
+  filtroResultado: 'faltantes' | 'estoque' | 'todos';
+  horizonLabel: string;
+  companyLogo: string | null;
+  currentUserName: string;
+  reportTitle: string;
+  orientation: 'p' | 'l';
+}
+
+export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3SupervisaoOptions): Promise<void> {
+  const {
+    data,
+    visibleColumns,
+    colunaPrincipal,
+    filtroResultado,
+    horizonLabel,
+    companyLogo,
+    currentUserName,
+    reportTitle,
+    orientation,
+  } = options;
+
+  const doc = new jsPDF({
+    orientation,
+    unit: 'pt',
+    format: 'a4',
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 25;
+  const headerHeight = 80;
+  let startY = margin;
+
+  const addHeader = (continuationLabel?: string) => {
+    doc.setFillColor(4, 17, 38);
+    doc.rect(0, 0, pageWidth, headerHeight, 'F');
+
+    const logoWidth = 50;
+    const logoHeight = 28;
+    const logoTop = (headerHeight - logoHeight) / 2;
+    const logoTextGap = 24;
+    const textStartX = companyLogo ? margin + logoWidth + logoTextGap : margin;
+
+    if (companyLogo) {
+      try {
+        doc.addImage(companyLogo, 'PNG', margin, logoTop, logoWidth, logoHeight);
+      } catch {
+        // ignora erro da imagem
+      }
+    }
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(reportTitle + (continuationLabel ? ` — ${continuationLabel}` : ''), textStartX, logoTop + 8);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    const now = new Date();
+    doc.text(
+      `Emissão: ${now.toLocaleString('pt-BR')} | Usuário: ${currentUserName} | ${horizonLabel}`,
+      textStartX,
+      logoTop + 22
+    );
+
+    startY = headerHeight + 12;
+  };
+
+  addHeader();
+
+  const selectedKeys = new Set(visibleColumns.map((c) => c.key));
+
+  const flattenRows = (): Array<ProductConsolidated | ComponentData> => {
+    const rows: Array<ProductConsolidated | ComponentData> = [];
+    for (const item of data) {
+      rows.push(item);
+      if (item.isShelf && item.components) {
+        for (const comp of item.components) rows.push(comp);
+      }
+    }
+    return rows;
+  };
+
+  const allRows = flattenRows();
+
+  const dataFiltered = allRows.filter((item) => {
+    if (!itemHasPedidoInSupervisaoCategorias(item, selectedKeys)) return false;
+    const cellPrincipal = getSupervisaoCellForItem(item, colunaPrincipal);
+    const statusFalta = cellPrincipal.falta;
+    const status = statusFalta < 0 ? 'Faltando' : 'Em Estoque';
+    if (filtroResultado === 'faltantes' && status !== 'Faltando') return false;
+    if (filtroResultado === 'estoque' && status !== 'Em Estoque') return false;
+    return true;
+  });
+
+  const cols = visibleColumns;
+  const isLandscape = orientation === 'l';
+  const dateColsPerPage = Math.max(1, isLandscape ? Math.min(cols.length, 6) : Math.min(cols.length, 3));
+  const colChunks: SupervisaoColOption[][] = [];
+  for (let i = 0; i < cols.length; i += dateColsPerPage) {
+    colChunks.push(cols.slice(i, i + dateColsPerPage));
+  }
+
+  for (let chunkIdx = 0; chunkIdx < colChunks.length; chunkIdx++) {
+    const chunkCols = colChunks[chunkIdx];
+    if (chunkIdx > 0) {
+      doc.addPage(orientation === 'l' ? 'a4' : 'a4', orientation);
+      addHeader(`Continuação ${chunkIdx + 1}/${colChunks.length}`);
+    }
+
+    const principalIdxInChunk = chunkCols.findIndex((c) => c.key === colunaPrincipal);
+    const colsBeforePrincipal = principalIdxInChunk >= 0 ? chunkCols.slice(0, principalIdxInChunk) : chunkCols;
+    const principalCol = principalIdxInChunk >= 0 ? chunkCols[principalIdxInChunk] : null;
+    const colsAfterPrincipal = principalIdxInChunk >= 0 ? chunkCols.slice(principalIdxInChunk + 1) : [];
+
+    const headRow1: (string | { content: string; colSpan: number })[] = [
+      'Código',
+      'Descrição',
+      'Estoque',
+      'Pedido',
+      'Falta',
+      ...colsBeforePrincipal.map((c) => ({ content: c.label, colSpan: 2 })),
+    ];
+    const headRow2: string[] = ['', '', '', '', '', ...colsBeforePrincipal.flatMap(() => ['P', 'F'])];
+
+    if (principalCol) {
+      headRow1.push({ content: principalCol.label, colSpan: 2 }, 'Status');
+      headRow2.push('P', 'F', '');
+      headRow1.push(...colsAfterPrincipal.map((c) => ({ content: c.label, colSpan: 2 })));
+      headRow2.push(...colsAfterPrincipal.flatMap(() => ['P', 'F']));
+    } else {
+      // fallback defensivo: se a coluna principal não estiver no chunk, mantém status após as colunas fixas
+      headRow1.push('Status');
+      headRow2.push('');
+    }
+
+    const head: (string | { content: string; colSpan: number })[][] = [headRow1, headRow2];
+
+    const body: string[][] = [];
+    for (const item of dataFiltered) {
+      const isComponent = 'falta' in item && !('isShelf' in item);
+      const codigo = isComponent ? `  └ ${item.codigo}` : item.codigo;
+      const isShelf = 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
+      const estoque = isShelf ? '-' : String(item.estoqueAtual);
+      const pedido = item.totalPedido === 0 ? '-' : String(item.totalPedido);
+      const pendente =
+        isShelf
+          ? '-'
+          : 'pendenteProducao' in item
+            ? (item as ProductConsolidated).pendenteProducao
+            : (item as ComponentData).falta;
+      const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
+
+      const cellPrincipal = getSupervisaoCellForItem(item, colunaPrincipal);
+      const status = cellPrincipal.falta < 0 ? 'Faltando' : 'Em Estoque';
+
+      const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
+
+      for (const col of colsBeforePrincipal) {
+        const cell = getSupervisaoCellForItem(item, col.key);
+        row.push(formatCellNum(cell.pedido), formatCellNum(cell.falta));
+      }
+      if (principalCol) {
+        const principalCell = getSupervisaoCellForItem(item, principalCol.key);
+        row.push(formatCellNum(principalCell.pedido), formatCellNum(principalCell.falta), status);
+        for (const col of colsAfterPrincipal) {
+          const cell = getSupervisaoCellForItem(item, col.key);
+          row.push(formatCellNum(cell.pedido), formatCellNum(cell.falta));
+        }
+      } else {
+        row.push(status);
+      }
+      body.push(row);
+    }
+
+    const tableMargin = margin;
+    const usableWidth = pageWidth - tableMargin * 2;
+    const pairCount = Math.max(1, chunkCols.length);
+
+    const codeWidth = usableWidth * 0.08;
+    const estoqueWidth = usableWidth * 0.055;
+    const pedidoWidth = usableWidth * 0.055;
+    const faltaWidth = usableWidth * 0.055;
+    const statusWidth = usableWidth * 0.09;
+    const baseRemaining = usableWidth - (codeWidth + estoqueWidth + pedidoWidth + faltaWidth + statusWidth);
+
+    const descBias =
+      pairCount <= 3 ? 0.5 :
+      pairCount <= 7 ? 0.42 :
+      0.35;
+
+    const minDescWidth = usableWidth * 0.16;
+    const minSubColWidth = usableWidth * 0.03;
+
+    let descWidth = baseRemaining * descBias;
+    let subColWidth = (baseRemaining - descWidth) / (pairCount * 2);
+
+    if (subColWidth < minSubColWidth) {
+      subColWidth = minSubColWidth;
+      descWidth = Math.max(minDescWidth, baseRemaining - subColWidth * pairCount * 2);
+    }
+    if (descWidth < minDescWidth) {
+      descWidth = minDescWidth;
+      subColWidth = Math.max(minSubColWidth, (baseRemaining - descWidth) / (pairCount * 2));
+    }
+
+    const descChars = Math.max(18, Math.floor(descWidth / 5.1));
+    const bodyResponsive = body.map((row) => {
+      const wrapped = wrapDescription(row[1], descChars).join('\n');
+      const next = [...row];
+      next[1] = wrapped;
+      return next;
+    });
+
+    const statusIndex = principalCol ? 5 + colsBeforePrincipal.length * 2 + 2 : 5;
+    const colIndexToKey: Record<number, string> = {};
+
+    const columnStyles: Record<string, object> = {
+      0: { cellWidth: codeWidth, fontStyle: 'bold' },
+      1: { cellWidth: descWidth },
+      2: { cellWidth: estoqueWidth, halign: 'center' },
+      3: { cellWidth: pedidoWidth, halign: 'center' },
+      4: { cellWidth: faltaWidth, halign: 'center' },
+      [String(statusIndex)]: { cellWidth: statusWidth, halign: 'center' },
+    };
+
+    const orderedRouteCols = principalCol
+      ? [...colsBeforePrincipal, principalCol, ...colsAfterPrincipal]
+      : [];
+    let colIdx = 5;
+    for (let i = 0; i < orderedRouteCols.length; i++) {
+      if (principalCol && colIdx === statusIndex) colIdx++;
+      const baseIdx = colIdx;
+      columnStyles[String(baseIdx)] = { cellWidth: subColWidth, halign: 'center' };
+      columnStyles[String(baseIdx + 1)] = { cellWidth: subColWidth, halign: 'center' };
+      colIndexToKey[baseIdx] = orderedRouteCols[i].key;
+      colIndexToKey[baseIdx + 1] = orderedRouteCols[i].key;
+      colIdx += 2;
+    }
+
+    const routeStartIndex = 5;
+    const isRouteCol = (idx: number) => colIndexToKey[idx] != null;
+    const isPCol = (idx: number) =>
+      isRouteCol(idx) && (idx === 5 || colIndexToKey[idx - 1] !== colIndexToKey[idx]);
+
+    autoTable(doc, {
+      head,
+      body: bodyResponsive,
+      startY,
+      margin: { left: tableMargin, right: tableMargin },
+      theme: 'grid',
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: {
+        fillColor: PRIMARY,
+        textColor: 255,
+        fontStyle: 'bold',
+        fontSize: 7,
+        halign: 'center',
+        lineWidth: 0.5,
+        lineColor: [60, 80, 120],
+      },
+      columnStyles,
+      didParseCell: ((cellData: { column: { index: number }; row: { index: number }; section: string; cell: { styles: Record<string, unknown> } }) => {
+        const colIndex = cellData.column.index;
+        if (cellData.section === 'head') {
+          cellData.cell.styles.halign = 'center';
+          const rowIdx = cellData.row.index;
+          const isRouteLabel = rowIdx === 0 && isPCol(colIndex);
+          if (isRouteLabel) {
+            cellData.cell.styles.fontSize = 6;
+          }
+        }
+        if (colIndex >= routeStartIndex) cellData.cell.styles.halign = 'center';
+        if (cellData.section === 'body') {
+          const rowIdx = cellData.row.index;
+          const item = dataFiltered[rowIdx];
+          const isShelf = item && 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
+          if (item && !isShelf && colIndex === 2 && item.estoqueAtual < 0) {
+            cellData.cell.styles.textColor = [220, 38, 38];
+          }
+          if (item && colIndex === statusIndex) {
+            const cellPrincipal = getSupervisaoCellForItem(item, colunaPrincipal);
+            if (cellPrincipal.falta < 0) {
+              cellData.cell.styles.textColor = [220, 38, 38];
+            } else {
+              cellData.cell.styles.textColor = [34, 197, 94];
+            }
+          }
+          if (item && !isShelf && colIndex === 4) {
+            const pend =
+              'pendenteProducao' in item
+                ? (item as ProductConsolidated).pendenteProducao
+                : (item as ComponentData).falta;
+            if (typeof pend === 'number' && pend < 0) cellData.cell.styles.textColor = FONT_AMARELO;
+          }
+          if (colIndex >= routeStartIndex && item) {
+            const colKey = colIndexToKey[colIndex];
+            if (!colKey) return;
+            const cell = getSupervisaoCellForItem(item, colKey);
+            if (isPCol(colIndex) && cell.pedido > 0) {
+              cellData.cell.styles.fillColor = BG_AMARELO_CLARO;
+              cellData.cell.styles.textColor = FONT_AMARELO;
+            } else if (cell.falta < 0 && colIndexToKey[colIndex - 1] === colIndexToKey[colIndex]) {
+              cellData.cell.styles.textColor = FONT_AMARELO;
+            }
+          }
+        }
+      }) as any,
+      showHead: 'everyPage',
+      pageBreak: 'auto',
+      rowPageBreak: 'auto',
+    });
+  }
+
+  const fileName = `Projecao_Estoque_V3_Supervisao_${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(fileName);
 }

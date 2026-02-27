@@ -664,6 +664,7 @@ const App: React.FC = () => {
               ? 'Relatório de Projeção de Estoque (Simulação)'
               : 'Relatório de Projeção de Estoque'
           }
+          projection={projectionSubMode === 'SIMULADO' ? simulationState.data : projection}
         />
       )}
 

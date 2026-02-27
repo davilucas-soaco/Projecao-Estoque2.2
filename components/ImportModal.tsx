@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Upload, CheckCircle, Package, Database, AlertCircle, Info } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { ShelfFicha, ProjecaoImportada } from '../types';
+import { validateRmPrevisaoUnica } from '../utils';
 
 interface Props {
   onClose: () => void;
@@ -122,6 +123,9 @@ const ImportModal: React.FC<Props> = ({
           if (mappedProjection.length === 0) {
             throw new Error('Nenhuma linha válida encontrada (verifique a coluna idChave).');
           }
+
+          const rmError = validateRmPrevisaoUnica(mappedProjection);
+          if (rmError) throw new Error(rmError);
 
           await Promise.resolve(onImportProjection(mappedProjection));
           setSuccessMsg(`Projeção importada: ${mappedProjection.length} registros processados.`);

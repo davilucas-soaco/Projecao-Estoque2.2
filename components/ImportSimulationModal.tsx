@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Upload, CheckCircle, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { ProjecaoImportada } from '../types';
+import { validateRmPrevisaoUnica } from '../utils';
 
 interface Props {
   onClose: () => void;
@@ -96,6 +97,9 @@ const ImportSimulationModal: React.FC<Props> = ({ onClose, onImportSimulation })
         if (mappedProjection.length === 0) {
           throw new Error('Nenhuma linha válida encontrada (verifique a coluna idChave).');
         }
+
+        const rmError = validateRmPrevisaoUnica(mappedProjection);
+        if (rmError) throw new Error(rmError);
 
         await Promise.resolve(onImportSimulation(mappedProjection, considerarRequisicoes));
         setSuccessMsg(

@@ -41,7 +41,7 @@ const formatCellNum = (v: unknown): string | number => {
   if (v === undefined || v === null) return '-';
   const n = Number(v);
   if (Number.isNaN(n) || n === 0) return '-';
-  return n % 1 === 0 ? Math.round(n) : Math.round(n * 100) / 100;
+  return Math.round(n);
 };
 
 const ProjectionTable: React.FC<Props> = ({
