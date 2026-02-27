@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { X, FileDown, SlidersHorizontal } from 'lucide-react';
 import { ProductConsolidated, ComponentData } from '../types';
 import { ROUTE_SO_MOVEIS } from '../utils';
-import { generateProjectionPdf } from '../utils/pdfReport';
+import { generateProjectionPdf, generateProjectionPdfV2 } from '../utils/pdfReport';
 
 interface DateColumn {
   key: string;
@@ -36,6 +36,7 @@ const PdfReportModal: React.FC<Props> = ({
   currentUserName,
   reportTitle = 'Relatório de Projeção de Estoque',
 }) => {
+  const [pdfVersion, setPdfVersion] = useState<'v1' | 'v2'>('v1');
   const [considerarRequisicoes, setConsiderarRequisicoes] = useState<boolean | null>(null);
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<Set<string>>(new Set());
   const [orientation, setOrientation] = useState<'p' | 'l'>('l');
@@ -84,15 +85,27 @@ const PdfReportModal: React.FC<Props> = ({
     setErrorMsg('');
     try {
       const data = getDataForPdf(considerarRequisicoes);
-      await generateProjectionPdf({
-        data,
-        visibleColumns: visibleColumns.map((c) => ({ key: c.key, label: c.label, isSoMoveis: c.isSoMoveis })),
-        horizonLabel,
-        companyLogo,
-        currentUserName,
-        reportTitle,
-        orientation,
-      });
+      const colOpts = visibleColumns.map((c) => ({ key: c.key, label: c.label, isSoMoveis: c.isSoMoveis }));
+      if (pdfVersion === 'v2') {
+        await generateProjectionPdfV2({
+          data,
+          visibleColumns: colOpts,
+          horizonLabel,
+          companyLogo,
+          currentUserName,
+          reportTitle,
+        });
+      } else {
+        await generateProjectionPdf({
+          data,
+          visibleColumns: colOpts,
+          horizonLabel,
+          companyLogo,
+          currentUserName,
+          reportTitle,
+          orientation,
+        });
+      }
       onClose();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Erro ao gerar PDF.');
@@ -118,6 +131,32 @@ const PdfReportModal: React.FC<Props> = ({
         </div>
 
         <div className="px-6 py-4 overflow-auto flex-1 space-y-5">
+          <div>
+            <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">
+              Versão do PDF
+            </p>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pdfVersion"
+                  checked={pdfVersion === 'v1'}
+                  onChange={() => setPdfVersion('v1')}
+                />
+                <span className="text-sm">V.1 — Formato horizontal (datas em colunas)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="pdfVersion"
+                  checked={pdfVersion === 'v2'}
+                  onChange={() => setPdfVersion('v2')}
+                />
+                <span className="text-sm">V.2 — Formato vertical por data (compacto, retrato A4)</span>
+              </label>
+            </div>
+          </div>
+
           <div>
             <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">
               Considerar Requisições na projeção?
@@ -151,31 +190,33 @@ const PdfReportModal: React.FC<Props> = ({
 
           {considerarRequisicoes !== null && (
             <>
-              <div>
-                <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
-                  Orientação do relatório
-                </p>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="orientation"
-                      checked={orientation === 'l'}
-                      onChange={() => setOrientation('l')}
-                    />
-                    <span className="text-sm">Paisagem</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="orientation"
-                      checked={orientation === 'p'}
-                      onChange={() => setOrientation('p')}
-                    />
-                    <span className="text-sm">Retrato</span>
-                  </label>
+              {pdfVersion === 'v1' && (
+                <div>
+                  <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
+                    Orientação do relatório
+                  </p>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="orientation"
+                        checked={orientation === 'l'}
+                        onChange={() => setOrientation('l')}
+                      />
+                      <span className="text-sm">Paisagem</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="orientation"
+                        checked={orientation === 'p'}
+                        onChange={() => setOrientation('p')}
+                      />
+                      <span className="text-sm">Retrato</span>
+                    </label>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="relative">
                 <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
