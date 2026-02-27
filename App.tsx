@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart3,
@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Users,
   X,
+  FileDown,
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
 import { getHorizonInfo, getDateColumns, getTodayStart } from './utils';
@@ -39,6 +40,7 @@ import ProjectionTable from './components/ProjectionTable';
 import OrdersView from './components/OrdersView';
 import ImportModal from './components/ImportModal';
 import ImportSimulationModal from './components/ImportSimulationModal';
+import PdfReportModal from './components/PdfReportModal';
 import Login from './components/Login';
 import UserManagement from './components/UserManagement';
 import { buildConsolidatedData, countEligibleProjectionRows, getEligibleUniqueOrderCount } from './consolidation';
@@ -78,6 +80,7 @@ const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isImportSimulationModalOpen, setIsImportSimulationModalOpen] = useState(false);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
@@ -408,6 +411,17 @@ const App: React.FC = () => {
     [ordersSimulation, dateColumns, simulationState.considerarRequisicoes]
   );
 
+  const getDataForPdf = useCallback(
+    (considerarRequisicoes: boolean) => {
+      const ords = projectionSubMode === 'SIMULADO' ? ordersSimulation : orders;
+      return buildConsolidatedData(ords, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
+        considerarRequisicoes,
+        flattenShelfProducts: true,
+      });
+    },
+    [projectionSubMode, orders, ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart]
+  );
+
   if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
 
   return (
@@ -509,8 +523,17 @@ const App: React.FC = () => {
       )}
 
       <main className="flex-1 p-6 overflow-auto">
-        {activeTab === 'PROJECAO' && projectionSubMode === 'PADRAO' && (
+        <div className={activeTab === 'PROJECAO' && projectionSubMode === 'PADRAO' ? '' : 'hidden'}>
           <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => setIsPdfModalOpen(true)}
+                className="flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold text-sm text-white transition-all active:scale-95 shadow-md"
+              >
+                <FileDown className="w-4 h-4" />
+                Gerar PDF
+              </button>
+            </div>
             <ProjectionTable
               data={consolidatedData}
               orders={orders}
@@ -519,8 +542,8 @@ const App: React.FC = () => {
               considerarRequisicoes={true}
             />
           </div>
-        )}
-        {activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' && (
+        </div>
+        <div className={activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' ? '' : 'hidden'}>
           <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
             <div className="flex flex-wrap gap-2 mb-4">
               <button
@@ -540,6 +563,18 @@ const App: React.FC = () => {
                 }`}
               >
                 Limpar Simulação
+              </button>
+              <button
+                onClick={() => setIsPdfModalOpen(true)}
+                disabled={simulationState.data.length === 0}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+                  simulationState.data.length === 0
+                    ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-secondary hover:bg-blue-700 text-white active:scale-95 shadow-md'
+                }`}
+              >
+                <FileDown className="w-4 h-4" />
+                Gerar PDF
               </button>
               {simulationState.data.length > 0 && (
                 <span className="text-[11px] text-neutral self-center">
@@ -569,13 +604,15 @@ const App: React.FC = () => {
               />
             )}
           </div>
-        )}
-        {activeTab === 'ROMANEIO' && ( <OrdersView projection={projection} /> )}
-        {activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' && (
+        </div>
+        <div className={activeTab === 'ROMANEIO' ? '' : 'hidden'}>
+          <OrdersView projection={projection} />
+        </div>
+        <div className={activeTab === 'USUARIOS' && currentUser.profile === 'ADMIN' ? '' : 'hidden'}>
           <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
             <UserManagement users={effectiveUsers} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onUpdateUser={handleUpdateUser} onExport={handleExportData} onImport={handleImportData} companyLogo={effectiveLogo} onLogoChange={handleLogoChange} />
           </div>
-        )}
+        </div>
       </main>
 
       <footer className="bg-white dark:bg-[#252525] border-t border-gray-200 dark:border-gray-700 p-2 px-6 flex justify-between text-[11px] text-neutral">
@@ -604,6 +641,22 @@ const App: React.FC = () => {
         <ImportSimulationModal
           onClose={() => setIsImportSimulationModalOpen(false)}
           onImportSimulation={handleImportSimulation}
+        />
+      )}
+
+      {isPdfModalOpen && (
+        <PdfReportModal
+          onClose={() => setIsPdfModalOpen(false)}
+          getDataForPdf={getDataForPdf}
+          dateColumns={dateColumns}
+          horizonLabel={getHorizonInfo().label}
+          companyLogo={effectiveLogo}
+          currentUserName={currentUser.name}
+          reportTitle={
+            projectionSubMode === 'SIMULADO'
+              ? 'Relatório de Projeção de Estoque (Simulação)'
+              : 'Relatório de Projeção de Estoque'
+          }
         />
       )}
 

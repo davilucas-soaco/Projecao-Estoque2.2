@@ -331,8 +331,8 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
         <div className="p-4 grid grid-cols-1 md:grid-cols-6 gap-3 bg-[#f1f5ff] dark:bg-[#1a1a1a] border-b border-[#dce3f1] dark:border-gray-800">
           <KpiCard icon={<ShoppingCart className="text-[#1E22AA]" />} label="Total Pedidos Únicos" value={kpis.uniqueTotal} active={kpiFilter === 'all'} onClick={() => setKpiFilter('all')} />
           <KpiCard icon={<Store className="text-emerald-600" />} label="Requisições" value={kpis.reqTotal} subLabel={`No Horizonte: ${kpis.horizonLabel.replace('Horizonte: ', '')}`} subValue={kpis.reqHorizon} active={kpiFilter === 'so_moveis'} onClick={() => setKpiFilter('so_moveis')} />
-          <KpiCard icon={<MapPin className="text-blue-600" />} label="Entrega em Grande Teresina" value={kpis.gtTotal} subLabel={`No Horizonte: ${kpis.horizonLabel.replace('Horizonte: ', '')}`} subValue={kpis.gtHorizon} active={kpiFilter === 'g_teresina'} onClick={() => setKpiFilter('g_teresina')} />
-          <KpiCard icon={<User className="text-purple-600" />} label="Retirada" value={kpis.retTotal} subLabel={`No Horizonte: ${kpis.horizonLabel.replace('Horizonte: ', '')}`} subValue={kpis.retHorizon} active={kpiFilter === 'cliente_busca'} onClick={() => setKpiFilter('cliente_busca')} />
+          <KpiCard icon={<MapPin className="text-blue-600" />} label="Entrega em Grande Teresina" value={kpis.gtTotal} active={kpiFilter === 'g_teresina'} onClick={() => setKpiFilter('g_teresina')} />
+          <KpiCard icon={<User className="text-purple-600" />} label="Retirada" value={kpis.retTotal} active={kpiFilter === 'cliente_busca'} onClick={() => setKpiFilter('cliente_busca')} />
           <KpiCard icon={<Truck className="text-blue-500" />} label="Pedidos em Rota" value={kpis.rotaTotal} subLabel="Total de rotas" subValue={kpis.rotasUnicas} active={kpiFilter === 'em_rota'} onClick={() => setKpiFilter('em_rota')} />
           <KpiCard icon={<AlertCircle className="text-red-500" />} label="Pedidos Sem Vínculo" value={kpis.semVincTotal} active={kpiFilter === 'sem_vinculo'} onClick={() => setKpiFilter('sem_vinculo')} />
         </div>

@@ -71,7 +71,7 @@ export const getHorizonInfo = () => {
   const start = new Date(today);
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
-  end.setDate(start.getDate() + 14);
+  end.setDate(start.getDate() + 59);
   const formatDate = (d: Date) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   return {
     start,
@@ -87,13 +87,13 @@ export const getTodayStart = (): Date => {
   return d;
 };
 
-/** Gera colunas de data para projeção: Atrasados + 15 dias futuros */
+/** Gera colunas de data para projeção: Atrasados + 60 dias futuros */
 export const getDateColumns = (): { key: string; label: string; date: Date | null; isAtrasados: boolean }[] => {
   const today = getTodayStart();
   const cols: { key: string; label: string; date: Date | null; isAtrasados: boolean }[] = [
     { key: 'ATRASADOS', label: 'Atrasados até hoje', date: null, isAtrasados: true }
   ];
-  for (let i = 1; i <= 15; i++) {
+  for (let i = 1; i <= 60; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     const key = d.toISOString().slice(0, 10);
