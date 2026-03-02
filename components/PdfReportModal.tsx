@@ -8,7 +8,7 @@ import {
   SUPERVISAO_RETIRADA,
   extractRotasFromProjection,
 } from '../utils';
-import { generateProjectionPdfV2, generateProjectionPdfV3, generateProjectionPdfV3Supervisao } from '../utils/pdfReport';
+import { generateProjectionPdfV2, generateProjectionPdfV3, generateProjectionPdfV2Supervisao } from '../utils/pdfReport';
 
 interface DateColumn {
   key: string;
@@ -33,6 +33,7 @@ interface Props {
   getDataForPdf: (considerarRequisicoes: boolean) => ProductConsolidated[];
   dateColumns: DateColumn[];
   horizonLabel: string;
+  todayStart: Date;
   companyLogo: string | null;
   currentUserName: string;
   reportTitle?: string;
@@ -44,6 +45,7 @@ const PdfReportModal: React.FC<Props> = ({
   getDataForPdf,
   dateColumns,
   horizonLabel,
+  todayStart,
   companyLogo,
   currentUserName,
   reportTitle = 'Relatório de Projeção de Estoque',
@@ -147,16 +149,18 @@ const PdfReportModal: React.FC<Props> = ({
       const data = getDataForPdf(considerarRequisicoes ?? true);
       if (isV2Supervisao) {
         const colOpts = visibleSupervisaoColumns.map((c) => ({ key: c.key, label: c.label }));
-        await generateProjectionPdfV3Supervisao({
+        await generateProjectionPdfV2Supervisao({
           data,
           visibleColumns: colOpts,
           colunaPrincipal: colunaPrincipalSupervisao,
           filtroResultado: filtroResultadoSupervisao,
           horizonLabel,
+          todayStart,
           companyLogo,
           currentUserName,
           reportTitle,
           orientation: 'l',
+          dateColumns,
         });
       } else {
         const colOpts = visibleColumns.map((c) => ({ key: c.key, label: c.label, isSoMoveis: c.isSoMoveis }));

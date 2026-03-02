@@ -154,6 +154,11 @@ export const formatDestinoForTooltip = (categoria: string): string => {
 export const SUPERVISAO_SO_MOVEIS = 'Requisição';
 export const SUPERVISAO_ENTREGA_GT = 'Entrega em Grande Teresina';
 export const SUPERVISAO_RETIRADA = 'Retirar';
+const SUPERVISAO_DESTINOS_ESPECIAIS = new Set<string>([
+  SUPERVISAO_SO_MOVEIS,
+  SUPERVISAO_ENTREGA_GT,
+  SUPERVISAO_RETIRADA,
+]);
 
 export interface RotaSupervisao {
   key: string;
@@ -203,6 +208,18 @@ function getDestinoFromCategoriaKey(categoriaKey: string): string {
   return categoriaKey;
 }
 
+/** Verifica se um destino do breakdown corresponde ao destino da supervisão (aceita variantes) */
+function destinoMatches(destinoBreakdown: string, destinoSupervisao: string): boolean {
+  if (destinoBreakdown === destinoSupervisao) return true;
+  const b = (destinoBreakdown ?? '').trim().toLowerCase();
+  const s = (destinoSupervisao ?? '').trim().toLowerCase();
+  if (b === s) return true;
+  if (destinoSupervisao === SUPERVISAO_RETIRADA && (b === 'retirada' || b.includes('retirada'))) return true;
+  if (destinoSupervisao === SUPERVISAO_ENTREGA_GT && b.includes('entrega') && b.includes('teresina')) return true;
+  if (destinoSupervisao === SUPERVISAO_SO_MOVEIS && (b === 'requisição' || b.includes('requisição') || b.includes('requisicao'))) return true;
+  return false;
+}
+
 /**
  * Ordem de consumo: Requisição, ATRASADOS, depois colunas de data (por data).
  */
@@ -227,16 +244,29 @@ export function getSupervisaoCellForItem(
     routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }>;
     estoqueAtual?: number;
   },
-  categoriaKey: string
+  categoriaKey: string,
+  options?: {
+    allowedDateKeys?: Set<string>;
+    limitSpecialToAllowedDates?: boolean;
+  }
 ): { pedido: number; falta: number } {
   const destino = getDestinoFromCategoriaKey(categoriaKey);
-  if (destino === SUPERVISAO_SO_MOVEIS) {
+  const limitByAllowedDates =
+    !!options?.limitSpecialToAllowedDates &&
+    SUPERVISAO_DESTINOS_ESPECIAIS.has(destino) &&
+    !!options?.allowedDateKeys &&
+    options.allowedDateKeys.size > 0;
+
+  if (destino === SUPERVISAO_SO_MOVEIS && !limitByAllowedDates) {
     const rd = item.routeData['Requisição'];
     return rd ? { pedido: Math.round(rd.pedido), falta: Math.round(rd.falta) } : { pedido: 0, falta: 0 };
   }
 
-  const colKeys = Object.keys(item.routeData);
-  const consumptionOrder = getConsumptionOrder(colKeys);
+  const fullColKeys = Object.keys(item.routeData);
+  const colKeysForSum = limitByAllowedDates && options?.allowedDateKeys?.size
+    ? fullColKeys.filter((key) => options!.allowedDateKeys!.has(key))
+    : fullColKeys;
+  const consumptionOrder = getConsumptionOrder(fullColKeys);
   let runningBalance = Math.max(0, item.estoqueAtual ?? 0);
   let pedido = 0;
   let falta = 0;
@@ -244,15 +274,16 @@ export function getSupervisaoCellForItem(
   for (const colKey of consumptionOrder) {
     const rd = item.routeData[colKey];
     if (!rd?.breakdown) continue;
+    const colInSum = colKeysForSum.includes(colKey);
     for (const b of rd.breakdown) {
-      if (b.destino === destino) {
-        pedido += b.qty;
+      if (destinoMatches(b.destino, destino)) {
+        if (colInSum) pedido += b.qty;
         const needed = b.qty;
         if (runningBalance >= needed) {
           runningBalance -= needed;
         } else {
           const missing = needed - runningBalance;
-          falta += -missing;
+          if (colInSum) falta += -missing;
           runningBalance = 0;
         }
       } else {
@@ -260,16 +291,46 @@ export function getSupervisaoCellForItem(
       }
     }
   }
-  return { pedido: Math.round(pedido), falta: Math.round(falta) };
+  const pedidoRounded = Math.round(pedido);
+  const faltaRounded = Math.round(falta);
+  const faltaClamped = pedidoRounded <= 0 ? 0 : Math.max(faltaRounded, -pedidoRounded);
+  return { pedido: pedidoRounded, falta: faltaClamped };
 }
 
 /** Verifica se o item tem pedido em alguma das categorias de supervisão selecionadas */
 export function itemHasPedidoInSupervisaoCategorias(
   item: { routeData: Record<string, { pedido: number; breakdown?: { destino: string }[] }> },
-  categoriaKeys: Set<string>
+  categoriaKeys: Set<string>,
+  options?: {
+    allowedDateKeys?: Set<string>;
+    limitSpecialToAllowedDates?: boolean;
+  }
 ): boolean {
   for (const key of categoriaKeys) {
     const destino = getDestinoFromCategoriaKey(key);
+    const isDestinoEspecial = SUPERVISAO_DESTINOS_ESPECIAIS.has(destino);
+    const shouldLimitToDates =
+      !!options?.limitSpecialToAllowedDates &&
+      isDestinoEspecial &&
+      !!options?.allowedDateKeys &&
+      options.allowedDateKeys.size > 0;
+
+    if (shouldLimitToDates) {
+      const cell = getSupervisaoCellForItem(
+        item as {
+          routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }>;
+          estoqueAtual?: number;
+        },
+        key,
+        {
+          allowedDateKeys: options?.allowedDateKeys,
+          limitSpecialToAllowedDates: true,
+        }
+      );
+      if (cell.pedido > 0) return true;
+      continue;
+    }
+
     if (destino === SUPERVISAO_SO_MOVEIS) {
       const rd = item.routeData['Requisição'];
       if (rd?.pedido > 0) return true;

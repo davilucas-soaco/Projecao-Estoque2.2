@@ -1,13 +1,27 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { ProductConsolidated, ComponentData } from '../types';
-import { itemHasPedidoInSupervisaoCategorias, getSupervisaoCellForItem } from '../utils';
+import type { ProductConsolidated, ComponentData, DateColumn } from '../types';
+import {
+  itemHasPedidoInSupervisaoCategorias,
+  getSupervisaoCellForItem,
+  ROUTE_SO_MOVEIS,
+  SUPERVISAO_SO_MOVEIS,
+  SUPERVISAO_ENTREGA_GT,
+  SUPERVISAO_RETIRADA,
+} from '../utils';
 
 const PRIMARY = '#041126';
 const SECONDARY = '#1E22AA';
 const HIGHLIGHT = '#FFAD00';
 const FONT_AMARELO = [248, 182, 53] as const;
 const BG_AMARELO_CLARO = [255, 237, 214] as const;
+const SPECIAL_HORIZON_DAYS = 13;
+const SPECIAL_KEYS_FOR_HORIZON = new Set<string>([
+  ROUTE_SO_MOVEIS,
+  SUPERVISAO_SO_MOVEIS,
+  SUPERVISAO_ENTREGA_GT,
+  SUPERVISAO_RETIRADA,
+]);
 
 interface ColOption {
   key: string;
@@ -25,11 +39,127 @@ interface GeneratePdfOptions {
   orientation: 'p' | 'l';
 }
 
+interface SpecialHorizonContext {
+  allowedDateKeys: Set<string>;
+  label: string;
+}
+
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function formatDateShortBR(date: Date): string {
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+function isDateKeyInRange(key: string, start: Date, end: Date): boolean {
+  if (!DATE_KEY_RE.test(key)) return false;
+  const d = new Date(`${key}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return false;
+  return d >= start && d <= end;
+}
+
+function buildSpecialHorizonContext(data: ProductConsolidated[]): SpecialHorizonContext {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(today);
+  end.setDate(today.getDate() + SPECIAL_HORIZON_DAYS);
+  const allowedDateKeys = new Set<string>();
+
+  const addItemKeys = (item: ProductConsolidated | ComponentData) => {
+    for (const key of Object.keys(item.routeData ?? {})) {
+      if (key === 'ATRASADOS') {
+        allowedDateKeys.add(key);
+        continue;
+      }
+      if (DATE_KEY_RE.test(key)) {
+        const d = new Date(`${key}T00:00:00`);
+        if (!Number.isNaN(d.getTime()) && d <= end) {
+          allowedDateKeys.add(key);
+        }
+        continue;
+      }
+      if (isDateKeyInRange(key, today, end)) {
+        allowedDateKeys.add(key);
+      }
+    }
+  };
+
+  for (const item of data) {
+    addItemKeys(item);
+    if (item.isShelf && item.components) {
+      for (const comp of item.components) addItemKeys(comp);
+    }
+  }
+
+  return {
+    allowedDateKeys,
+    label: `${formatDateShortBR(today)} a ${formatDateShortBR(end)}`,
+  };
+}
+
+/** Constrói allowedDateKeys para supervisão com base no horizonte ativo do relatório. */
+function buildSpecialHorizonContextFromDateColumns(
+  dateColumns: DateColumn[],
+  data: ProductConsolidated[],
+  todayStartOverride?: Date
+): SpecialHorizonContext {
+  // Regra da supervisão (V.2 Gestor): retroativos + hoje até hoje+13 (dinâmico).
+  const start = todayStartOverride ? new Date(todayStartOverride) : new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + SPECIAL_HORIZON_DAYS);
+  end.setHours(0, 0, 0, 0);
+  const allowedDateKeys = new Set<string>(['ATRASADOS']);
+
+  for (const col of dateColumns) {
+    if (col.isAtrasados) continue;
+    if (col.date && col.date <= end) allowedDateKeys.add(col.key);
+  }
+
+  for (const item of data) {
+    const addKeys = (obj: ProductConsolidated | ComponentData) => {
+      for (const key of Object.keys(obj.routeData ?? {})) {
+        if (key === 'ATRASADOS') {
+          allowedDateKeys.add(key);
+          continue;
+        }
+        if (DATE_KEY_RE.test(key)) {
+          const d = new Date(`${key}T00:00:00`);
+          if (!Number.isNaN(d.getTime()) && d <= end) allowedDateKeys.add(key);
+        }
+      }
+    };
+    addKeys(item);
+    if (item.isShelf && item.components) {
+      for (const comp of item.components) addKeys(comp);
+    }
+  }
+
+  return {
+    allowedDateKeys,
+    label: `${formatDateShortBR(start)} a ${formatDateShortBR(end)}`,
+  };
+}
+
+function isSpecialHorizonColumn(key: string): boolean {
+  return SPECIAL_KEYS_FOR_HORIZON.has(key);
+}
+
 const formatCellNum = (v: unknown): string => {
   if (v === undefined || v === null) return '-';
   const n = Number(v);
   if (Number.isNaN(n) || n === 0) return '-';
   return String(Math.round(n));
+};
+
+/** Formata par P/F de supervisão: se P exibir '-', F também exibe '-' na mesma coluna. */
+const formatSupervisaoPF = (pedido: number, falta: number): [string, string] => {
+  const pStr = formatCellNum(pedido);
+  if (pStr === '-') return ['-', '-'];
+  const pNum = Math.max(0, Math.round(Number(pedido) || 0));
+  const fNum = Math.round(Number(falta) || 0);
+  const fClamped = pNum === 0 ? 0 : Math.max(fNum, -pNum);
+  const fStr = formatCellNum(fClamped);
+  return [pStr, fStr];
 };
 
 /** Quebra descrição em linhas para largura fixa (aprox. 35 caracteres por linha) */
@@ -61,6 +191,18 @@ const getDateColsPerPage = (orientation: 'p' | 'l'): number => {
   const twoColWidth = 44;
   return Math.max(1, Math.floor(remaining / twoColWidth));
 };
+
+const PDF_FILE_PREFIX = {
+  base: 'Projecao_Estoque',
+  v2: 'Projecao_Estoque_V2',
+  v3: 'Projecao_Estoque_V3',
+  v2Supervisao: 'Projecao_Estoque_V2_Supervisao',
+} as const;
+
+function buildPdfFileName(prefix: keyof typeof PDF_FILE_PREFIX): string {
+  const day = new Date().toISOString().slice(0, 10);
+  return `${PDF_FILE_PREFIX[prefix]}_${day}.pdf`;
+}
 
 export async function generateProjectionPdf(options: GeneratePdfOptions): Promise<void> {
   const {
@@ -287,7 +429,7 @@ export async function generateProjectionPdf(options: GeneratePdfOptions): Promis
     }
   }
 
-  const fileName = `Projecao_Estoque_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const fileName = buildPdfFileName('base');
   doc.save(fileName);
 }
 
@@ -351,18 +493,24 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
 
   addHeader();
 
+  const specialHorizon = buildSpecialHorizonContext(data);
+  const getCellForColumn = (item: ProductConsolidated | ComponentData, colKey: string) => {
+    if (isSpecialHorizonColumn(colKey)) {
+      return getSupervisaoCellForItem(item, colKey, {
+        allowedDateKeys: specialHorizon.allowedDateKeys,
+        limitSpecialToAllowedDates: true,
+      });
+    }
+    const rd = item.routeData[colKey] || { pedido: 0, falta: 0 };
+    return { pedido: rd.pedido ?? 0, falta: rd.falta ?? 0 };
+  };
+
   const selectedKeys = new Set(visibleColumns.map((c) => c.key));
   const dataFiltered = data.filter((item) => {
-    const itemHasPedido = Object.entries(item.routeData).some(
-      ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
-    );
+    const itemHasPedido = Array.from(selectedKeys).some((key) => getCellForColumn(item, key).pedido > 0);
     if (itemHasPedido) return true;
     if (item.isShelf && item.components) {
-      return item.components.some((comp) =>
-        Object.entries(comp.routeData).some(
-          ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
-        )
-      );
+      return item.components.some((comp) => Array.from(selectedKeys).some((key) => getCellForColumn(comp, key).pedido > 0));
     }
     return false;
   });
@@ -409,12 +557,14 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(4, 17, 38);
-    doc.text(col.label, margin, startY);
+    const isSpecial = isSpecialHorizonColumn(col.key);
+    const colLabel = isSpecial ? `${col.label} (${specialHorizon.label})` : col.label;
+    doc.text(colLabel, margin, startY);
     startY += 14;
 
     const body: string[][] = [];
     for (const item of itemsForCol) {
-      const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
+      const rd = getCellForColumn(item, col.key);
       const isComponent = 'falta' in item && !('isShelf' in item);
       const codigo = isComponent ? `  └ ${item.codigo}` : item.codigo;
       const produto = wrapDesc(item.descricao);
@@ -469,8 +619,8 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
         if (cellData.section === 'body') {
           const rowIdx = cellData.row.index;
           const item = itemsForCol[rowIdx];
-          const rd = item?.routeData[col.key];
-          const faltaVal = rd?.falta ?? 0;
+          const rd = item ? getCellForColumn(item, col.key) : { pedido: 0, falta: 0 };
+          const faltaVal = rd.falta ?? 0;
           if (cellData.column.index === 2 && item && !('isShelf' in item ? (item as ProductConsolidated).isShelf : false)) {
             if (item.estoqueAtual < 0) {
               cellData.cell.styles.textColor = [220, 38, 38];
@@ -503,7 +653,7 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
     }
   }
 
-  const fileName = `Projecao_Estoque_V2_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const fileName = buildPdfFileName('v2');
   doc.save(fileName);
 }
 
@@ -576,18 +726,24 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
 
   addHeader();
 
+  const specialHorizon = buildSpecialHorizonContext(data);
+  const getCellForColumn = (item: ProductConsolidated | ComponentData, colKey: string) => {
+    if (isSpecialHorizonColumn(colKey)) {
+      return getSupervisaoCellForItem(item, colKey, {
+        allowedDateKeys: specialHorizon.allowedDateKeys,
+        limitSpecialToAllowedDates: true,
+      });
+    }
+    const rd = item.routeData[colKey] || { pedido: 0, falta: 0 };
+    return { pedido: rd.pedido ?? 0, falta: rd.falta ?? 0 };
+  };
+
   const selectedKeys = new Set(visibleColumns.map((c) => c.key));
   const dataFiltered = data.filter((item) => {
-    const itemHasPedido = Object.entries(item.routeData).some(
-      ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
-    );
+    const itemHasPedido = Array.from(selectedKeys).some((key) => getCellForColumn(item, key).pedido > 0);
     if (itemHasPedido) return true;
     if (item.isShelf && item.components) {
-      return item.components.some((comp) =>
-        Object.entries(comp.routeData).some(
-          ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
-        )
-      );
+      return item.components.some((comp) => Array.from(selectedKeys).some((key) => getCellForColumn(comp, key).pedido > 0));
     }
     return false;
   });
@@ -626,7 +782,10 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
         'Estoque',
         'Pedido',
         'Falta',
-        ...cols.map((c) => ({ content: c.label, colSpan: 2 })),
+        ...cols.map((c) => ({
+          content: isSpecialHorizonColumn(c.key) ? `${c.label}\n${specialHorizon.label}` : c.label,
+          colSpan: 2,
+        })),
       ],
       [
         '',
@@ -655,7 +814,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
 
       const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
       for (const col of cols) {
-        const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
+        const rd = getCellForColumn(item, col.key);
         row.push(formatCellNum(rd.pedido), formatCellNum(rd.falta));
       }
       body.push(row);
@@ -746,9 +905,9 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
             const routeIdx = Math.floor((colIndex - 5) / 2);
             const colKey = cols[routeIdx]?.key;
             if (colKey && item) {
-              const rd = item.routeData[colKey];
-              const pedidoVal = rd?.pedido ?? 0;
-              const faltaVal = rd?.falta ?? 0;
+              const rd = getCellForColumn(item, colKey);
+              const pedidoVal = rd.pedido ?? 0;
+              const faltaVal = rd.falta ?? 0;
               if (colIndex % 2 === 0) {
                 if (pedidoVal > 0) {
                   cellData.cell.styles.fillColor = BG_AMARELO_CLARO;
@@ -767,7 +926,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
     });
   }
 
-  const fileName = `Projecao_Estoque_V3_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const fileName = buildPdfFileName('v3');
   doc.save(fileName);
 }
 
@@ -786,9 +945,11 @@ interface GeneratePdfV3SupervisaoOptions {
   currentUserName: string;
   reportTitle: string;
   orientation: 'p' | 'l';
+  dateColumns?: DateColumn[];
+  todayStart?: Date;
 }
 
-export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3SupervisaoOptions): Promise<void> {
+export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3SupervisaoOptions): Promise<void> {
   const {
     data,
     visibleColumns,
@@ -799,6 +960,8 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
     currentUserName,
     reportTitle,
     orientation,
+    dateColumns,
+    todayStart,
   } = options;
 
   const doc = new jsPDF({
@@ -849,6 +1012,16 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
 
   addHeader();
 
+  const specialHorizon =
+    dateColumns && dateColumns.length > 0
+      ? buildSpecialHorizonContextFromDateColumns(dateColumns, data, todayStart)
+      : buildSpecialHorizonContext(data);
+  const getSupervisaoCell = (item: ProductConsolidated | ComponentData, colKey: string) =>
+    getSupervisaoCellForItem(item, colKey, {
+      allowedDateKeys: specialHorizon.allowedDateKeys,
+      limitSpecialToAllowedDates: isSpecialHorizonColumn(colKey),
+    });
+
   const selectedKeys = new Set(visibleColumns.map((c) => c.key));
 
   const flattenRows = (): Array<ProductConsolidated | ComponentData> => {
@@ -865,8 +1038,15 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
   const allRows = flattenRows();
 
   const dataFiltered = allRows.filter((item) => {
-    if (!itemHasPedidoInSupervisaoCategorias(item, selectedKeys)) return false;
-    const cellPrincipal = getSupervisaoCellForItem(item, colunaPrincipal);
+    if (
+      !itemHasPedidoInSupervisaoCategorias(item, selectedKeys, {
+        allowedDateKeys: specialHorizon.allowedDateKeys,
+        limitSpecialToAllowedDates: true,
+      })
+    ) {
+      return false;
+    }
+    const cellPrincipal = getSupervisaoCell(item, colunaPrincipal);
     const statusFalta = cellPrincipal.falta;
     const status = statusFalta < 0 ? 'Faltando' : 'Em Estoque';
     if (filtroResultado === 'faltantes' && status !== 'Faltando') return false;
@@ -900,19 +1080,31 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
       'Estoque',
       'Pedido',
       'Falta',
-      ...colsBeforePrincipal.map((c) => ({ content: c.label, colSpan: 2 })),
+      ...colsBeforePrincipal.map((c) => ({
+        content: isSpecialHorizonColumn(c.key) ? `${c.label}\n${specialHorizon.label}` : c.label,
+        colSpan: 2,
+      })),
     ];
     const headRow2: string[] = ['', '', '', '', '', ...colsBeforePrincipal.flatMap(() => ['P', 'F'])];
 
     if (principalCol) {
-      headRow1.push({ content: principalCol.label, colSpan: 2 }, 'Status');
+      headRow1.push(
+        {
+          content: isSpecialHorizonColumn(principalCol.key)
+            ? `${principalCol.label}\n${specialHorizon.label}`
+            : principalCol.label,
+          colSpan: 2,
+        },
+        'Status'
+      );
       headRow2.push('P', 'F', '');
-      headRow1.push(...colsAfterPrincipal.map((c) => ({ content: c.label, colSpan: 2 })));
+      headRow1.push(
+        ...colsAfterPrincipal.map((c) => ({
+          content: isSpecialHorizonColumn(c.key) ? `${c.label}\n${specialHorizon.label}` : c.label,
+          colSpan: 2,
+        }))
+      );
       headRow2.push(...colsAfterPrincipal.flatMap(() => ['P', 'F']));
-    } else {
-      // fallback defensivo: se a coluna principal não estiver no chunk, mantém status após as colunas fixas
-      headRow1.push('Status');
-      headRow2.push('');
     }
 
     const head: (string | { content: string; colSpan: number })[][] = [headRow1, headRow2];
@@ -932,26 +1124,39 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
             : (item as ComponentData).falta;
       const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
 
-      const cellPrincipal = getSupervisaoCellForItem(item, colunaPrincipal);
+      const cellPrincipal = getSupervisaoCell(item, colunaPrincipal);
       const status = cellPrincipal.falta < 0 ? 'Faltando' : 'Em Estoque';
 
       const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
 
       for (const col of colsBeforePrincipal) {
-        const cell = getSupervisaoCellForItem(item, col.key);
-        row.push(formatCellNum(cell.pedido), formatCellNum(cell.falta));
+        const cell = getSupervisaoCell(item, col.key);
+        row.push(...formatSupervisaoPF(cell.pedido, cell.falta));
       }
       if (principalCol) {
-        const principalCell = getSupervisaoCellForItem(item, principalCol.key);
-        row.push(formatCellNum(principalCell.pedido), formatCellNum(principalCell.falta), status);
+        const principalCell = getSupervisaoCell(item, principalCol.key);
+        row.push(...formatSupervisaoPF(principalCell.pedido, principalCell.falta), status);
         for (const col of colsAfterPrincipal) {
-          const cell = getSupervisaoCellForItem(item, col.key);
-          row.push(formatCellNum(cell.pedido), formatCellNum(cell.falta));
+          const cell = getSupervisaoCell(item, col.key);
+          row.push(...formatSupervisaoPF(cell.pedido, cell.falta));
         }
-      } else {
-        row.push(status);
       }
-      body.push(row);
+      // Blindagem final de apresentação: se P está vazio/traço, F da mesma coluna também deve ficar vazio/traço.
+      const normalizedRow = [...row];
+      let pfIdx = 5;
+      for (let i = 0; i < colsBeforePrincipal.length; i++) {
+        if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
+        pfIdx += 2;
+      }
+      if (principalCol) {
+        if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
+        pfIdx += 3; // pula coluna Status
+        for (let i = 0; i < colsAfterPrincipal.length; i++) {
+          if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
+          pfIdx += 2;
+        }
+      }
+      body.push(normalizedRow);
     }
 
     const tableMargin = margin;
@@ -993,7 +1198,7 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
       return next;
     });
 
-    const statusIndex = principalCol ? 5 + colsBeforePrincipal.length * 2 + 2 : 5;
+    const statusIndex = principalCol ? 5 + colsBeforePrincipal.length * 2 + 2 : -1;
     const colIndexToKey: Record<number, string> = {};
 
     const columnStyles: Record<string, object> = {
@@ -1002,15 +1207,15 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
       2: { cellWidth: estoqueWidth, halign: 'center' },
       3: { cellWidth: pedidoWidth, halign: 'center' },
       4: { cellWidth: faltaWidth, halign: 'center' },
-      [String(statusIndex)]: { cellWidth: statusWidth, halign: 'center' },
     };
+    if (statusIndex >= 0) {
+      columnStyles[String(statusIndex)] = { cellWidth: statusWidth, halign: 'center' };
+    }
 
-    const orderedRouteCols = principalCol
-      ? [...colsBeforePrincipal, principalCol, ...colsAfterPrincipal]
-      : [];
+    const orderedRouteCols = [...colsBeforePrincipal, ...(principalCol ? [principalCol] : []), ...colsAfterPrincipal];
     let colIdx = 5;
     for (let i = 0; i < orderedRouteCols.length; i++) {
-      if (principalCol && colIdx === statusIndex) colIdx++;
+      if (statusIndex >= 0 && colIdx === statusIndex) colIdx++;
       const baseIdx = colIdx;
       columnStyles[String(baseIdx)] = { cellWidth: subColWidth, halign: 'center' };
       columnStyles[String(baseIdx + 1)] = { cellWidth: subColWidth, halign: 'center' };
@@ -1060,7 +1265,7 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
             cellData.cell.styles.textColor = [220, 38, 38];
           }
           if (item && colIndex === statusIndex) {
-            const cellPrincipal = getSupervisaoCellForItem(item, colunaPrincipal);
+            const cellPrincipal = getSupervisaoCell(item, colunaPrincipal);
             if (cellPrincipal.falta < 0) {
               cellData.cell.styles.textColor = [220, 38, 38];
             } else {
@@ -1077,11 +1282,11 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
           if (colIndex >= routeStartIndex && item) {
             const colKey = colIndexToKey[colIndex];
             if (!colKey) return;
-            const cell = getSupervisaoCellForItem(item, colKey);
+            const cell = getSupervisaoCell(item, colKey);
             if (isPCol(colIndex) && cell.pedido > 0) {
               cellData.cell.styles.fillColor = BG_AMARELO_CLARO;
               cellData.cell.styles.textColor = FONT_AMARELO;
-            } else if (cell.falta < 0 && colIndexToKey[colIndex - 1] === colIndexToKey[colIndex]) {
+            } else if (cell.pedido > 0 && cell.falta < 0 && colIndexToKey[colIndex - 1] === colIndexToKey[colIndex]) {
               cellData.cell.styles.textColor = FONT_AMARELO;
             }
           }
@@ -1093,6 +1298,7 @@ export async function generateProjectionPdfV3Supervisao(options: GeneratePdfV3Su
     });
   }
 
-  const fileName = `Projecao_Estoque_V3_Supervisao_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const fileName = buildPdfFileName('v2Supervisao');
   doc.save(fileName);
 }
+

@@ -659,6 +659,7 @@ const App: React.FC = () => {
           getDataForPdf={getDataForPdf}
           dateColumns={dateColumns}
           horizonLabel={horizonInfo.label}
+          todayStart={todayStart}
           companyLogo={effectiveLogo}
           currentUserName={currentUser.name}
           reportTitle={
