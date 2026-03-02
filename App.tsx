@@ -5,8 +5,6 @@ import {
   ArrowRightLeft,
   Upload,
   Search,
-  Moon,
-  Sun,
   ClipboardList,
   LogOut,
   ChevronDown,
@@ -43,6 +41,7 @@ import ImportSimulationModal from './components/ImportSimulationModal';
 import PdfReportModal from './components/PdfReportModal';
 import Login from './components/Login';
 import UserManagement from './components/UserManagement';
+import ThemeToggle from './components/ThemeToggle';
 import { buildConsolidatedData, countEligibleProjectionRows, getEligibleUniqueOrderCount } from './consolidation';
 
 const STORAGE_KEYS = {
@@ -78,7 +77,6 @@ const loadSimulationFromStorage = (): SimulationState => {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'PROJECAO' | 'ROMANEIO' | 'USUARIOS'>('PROJECAO');
   const [projectionSubMode, setProjectionSubMode] = useState<ProjectionSubMode>('PADRAO');
-  const [darkMode, setDarkMode] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isImportSimulationModalOpen, setIsImportSimulationModalOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
@@ -88,6 +86,8 @@ const App: React.FC = () => {
   const [showErpPanel, setShowErpPanel] = useState(false);
   const [erpStatus, setErpStatus] = useState<'connected' | 'disconnected' | 'syncing'>('syncing');
   const [logoLoadError, setLogoLoadError] = useState(false);
+  const [visibleProductsPadrao, setVisibleProductsPadrao] = useState<number | null>(null);
+  const [visibleProductsSimulacao, setVisibleProductsSimulacao] = useState<number | null>(null);
 
   // Auth State
   const [currentUser, setCurrentUser] = useState<{ profile: UserProfile, name: string } | null>(() => {
@@ -237,11 +237,6 @@ const App: React.FC = () => {
       unsubLogo();
     };
   }, [supabase, queryClient]);
-
-  useEffect(() => {
-    if (darkMode) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-  }, [darkMode]);
 
   useEffect(() => {
     if (erpStatus === 'syncing' && stockQuery.isFetching) return;
@@ -456,9 +451,7 @@ const App: React.FC = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input type="text" placeholder="Buscar produto..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-[#0b2b58] text-sm rounded-full py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-highlight w-64 border-none text-white placeholder-gray-400 transition-all" />
           </div>
-          <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full hover:bg-white/10 transition-colors">
-            {darkMode ? <Sun className="w-5 h-5 text-highlight" /> : <Moon className="w-5 h-5" />}
-          </button>
+          <ThemeToggle />
           <button onClick={() => setIsImportModalOpen(true)} className="flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded font-semibold text-sm transition-all active:scale-95 shadow-lg">
             <Upload className="w-4 h-4" />
             <span>Importações</span>
@@ -545,6 +538,7 @@ const App: React.FC = () => {
               considerarRequisicoes={true}
               horizonDays={horizonDays}
               onHorizonDaysChange={setHorizonDays}
+              onVisibleProductsCountChange={setVisibleProductsPadrao}
             />
           </div>
         </div>
@@ -608,6 +602,7 @@ const App: React.FC = () => {
                 considerarRequisicoes={simulationState.considerarRequisicoes}
                 horizonDays={horizonDays}
                 onHorizonDaysChange={setHorizonDays}
+                onVisibleProductsCountChange={setVisibleProductsSimulacao}
               />
             )}
           </div>
@@ -625,7 +620,14 @@ const App: React.FC = () => {
       <footer className="bg-white dark:bg-[#252525] border-t border-gray-200 dark:border-gray-700 p-2 px-6 flex justify-between text-[11px] text-neutral">
         <div className="flex gap-4">
           <span>Pedidos Únicos: <b>{activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' ? uniqueOrdersCountSimulation : uniqueOrdersCount}</b></span>
-          <span>Produtos: <b>{activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' ? consolidatedDataSimulation.length : consolidatedData.length}</b></span>
+          <span>
+            Produtos:{' '}
+            <b>
+              {activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO'
+                ? (visibleProductsSimulacao ?? consolidatedDataSimulation.length)
+                : (visibleProductsPadrao ?? consolidatedData.length)}
+            </b>
+          </span>
           {activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' && simulationState.data.length > 0 && (
             <span className="text-amber-600 dark:text-amber-400 font-semibold">[Simulação]</span>
           )}

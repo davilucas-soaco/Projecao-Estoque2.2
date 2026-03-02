@@ -15,18 +15,31 @@ interface ConsolidationFilterOptions {
   flattenShelfProducts?: boolean;
 }
 
+const parseOrderDateAtStartOfDay = (dateStr: string): Date | null => {
+  const d = parseOrderDate(dateStr);
+  if (!d) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const isOrderEligibleBase = (order: Order, options?: ConsolidationFilterOptions): boolean => {
+  const considerarRequisicoes = options?.considerarRequisicoes ?? true;
+  const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
+  const dEntrega = parseOrderDateAtStartOfDay(order.dataEntrega);
+
+  if (categoria === CATEGORY_INSERIR_ROMANEIO) return false;
+  if (!considerarRequisicoes && categoria === CATEGORY_REQUISICAO) return false;
+  if (!dEntrega) return false;
+  return true;
+};
+
 const isOrderEligibleForProjection = (
   order: Order,
   lastFutureDate: Date | null | undefined,
   options?: ConsolidationFilterOptions
 ): boolean => {
-  const considerarRequisicoes = options?.considerarRequisicoes ?? true;
-  const categoria = getCategoriaFromObservacoes(order.observacoesRomaneio);
-  const dEntrega = parseOrderDate(order.dataEntrega);
-  if (dEntrega) dEntrega.setHours(0, 0, 0, 0);
-
-  if (categoria === CATEGORY_INSERIR_ROMANEIO) return false;
-  if (!considerarRequisicoes && categoria === CATEGORY_REQUISICAO) return false;
+  if (!isOrderEligibleBase(order, options)) return false;
+  const dEntrega = parseOrderDateAtStartOfDay(order.dataEntrega);
   if (!dEntrega) return false;
   if (lastFutureDate && dEntrega > lastFutureDate) return false;
   return true;
@@ -37,9 +50,9 @@ export function countEligibleProjectionRows(
   dateColumns: DateColumn[],
   options?: ConsolidationFilterOptions
 ): number {
-  const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
+  void dateColumns;
   return orders.reduce((acc, order) => {
-    if (isOrderEligibleForProjection(order, lastFutureDate, options)) {
+    if (isOrderEligibleBase(order, options)) {
       return acc + 1;
     }
     return acc;
@@ -52,10 +65,10 @@ export function getEligibleUniqueOrderCount(
   dateColumns: DateColumn[],
   options?: ConsolidationFilterOptions
 ): number {
-  const lastFutureDate = dateColumns[dateColumns.length - 1]?.date;
+  void dateColumns;
   const seen = new Set<string>();
   orders.forEach((order) => {
-    if (isOrderEligibleForProjection(order, lastFutureDate, options)) {
+    if (isOrderEligibleBase(order, options)) {
       seen.add(order.numeroPedido);
     }
   });

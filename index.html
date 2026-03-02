@@ -1,8 +1,17 @@
 
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-br" class="dark">
 <head>
     <meta charset="UTF-8">
+    <script>
+      (function(){
+        try {
+          var v = localStorage.getItem('sa_industrial_theme_v1');
+          if (v === 'false') document.documentElement.classList.remove('dark');
+          else document.documentElement.classList.add('dark');
+        } catch(e) { document.documentElement.classList.add('dark'); }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Projeção de Estoque — Só Aço Industrial</title>
     <script src="https://cdn.tailwindcss.com"></script>

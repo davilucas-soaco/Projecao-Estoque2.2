@@ -35,6 +35,7 @@ interface Props {
   considerarRequisicoes?: boolean;
   horizonDays?: 15 | 30 | 45 | 60;
   onHorizonDaysChange?: (days: 15 | 30 | 45 | 60) => void;
+  onVisibleProductsCountChange?: (count: number) => void;
 }
 
 const formatCellNum = (v: unknown): string | number => {
@@ -52,6 +53,7 @@ const ProjectionTable: React.FC<Props> = ({
   considerarRequisicoes = true,
   horizonDays = 60,
   onHorizonDaysChange,
+  onVisibleProductsCountChange,
 }) => {
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [descriptionWidth, setDescriptionWidth] = useState(280);
@@ -234,6 +236,10 @@ const ProjectionTable: React.FC<Props> = ({
       return 0;
     });
   }, [dataFilteredByColumns, sortCriteria]);
+
+  useEffect(() => {
+    onVisibleProductsCountChange?.(sortedData.length);
+  }, [sortedData.length, onVisibleProductsCountChange]);
 
   const renderSortIndicator = (columnKey: string) => {
     const idx = sortCriteria.findIndex(s => s.column === columnKey);
