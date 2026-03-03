@@ -13,6 +13,8 @@ interface ConsolidationFilterOptions {
   considerarRequisicoes?: boolean;
   /** Quando true, produtos acabados (shelf) não são exibidos; apenas componentes (ex.: PA 6895 → PI 0761, MP 2788) */
   flattenShelfProducts?: boolean;
+  /** Limite para coluna Só Móveis: retroativo + hoje até N dias (ex: 13). Se não informado, usa horizonDate completo. */
+  soMoveisHorizonEndDate?: Date;
 }
 
 const parseOrderDateAtStartOfDay = (dateStr: string): Date | null => {
@@ -86,6 +88,7 @@ export function buildConsolidatedData(
 ): ProductConsolidated[] {
   const considerarRequisicoes = options?.considerarRequisicoes ?? true;
   const flattenShelfProducts = options?.flattenShelfProducts ?? false;
+  const soMoveisHorizonEnd = options?.soMoveisHorizonEndDate;
 
   const productMap = new Map<string, ProductConsolidated>();
   const shelfFichaMap = new Map<string, ShelfFicha>();
@@ -99,6 +102,7 @@ export function buildConsolidatedData(
   });
 
   const horizonDate = dateColumns[dateColumns.length - 1]?.date;
+  const reqHorizon = soMoveisHorizonEnd ?? horizonDate;
   const dateKeysSet = new Set(dateColumns.filter((c) => !c.isAtrasados).map((c) => c.key));
 
   const parseOrderDateLocal = (dateStr: string) => {
@@ -189,7 +193,7 @@ export function buildConsolidatedData(
       const qtyBan = orderQty * ficha.qtdBandeja;
       col.totalPedido += qtyCol;
       ban.totalPedido += qtyBan;
-      if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && (!horizonDate || dEntrega <= horizonDate)) {
+      if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && (!reqHorizon || dEntrega <= reqHorizon)) {
         const routeName = CATEGORY_REQUISICAO;
         if (!col.routeData[routeName]) col.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
         col.routeData[routeName].pedido += qtyCol;
@@ -223,7 +227,7 @@ export function buildConsolidatedData(
       prod.components[1].totalPedido += orderQty * fic.qtdBandeja;
     }
 
-    if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && (!horizonDate || dEntrega <= horizonDate)) {
+    if (considerarRequisicoes && categoria === CATEGORY_REQUISICAO && (!reqHorizon || dEntrega <= reqHorizon)) {
       const routeName = CATEGORY_REQUISICAO;
       if (!prod.routeData[routeName]) prod.routeData[routeName] = { pedido: 0, falta: 0, breakdown: [] };
       prod.routeData[routeName].pedido += orderQty;

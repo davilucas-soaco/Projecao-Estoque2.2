@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ProductConsolidated, Order, ComponentData } from '../types';
-import { ROUTE_SO_MOVEIS } from '../utils';
+import { ProductConsolidated, Order, ComponentData, ProjecaoImportada } from '../types';
+import { ROUTE_SO_MOVEIS, extractRotasFromProjection, dateToKey } from '../utils';
 import {
   AlertTriangle,
   TrendingDown,
@@ -30,12 +30,17 @@ interface Props {
   data: ProductConsolidated[];
   orders: Order[];
   horizonLabel?: string;
+  /** Label do horizonte da coluna Só Móveis (ex: "03/03 a 16/03") */
+  soMoveisHorizonLabel?: string;
   dateColumns?: DateColumn[];
   /** Se false, a coluna "Só Móveis" não é renderizada (exclusivo da simulação) */
   considerarRequisicoes?: boolean;
   horizonDays?: 15 | 30 | 45 | 60;
   onHorizonDaysChange?: (days: 15 | 30 | 45 | 60) => void;
   onVisibleProductsCountChange?: (count: number) => void;
+  projectionSource?: ProjecaoImportada[];
+  selectedRotas?: Set<string>;
+  selectedSetores?: Set<string>;
 }
 
 const formatCellNum = (v: unknown): string | number => {
@@ -49,11 +54,15 @@ const ProjectionTable: React.FC<Props> = ({
   data,
   orders,
   horizonLabel,
+  soMoveisHorizonLabel,
   dateColumns = [],
   considerarRequisicoes = true,
   horizonDays = 60,
   onHorizonDaysChange,
   onVisibleProductsCountChange,
+  projectionSource = [],
+  selectedRotas = new Set(),
+  selectedSetores = new Set(),
 }) => {
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [descriptionWidth, setDescriptionWidth] = useState(280);
@@ -61,6 +70,8 @@ const ProjectionTable: React.FC<Props> = ({
   const [showColumnFilter, setShowColumnFilter] = useState(false);
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<Set<string>>(new Set());
   const [expandedShelves, setExpandedShelves] = useState<Set<string>>(new Set());
+  const [selectedRowCodigo, setSelectedRowCodigo] = useState<string | null>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<{
     codigo: string;
     colKey: string;
@@ -126,6 +137,7 @@ const ProjectionTable: React.FC<Props> = ({
     colLabel: string
   ) => {
     e.stopPropagation();
+    setSelectedRowCodigo(item.codigo);
     const rd = item.routeData[colKey];
     if (!rd || rd.pedido === 0) return;
     const breakdown = rd.breakdown && rd.breakdown.length > 0 ? rd.breakdown : [{ destino: 'Total', qty: rd.pedido } as { destino: string; qty: number; numeroPedido?: string }];
@@ -138,6 +150,52 @@ const ProjectionTable: React.FC<Props> = ({
       pedido: rd.pedido,
       anchorRect: rect,
     });
+  };
+
+  const rotasCompletas = useMemo(() => extractRotasFromProjection(projectionSource), [projectionSource]);
+
+  const dateKeysForSelectedRotas = useMemo(() => {
+    if (selectedRotas.size === 0) return null;
+    const keys = new Set<string>();
+    for (const r of rotasCompletas) {
+      if (selectedRotas.has(r.routeName) && r.previsaoDate) {
+        keys.add(dateToKey(r.previsaoDate));
+      }
+    }
+    return keys.size > 0 ? keys : null;
+  }, [rotasCompletas, selectedRotas]);
+
+  const codigoToSetores = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    projectionSource.forEach((r) => {
+      const cod = (r.cod ?? '').trim().toUpperCase();
+      const setor = (r.setorProducao ?? '').trim();
+      if (!cod || !setor) return;
+      if (!map.has(cod)) map.set(cod, new Set());
+      map.get(cod)!.add(setor);
+    });
+    return map;
+  }, [projectionSource]);
+
+  const productHasRota = (item: ProductConsolidated | ComponentData, rotas: Set<string>): boolean => {
+    if (rotas.size === 0) return true;
+    for (const rd of Object.values(item.routeData)) {
+      if (!rd?.breakdown) continue;
+      for (const b of rd.breakdown) {
+        if (rotas.has(b.destino)) return true;
+      }
+    }
+    return false;
+  };
+
+  const productHasSetor = (codigo: string, setores: Set<string>): boolean => {
+    if (setores.size === 0) return true;
+    const prodSetores = codigoToSetores.get(codigo.trim().toUpperCase());
+    if (!prodSetores) return false;
+    for (const s of setores) {
+      if (prodSetores.has(s)) return true;
+    }
+    return false;
   };
 
   useEffect(() => {
@@ -154,6 +212,9 @@ const ProjectionTable: React.FC<Props> = ({
           setTooltip(null);
         }
       }
+      if (selectedRowCodigo && tableContainerRef.current && !tableContainerRef.current.contains(e.target as Node)) {
+        setSelectedRowCodigo(null);
+      }
     };
     document.addEventListener('mousedown', handleCloseMenus);
     document.addEventListener('mousedown', handleClickOutside);
@@ -161,7 +222,7 @@ const ProjectionTable: React.FC<Props> = ({
       document.removeEventListener('mousedown', handleCloseMenus);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [tooltip, showColumnFilter]);
+  }, [tooltip, showColumnFilter, selectedRowCodigo]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -187,23 +248,32 @@ const ProjectionTable: React.FC<Props> = ({
   const dataFilteredByColumns = useMemo(() => {
     const totalColumnsCount = 1 + dateColumns.length;
     const filterIsActive = selectedColumnKeys.size < totalColumnsCount;
-    if (!filterIsActive) return data;
-    const selectedKeys = new Set(selectedColumnKeys);
-    return data.filter((item) => {
-      const itemHasSelected = Object.entries(item.routeData).some(
-        ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
-      );
-      if (itemHasSelected) return true;
-      if (item.isShelf && item.components) {
-        return item.components.some((comp) =>
-          Object.entries(comp.routeData).some(
-            ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
-          )
+    let result = data;
+    if (filterIsActive) {
+      const selectedKeys = new Set(selectedColumnKeys);
+      result = result.filter((item) => {
+        const itemHasSelected = Object.entries(item.routeData).some(
+          ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
         );
-      }
-      return false;
-    });
-  }, [data, selectedColumnKeys, dateColumns.length]);
+        if (itemHasSelected) return true;
+        if (item.isShelf && item.components) {
+          return item.components.some((comp) =>
+            Object.entries(comp.routeData).some(
+              ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
+            )
+          );
+        }
+        return false;
+      });
+    }
+    if (selectedRotas.size > 0) {
+      result = result.filter((item) => productHasRota(item, selectedRotas));
+    }
+    if (selectedSetores.size > 0) {
+      result = result.filter((item) => productHasSetor(item.codigo, selectedSetores));
+    }
+    return result;
+  }, [data, selectedColumnKeys, dateColumns.length, selectedRotas, selectedSetores, codigoToSetores]);
 
   const sortedData = useMemo(() => {
     if (sortCriteria.length === 0) return dataFilteredByColumns;
@@ -258,9 +328,12 @@ const ProjectionTable: React.FC<Props> = ({
     ...dateColumns.map(c => ({ key: c.key, label: c.label, isSoMoveis: false as const })),
   ];
   const allColumnsSelected = selectedColumnKeys.size === allColumns.length && allColumns.length > 0;
-  const selectedCountLabel = allColumnsSelected
-    ? 'Todas as colunas filtradas'
-    : `${selectedColumnKeys.size} opções filtradas`;
+  const rotaFilterActive = dateKeysForSelectedRotas != null;
+  const selectedCountLabel = rotaFilterActive
+    ? `Coluna(s) da rota selecionada`
+    : allColumnsSelected
+      ? 'Todas as colunas filtradas'
+      : `${selectedColumnKeys.size} opções filtradas`;
 
   useEffect(() => {
     setSelectedColumnKeys(prev => {
@@ -276,14 +349,19 @@ const ProjectionTable: React.FC<Props> = ({
     });
   }, [dateColumns]);
 
-  const visibleColumns = allColumns.filter(col => selectedColumnKeys.has(col.key));
+  const visibleColumns = useMemo(() => {
+    if (dateKeysForSelectedRotas) {
+      return allColumns.filter((col) => !col.isSoMoveis && dateKeysForSelectedRotas.has(col.key));
+    }
+    return allColumns.filter(col => selectedColumnKeys.has(col.key));
+  }, [allColumns, selectedColumnKeys, dateKeysForSelectedRotas]);
 
   const totalColSpan = 5 + visibleColumns.length * 2;
 
   return (
     <div className="space-y-4 h-full flex flex-col">
       <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0">
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
+        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-end justify-between gap-3">
           <div className="relative" ref={columnFilterRef}>
             <button
               type="button"
@@ -294,7 +372,7 @@ const ProjectionTable: React.FC<Props> = ({
               Filtro de Colunas
             </button>
             <p className="mt-1 text-[10px] text-neutral font-semibold">{selectedCountLabel}</p>
-            {showColumnFilter && (
+            {showColumnFilter && !rotaFilterActive && (
               <div className="absolute left-0 mt-2 z-[95] w-72 max-h-80 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#252525] shadow-xl p-2">
                 <div className="flex items-center justify-between mb-2 px-1">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-neutral">Colunas visíveis</span>
@@ -339,21 +417,8 @@ const ProjectionTable: React.FC<Props> = ({
               </div>
             )}
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-neutral">Horizonte</label>
-            <select
-              value={horizonDays}
-              onChange={(e) => onHorizonDaysChange?.(Number(e.target.value) as 15 | 30 | 45 | 60)}
-              className="px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#252525] text-xs font-semibold text-gray-700 dark:text-gray-200"
-            >
-              <option value={15}>15 dias</option>
-              <option value={30}>30 dias</option>
-              <option value={45}>45 dias</option>
-              <option value={60}>60 dias</option>
-            </select>
-          </div>
         </div>
-        <div className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-250px)]">
+        <div ref={tableContainerRef} className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-250px)]">
           <table className="w-full text-left text-sm border-separate border-spacing-0 min-w-max">
             <thead className="sticky top-0 z-[70]">
               <tr className="bg-primary text-white">
@@ -418,7 +483,7 @@ const ProjectionTable: React.FC<Props> = ({
                     colSpan={2}
                   >
                     <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">
-                      {col.isSoMoveis ? (horizonLabel || 'Horizonte') : 'Data'}
+                      {col.isSoMoveis ? (soMoveisHorizonLabel || horizonLabel || 'Horizonte') : 'Data'}
                     </div>
                     <div className="text-[10px] whitespace-normal break-words leading-tight max-w-[85px] mx-auto uppercase font-bold mb-0.5 min-h-[24px] flex items-center justify-center select-text">
                       {col.label}
@@ -446,7 +511,12 @@ const ProjectionTable: React.FC<Props> = ({
                 const isExpanded = expandedShelves.has(item.codigo);
                 return (
                   <React.Fragment key={item.codigo}>
-                    <tr className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group`}>
+                    <tr
+                      onClick={() => setSelectedRowCodigo((prev) => (prev === item.codigo ? null : item.codigo))}
+                      className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group cursor-pointer ${
+                        selectedRowCodigo === item.codigo ? 'ring-1 ring-secondary/40 bg-blue-50/70 dark:bg-blue-900/20' : ''
+                      }`}
+                    >
                       <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                         <div className="flex items-center gap-2">
                           {item.isShelf && (
@@ -501,7 +571,16 @@ const ProjectionTable: React.FC<Props> = ({
                     </tr>
 
                     {item.isShelf && isExpanded && item.components?.map((comp) => (
-                      <tr key={`${item.codigo}-${comp.codigo}`} className="bg-gray-100/30 dark:bg-gray-800/20 border-l-4 border-secondary animate-in slide-in-from-top-1 duration-200">
+                      <tr
+                        key={`${item.codigo}-${comp.codigo}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedRowCodigo((prev) => (prev === item.codigo ? null : item.codigo));
+                        }}
+                        className={`bg-gray-100/30 dark:bg-gray-800/20 border-l-4 border-secondary animate-in slide-in-from-top-1 duration-200 ${
+                          selectedRowCodigo === item.codigo ? 'ring-1 ring-secondary/40 bg-blue-50/50 dark:bg-blue-900/15' : ''
+                        }`}
+                      >
                         <td className="px-3 py-1 text-[10px] font-mono sticky left-0 z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)]">
                           <div className="flex items-center gap-2 pl-4">
                             <CornerDownRight className="w-3 h-3 text-neutral opacity-50" />

@@ -4,16 +4,14 @@ import {
   BarChart3,
   ArrowRightLeft,
   Upload,
-  Search,
   ClipboardList,
   LogOut,
   ChevronDown,
   Users,
   X,
-  FileDown,
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
-import { getHorizonInfo, getDateColumns, getTodayStart } from './utils';
+import { getHorizonInfo, getDateColumns, getTodayStart, getSoMoveisHorizonInfo } from './utils';
 import { fetchStock } from './api';
 import {
   supabase,
@@ -35,6 +33,7 @@ import {
 } from './supabaseClient';
 import { useQueryClient } from '@tanstack/react-query';
 import ProjectionTable from './components/ProjectionTable';
+import ProjectionFiltersBar from './components/ProjectionFiltersBar';
 import OrdersView from './components/OrdersView';
 import ImportModal from './components/ImportModal';
 import ImportSimulationModal from './components/ImportSimulationModal';
@@ -81,6 +80,8 @@ const App: React.FC = () => {
   const [isImportSimulationModalOpen, setIsImportSimulationModalOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [projectionFilterRotas, setProjectionFilterRotas] = useState<Set<string>>(new Set());
+  const [projectionFilterSetores, setProjectionFilterSetores] = useState<Set<string>>(new Set());
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
   const [showErpPanel, setShowErpPanel] = useState(false);
@@ -370,6 +371,7 @@ const App: React.FC = () => {
 
   const dateColumns = useMemo(() => getDateColumns(horizonDays), [horizonDays]);
   const horizonInfo = useMemo(() => getHorizonInfo(horizonDays), [horizonDays]);
+  const soMoveisHorizonInfo = useMemo(() => getSoMoveisHorizonInfo(), []);
   const todayStart = useMemo(() => getTodayStart(), []);
 
   const consolidatedData = useMemo(
@@ -377,8 +379,9 @@ const App: React.FC = () => {
       buildConsolidatedData(orders, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
         considerarRequisicoes: true,
         flattenShelfProducts: true,
+        soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       }),
-    [orders, stock, shelfFicha, searchTerm, dateColumns, todayStart]
+    [orders, stock, shelfFicha, searchTerm, dateColumns, todayStart, soMoveisHorizonInfo.endDate]
   );
 
   const consolidatedDataSimulation = useMemo(
@@ -386,8 +389,9 @@ const App: React.FC = () => {
       buildConsolidatedData(ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
         considerarRequisicoes: simulationState.considerarRequisicoes,
         flattenShelfProducts: true,
+        soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       }),
-    [ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, simulationState.considerarRequisicoes]
+    [ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, simulationState.considerarRequisicoes, soMoveisHorizonInfo.endDate]
   );
   const simulationEligibleRowsCount = useMemo(
     () =>
@@ -415,9 +419,10 @@ const App: React.FC = () => {
       return buildConsolidatedData(ords, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
         considerarRequisicoes,
         flattenShelfProducts: true,
+        soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       });
     },
-    [projectionSubMode, orders, ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart]
+    [projectionSubMode, orders, ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, soMoveisHorizonInfo.endDate]
   );
 
   if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
@@ -447,10 +452,6 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <div className="relative hidden md:block">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input type="text" placeholder="Buscar produto..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-[#0b2b58] text-sm rounded-full py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-highlight w-64 border-none text-white placeholder-gray-400 transition-all" />
-          </div>
           <ThemeToggle />
           <button onClick={() => setIsImportModalOpen(true)} className="flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded font-semibold text-sm transition-all active:scale-95 shadow-lg">
             <Upload className="w-4 h-4" />
@@ -521,24 +522,31 @@ const App: React.FC = () => {
       <main className="flex-1 p-6 overflow-auto">
         <div className={activeTab === 'PROJECAO' && projectionSubMode === 'PADRAO' ? '' : 'hidden'}>
           <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
-            <div className="flex justify-end mb-4">
-              <button
-                onClick={() => setIsPdfModalOpen(true)}
-                className="flex items-center gap-2 bg-secondary hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold text-sm text-white transition-all active:scale-95 shadow-md"
-              >
-                <FileDown className="w-4 h-4" />
-                Gerar PDF
-              </button>
-            </div>
+            <ProjectionFiltersBar
+              projectionSource={projection}
+              filterDescCod={searchTerm}
+              onFilterDescCodChange={setSearchTerm}
+              selectedRotas={projectionFilterRotas}
+              onSelectedRotasChange={setProjectionFilterRotas}
+              selectedSetores={projectionFilterSetores}
+              onSelectedSetoresChange={setProjectionFilterSetores}
+              horizonDays={horizonDays}
+              onHorizonDaysChange={setHorizonDays}
+              onGeneratePdf={() => setIsPdfModalOpen(true)}
+            />
             <ProjectionTable
               data={consolidatedData}
               orders={orders}
               horizonLabel={horizonInfo.label}
+              soMoveisHorizonLabel={soMoveisHorizonInfo.label}
               dateColumns={dateColumns}
               considerarRequisicoes={true}
               horizonDays={horizonDays}
               onHorizonDaysChange={setHorizonDays}
               onVisibleProductsCountChange={setVisibleProductsPadrao}
+              projectionSource={projection}
+              selectedRotas={projectionFilterRotas}
+              selectedSetores={projectionFilterSetores}
             />
           </div>
         </div>
@@ -563,18 +571,6 @@ const App: React.FC = () => {
               >
                 Limpar Simulação
               </button>
-              <button
-                onClick={() => setIsPdfModalOpen(true)}
-                disabled={simulationState.data.length === 0}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
-                  simulationState.data.length === 0
-                    ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-secondary hover:bg-blue-700 text-white active:scale-95 shadow-md'
-                }`}
-              >
-                <FileDown className="w-4 h-4" />
-                Gerar PDF
-              </button>
               {simulationState.data.length > 0 && (
                 <span className="text-[11px] text-neutral self-center">
                   {simulationEligibleRowsCount} registros considerados • Requisições: {simulationState.considerarRequisicoes ? 'Sim' : 'Não'}
@@ -594,16 +590,34 @@ const App: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <ProjectionTable
-                data={consolidatedDataSimulation}
-                orders={ordersSimulation}
-                horizonLabel={horizonInfo.label}
-                dateColumns={dateColumns}
-                considerarRequisicoes={simulationState.considerarRequisicoes}
-                horizonDays={horizonDays}
-                onHorizonDaysChange={setHorizonDays}
-                onVisibleProductsCountChange={setVisibleProductsSimulacao}
-              />
+              <>
+                <ProjectionFiltersBar
+                  projectionSource={simulationState.data}
+                  filterDescCod={searchTerm}
+                  onFilterDescCodChange={setSearchTerm}
+                  selectedRotas={projectionFilterRotas}
+                  onSelectedRotasChange={setProjectionFilterRotas}
+                  selectedSetores={projectionFilterSetores}
+                  onSelectedSetoresChange={setProjectionFilterSetores}
+                  horizonDays={horizonDays}
+                  onHorizonDaysChange={setHorizonDays}
+                  onGeneratePdf={() => setIsPdfModalOpen(true)}
+                />
+                <ProjectionTable
+                  data={consolidatedDataSimulation}
+                  orders={ordersSimulation}
+                  horizonLabel={horizonInfo.label}
+                  soMoveisHorizonLabel={soMoveisHorizonInfo.label}
+                  dateColumns={dateColumns}
+                  considerarRequisicoes={simulationState.considerarRequisicoes}
+                  horizonDays={horizonDays}
+                  onHorizonDaysChange={setHorizonDays}
+                  onVisibleProductsCountChange={setVisibleProductsSimulacao}
+                  projectionSource={simulationState.data}
+                  selectedRotas={projectionFilterRotas}
+                  selectedSetores={projectionFilterSetores}
+                />
+              </>
             )}
           </div>
         </div>

@@ -95,6 +95,9 @@ export function validateRmPrevisaoUnica(
   return null;
 }
 
+/** Dias adiante para o horizonte da coluna Só Móveis (igual ao PDF) */
+export const SO_MOVEIS_HORIZON_DAYS = 13;
+
 export const getHorizonInfo = (daysAhead: number = 60) => {
   const today = new Date();
   const start = new Date(today);
@@ -106,6 +109,21 @@ export const getHorizonInfo = (daysAhead: number = 60) => {
     start,
     end,
     label: `Horizonte: ${formatDate(start)} até ${formatDate(end)}`
+  };
+};
+
+/** Horizonte da coluna Só Móveis: retroativo + dia atual até 13 dias em diante (igual ao PDF). */
+export const getSoMoveisHorizonInfo = () => {
+  const today = getTodayStart();
+  const end = new Date(today);
+  end.setDate(today.getDate() + SO_MOVEIS_HORIZON_DAYS);
+  const formatShort = (d: Date) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  return {
+    start: today,
+    end,
+    label: `${formatShort(today)} a ${formatShort(end)}`,
+    /** Data limite para incluir pedidos de Requisição (<= end) */
+    endDate: end,
   };
 };
 
