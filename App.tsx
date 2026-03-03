@@ -406,22 +406,22 @@ const App: React.FC = () => {
 
   const consolidatedData = useMemo(
     () =>
-      buildConsolidatedData(orders, stock, shelfFicha, deferredSearchTerm, dateColumns, todayStart, {
+      buildConsolidatedData(orders, stock, shelfFicha, deferredSearchTerm, allDateColumns, todayStart, {
         considerarRequisicoes: true,
         flattenShelfProducts: true,
         soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       }),
-    [orders, stock, shelfFicha, deferredSearchTerm, dateColumns, todayStart, soMoveisHorizonInfo.endDate]
+    [orders, stock, shelfFicha, deferredSearchTerm, allDateColumns, todayStart, soMoveisHorizonInfo.endDate]
   );
 
   const consolidatedDataSimulation = useMemo(
     () =>
-      buildConsolidatedData(ordersSimulation, stock, shelfFicha, deferredSearchTerm, dateColumns, todayStart, {
+      buildConsolidatedData(ordersSimulation, stock, shelfFicha, deferredSearchTerm, allDateColumns, todayStart, {
         considerarRequisicoes: simulationState.considerarRequisicoes,
         flattenShelfProducts: true,
         soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       }),
-    [ordersSimulation, stock, shelfFicha, deferredSearchTerm, dateColumns, todayStart, simulationState.considerarRequisicoes, soMoveisHorizonInfo.endDate]
+    [ordersSimulation, stock, shelfFicha, deferredSearchTerm, allDateColumns, todayStart, simulationState.considerarRequisicoes, soMoveisHorizonInfo.endDate]
   );
   const simulationEligibleRowsCount = useMemo(
     () =>

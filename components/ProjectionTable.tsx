@@ -11,7 +11,6 @@ import {
   Minus,
   CornerDownRight,
   X,
-  SlidersHorizontal,
 } from 'lucide-react';
 
 interface SortCriterion {
@@ -72,8 +71,6 @@ const ProjectionTable: React.FC<Props> = ({
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [descriptionWidth, setDescriptionWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
-  const [showColumnFilter, setShowColumnFilter] = useState(false);
-  const [selectedColumnKeys, setSelectedColumnKeys] = useState<Set<string>>(new Set());
   const [expandedShelves, setExpandedShelves] = useState<Set<string>>(new Set());
   const [selectedRowCodigo, setSelectedRowCodigo] = useState<string | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -88,7 +85,6 @@ const ProjectionTable: React.FC<Props> = ({
   const resizeRef = useRef<number>(0);
   const didResizeRef = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const columnFilterRef = useRef<HTMLDivElement>(null);
   const tooltipDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({
     dragging: false,
     offsetX: 0,
@@ -163,16 +159,30 @@ const ProjectionTable: React.FC<Props> = ({
 
   const rotasCompletas = useMemo(() => extractRotasFromProjection(projectionSource), [projectionSource]);
 
+  const todayStart = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
   const dateKeysForSelectedRotas = useMemo(() => {
     if (selectedRotas.size === 0) return null;
     const keys = new Set<string>();
+    const overdueDates = new Set<string>();
     for (const r of rotasCompletas) {
-      if (selectedRotas.has(r.routeName) && r.previsaoDate) {
-        keys.add(dateToKey(r.previsaoDate));
+      if (!selectedRotas.has(r.routeName) || !r.previsaoDate) continue;
+      const d = new Date(r.previsaoDate);
+      d.setHours(0, 0, 0, 0);
+      if (d <= todayStart) {
+        overdueDates.add(
+          d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+        );
+      } else {
+        keys.add(dateToKey(d));
       }
     }
-    return keys.size > 0 ? keys : null;
-  }, [rotasCompletas, selectedRotas]);
+    return { keys, overdueDates };
+  }, [rotasCompletas, selectedRotas, todayStart]);
 
   const codigoToRotas = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -223,12 +233,6 @@ const ProjectionTable: React.FC<Props> = ({
   };
 
   useEffect(() => {
-    const handleCloseMenus = (e: MouseEvent) => {
-      if (showColumnFilter && columnFilterRef.current && !columnFilterRef.current.contains(e.target as Node)) {
-        setShowColumnFilter(false);
-      }
-    };
-
     const handleClickOutside = (e: MouseEvent) => {
       if (tooltip && tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
         const target = e.target as HTMLElement;
@@ -240,13 +244,11 @@ const ProjectionTable: React.FC<Props> = ({
         setSelectedRowCodigo(null);
       }
     };
-    document.addEventListener('mousedown', handleCloseMenus);
     document.addEventListener('pointerdown', handleClickOutside, true);
     return () => {
-      document.removeEventListener('mousedown', handleCloseMenus);
       document.removeEventListener('pointerdown', handleClickOutside, true);
     };
-  }, [tooltip, showColumnFilter, selectedRowCodigo]);
+  }, [tooltip, selectedRowCodigo]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -296,26 +298,7 @@ const ProjectionTable: React.FC<Props> = ({
   }, [isResizing]);
 
   const dataFilteredByColumns = useMemo(() => {
-    const totalColumnsCount = 1 + dateColumns.length;
-    const filterIsActive = selectedColumnKeys.size < totalColumnsCount;
     let result = data;
-    if (filterIsActive) {
-      const selectedKeys = new Set(selectedColumnKeys);
-      result = result.filter((item) => {
-        const itemHasSelected = Object.entries(item.routeData).some(
-          ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
-        );
-        if (itemHasSelected) return true;
-        if (item.isShelf && item.components) {
-          return item.components.some((comp) =>
-            Object.entries(comp.routeData).some(
-              ([key, value]) => selectedKeys.has(key) && (value?.pedido || 0) > 0
-            )
-          );
-        }
-        return false;
-      });
-    }
     if (selectedRotas.size > 0) {
       result = result.filter((item) => productHasRota(item.codigo, selectedRotas));
     }
@@ -323,7 +306,7 @@ const ProjectionTable: React.FC<Props> = ({
       result = result.filter((item) => productHasSetor(item.codigo, selectedSetores));
     }
     return result;
-  }, [data, selectedColumnKeys, dateColumns.length, selectedRotas, selectedSetores, codigoToSetores, codigoToRotas]);
+  }, [data, selectedRotas, selectedSetores, codigoToSetores, codigoToRotas]);
 
   const sortedData = useMemo(() => {
     if (sortCriteria.length === 0) return dataFilteredByColumns;
@@ -377,98 +360,38 @@ const ProjectionTable: React.FC<Props> = ({
     ...(considerarRequisicoes ? [{ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true as const }] : []),
     ...dateColumns.map(c => ({ key: c.key, label: c.label, isSoMoveis: false as const })),
   ];
-  const allColumnsSelected = selectedColumnKeys.size === allColumns.length && allColumns.length > 0;
-  const rotaFilterActive = dateKeysForSelectedRotas != null;
-  const selectedCountLabel = rotaFilterActive
-    ? `Coluna(s) da rota selecionada`
-    : allColumnsSelected
-      ? 'Todas as colunas filtradas'
-      : `${selectedColumnKeys.size} opções filtradas`;
-
-  useEffect(() => {
-    setSelectedColumnKeys(prev => {
-      if (prev.size === 0) return new Set(allColumns.map(c => c.key));
-      const next = new Set<string>();
-      for (const col of allColumns) {
-        if (prev.has(col.key)) next.add(col.key);
-      }
-      if (next.size === 0) {
-        allColumns.forEach(col => next.add(col.key));
-      }
-      return next;
-    });
-  }, [dateColumns]);
+  const rotaFilterActive = selectedRotas.size > 0;
 
   const visibleColumns = useMemo(() => {
-    if (dateKeysForSelectedRotas) {
-      return allColumns.filter((col) => !col.isSoMoveis && dateKeysForSelectedRotas.has(col.key));
+    if (rotaFilterActive) {
+      const cols: { key: string; label: string; isSoMoveis: false }[] = [];
+      const overdueDates = Array.from(dateKeysForSelectedRotas?.overdueDates ?? []);
+      if (overdueDates.length > 0) {
+        const label =
+          overdueDates.length <= 2
+            ? overdueDates.join(' • ')
+            : `${overdueDates[0]} +${overdueDates.length - 1}`;
+        cols.push({ key: 'ATRASADOS', label, isSoMoveis: false });
+      }
+      const formatDateKey = (key: string) => {
+        const [yy, mm, dd] = key.split('-');
+        return `${dd}/${mm}/${yy.slice(-2)}`;
+      };
+      for (const key of dateKeysForSelectedRotas?.keys ?? []) {
+        const col = dateColumns.find((c) => c.key === key);
+        cols.push({ key, label: col?.label ?? formatDateKey(key), isSoMoveis: false });
+      }
+      return cols;
     }
-    return allColumns.filter(col => selectedColumnKeys.has(col.key));
-  }, [allColumns, selectedColumnKeys, dateKeysForSelectedRotas]);
+    return allColumns;
+  }, [rotaFilterActive, allColumns, dateKeysForSelectedRotas, dateColumns]);
 
   const totalColSpan = 5 + visibleColumns.length * 2;
 
   return (
     <div className="space-y-4 h-full flex flex-col">
       <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0">
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-end justify-between gap-3">
-          <div className="relative" ref={columnFilterRef}>
-            <button
-              type="button"
-              onClick={() => setShowColumnFilter(prev => !prev)}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              Filtro de Colunas
-            </button>
-            <p className="mt-1 text-[10px] text-neutral font-semibold">{selectedCountLabel}</p>
-            {showColumnFilter && !rotaFilterActive && (
-              <div className="absolute left-0 mt-2 z-[95] w-72 max-h-80 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#252525] shadow-xl p-2">
-                <div className="flex items-center justify-between mb-2 px-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-neutral">Colunas visíveis</span>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (allColumnsSelected) {
-                          setSelectedColumnKeys(new Set());
-                        } else {
-                          setSelectedColumnKeys(new Set(allColumns.map(c => c.key)));
-                        }
-                      }}
-                      className="text-[10px] font-bold text-secondary hover:underline"
-                    >
-                      {allColumnsSelected ? 'Desmarcar todas' : 'Selecionar todas'}
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  {allColumns.map(col => (
-                    <label key={col.key} className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedColumnKeys.has(col.key)}
-                        onChange={(e) => {
-                          setSelectedColumnKeys(prev => {
-                            const next = new Set(prev);
-                            if (e.target.checked) {
-                              next.add(col.key);
-                            } else {
-                              next.delete(col.key);
-                            }
-                            return next;
-                          });
-                        }}
-                      />
-                      <span>{col.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        <div ref={tableContainerRef} className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-250px)]">
+        <div ref={tableContainerRef} className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-215px)]">
           <table className="w-full text-left text-sm border-separate border-spacing-0 min-w-max">
             <thead className="sticky top-0 z-[70]">
               <tr className="bg-primary text-white">
