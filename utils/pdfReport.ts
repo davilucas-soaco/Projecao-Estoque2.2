@@ -938,7 +938,6 @@ interface SupervisaoColOption {
 interface GeneratePdfV3SupervisaoOptions {
   data: ProductConsolidated[];
   visibleColumns: SupervisaoColOption[];
-  colunaPrincipal: string;
   filtroResultado: 'faltantes' | 'estoque' | 'todos';
   horizonLabel: string;
   companyLogo: string | null;
@@ -953,7 +952,6 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
   const {
     data,
     visibleColumns,
-    colunaPrincipal,
     filtroResultado,
     horizonLabel,
     companyLogo,
@@ -1022,8 +1020,6 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       limitSpecialToAllowedDates: isSpecialHorizonColumn(colKey),
     });
 
-  const selectedKeys = new Set(visibleColumns.map((c) => c.key));
-
   const flattenRows = (): Array<ProductConsolidated | ComponentData> => {
     const rows: Array<ProductConsolidated | ComponentData> = [];
     for (const item of data) {
@@ -1037,42 +1033,38 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
 
   const allRows = flattenRows();
 
-  const dataFiltered = allRows.filter((item) => {
-    if (
-      !itemHasPedidoInSupervisaoCategorias(item, selectedKeys, {
-        allowedDateKeys: specialHorizon.allowedDateKeys,
-        limitSpecialToAllowedDates: true,
-      })
-    ) {
-      return false;
-    }
-    const cellPrincipal = getSupervisaoCell(item, colunaPrincipal);
-    const statusFalta = cellPrincipal.falta;
-    const status = statusFalta < 0 ? 'Faltando' : 'Em Estoque';
-    if (filtroResultado === 'faltantes' && status !== 'Faltando') return false;
-    if (filtroResultado === 'estoque' && status !== 'Em Estoque') return false;
-    return true;
-  });
-
   const cols = visibleColumns;
-  const isLandscape = orientation === 'l';
-  const dateColsPerPage = Math.max(1, isLandscape ? Math.min(cols.length, 6) : Math.min(cols.length, 3));
   const colChunks: SupervisaoColOption[][] = [];
-  for (let i = 0; i < cols.length; i += dateColsPerPage) {
-    colChunks.push(cols.slice(i, i + dateColsPerPage));
+  for (let i = 0; i < cols.length; i++) {
+    colChunks.push(cols.slice(0, i + 1));
   }
 
   for (let chunkIdx = 0; chunkIdx < colChunks.length; chunkIdx++) {
     const chunkCols = colChunks[chunkIdx];
+    const principalCol = chunkCols[chunkCols.length - 1];
+    const colsBeforePrincipal = chunkCols.slice(0, -1);
+    const pageSelectedKeys = new Set(chunkCols.map((c) => c.key));
+    const dataFiltered = allRows.filter((item) => {
+      if (
+        !itemHasPedidoInSupervisaoCategorias(item, pageSelectedKeys, {
+          allowedDateKeys: specialHorizon.allowedDateKeys,
+          limitSpecialToAllowedDates: true,
+        })
+      ) {
+        return false;
+      }
+      const cellPrincipal = getSupervisaoCell(item, principalCol.key);
+      const statusFalta = cellPrincipal.falta;
+      const status = statusFalta < 0 ? 'Faltando' : 'Em Estoque';
+      if (filtroResultado === 'faltantes' && status !== 'Faltando') return false;
+      if (filtroResultado === 'estoque' && status !== 'Em Estoque') return false;
+      return true;
+    });
+
     if (chunkIdx > 0) {
       doc.addPage(orientation === 'l' ? 'a4' : 'a4', orientation);
       addHeader(`Continuação ${chunkIdx + 1}/${colChunks.length}`);
     }
-
-    const principalIdxInChunk = chunkCols.findIndex((c) => c.key === colunaPrincipal);
-    const colsBeforePrincipal = principalIdxInChunk >= 0 ? chunkCols.slice(0, principalIdxInChunk) : chunkCols;
-    const principalCol = principalIdxInChunk >= 0 ? chunkCols[principalIdxInChunk] : null;
-    const colsAfterPrincipal = principalIdxInChunk >= 0 ? chunkCols.slice(principalIdxInChunk + 1) : [];
 
     const headRow1: (string | { content: string; colSpan: number })[] = [
       'Código',
@@ -1086,26 +1078,16 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       })),
     ];
     const headRow2: string[] = ['', '', '', '', '', ...colsBeforePrincipal.flatMap(() => ['P', 'F'])];
-
-    if (principalCol) {
-      headRow1.push(
-        {
-          content: isSpecialHorizonColumn(principalCol.key)
-            ? `${principalCol.label}\n${specialHorizon.label}`
-            : principalCol.label,
-          colSpan: 2,
-        },
-        'Status'
-      );
-      headRow2.push('P', 'F', '');
-      headRow1.push(
-        ...colsAfterPrincipal.map((c) => ({
-          content: isSpecialHorizonColumn(c.key) ? `${c.label}\n${specialHorizon.label}` : c.label,
-          colSpan: 2,
-        }))
-      );
-      headRow2.push(...colsAfterPrincipal.flatMap(() => ['P', 'F']));
-    }
+    headRow1.push(
+      {
+        content: isSpecialHorizonColumn(principalCol.key)
+          ? `${principalCol.label}\n${specialHorizon.label}`
+          : principalCol.label,
+        colSpan: 2,
+      },
+      'Status'
+    );
+    headRow2.push('P', 'F', '');
 
     const head: (string | { content: string; colSpan: number })[][] = [headRow1, headRow2];
 
@@ -1124,7 +1106,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
             : (item as ComponentData).falta;
       const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
 
-      const cellPrincipal = getSupervisaoCell(item, colunaPrincipal);
+      const cellPrincipal = getSupervisaoCell(item, principalCol.key);
       const status = cellPrincipal.falta < 0 ? 'Faltando' : 'Em Estoque';
 
       const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
@@ -1133,14 +1115,8 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
         const cell = getSupervisaoCell(item, col.key);
         row.push(...formatSupervisaoPF(cell.pedido, cell.falta));
       }
-      if (principalCol) {
-        const principalCell = getSupervisaoCell(item, principalCol.key);
-        row.push(...formatSupervisaoPF(principalCell.pedido, principalCell.falta), status);
-        for (const col of colsAfterPrincipal) {
-          const cell = getSupervisaoCell(item, col.key);
-          row.push(...formatSupervisaoPF(cell.pedido, cell.falta));
-        }
-      }
+      const principalCell = getSupervisaoCell(item, principalCol.key);
+      row.push(...formatSupervisaoPF(principalCell.pedido, principalCell.falta), status);
       // Blindagem final de apresentação: se P está vazio/traço, F da mesma coluna também deve ficar vazio/traço.
       const normalizedRow = [...row];
       let pfIdx = 5;
@@ -1148,14 +1124,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
         if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
         pfIdx += 2;
       }
-      if (principalCol) {
-        if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
-        pfIdx += 3; // pula coluna Status
-        for (let i = 0; i < colsAfterPrincipal.length; i++) {
-          if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
-          pfIdx += 2;
-        }
-      }
+      if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
       body.push(normalizedRow);
     }
 
@@ -1198,7 +1167,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       return next;
     });
 
-    const statusIndex = principalCol ? 5 + colsBeforePrincipal.length * 2 + 2 : -1;
+    const statusIndex = 5 + colsBeforePrincipal.length * 2 + 2;
     const colIndexToKey: Record<number, string> = {};
 
     const columnStyles: Record<string, object> = {
@@ -1208,14 +1177,12 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       3: { cellWidth: pedidoWidth, halign: 'center' },
       4: { cellWidth: faltaWidth, halign: 'center' },
     };
-    if (statusIndex >= 0) {
-      columnStyles[String(statusIndex)] = { cellWidth: statusWidth, halign: 'center' };
-    }
+    columnStyles[String(statusIndex)] = { cellWidth: statusWidth, halign: 'center' };
 
-    const orderedRouteCols = [...colsBeforePrincipal, ...(principalCol ? [principalCol] : []), ...colsAfterPrincipal];
+    const orderedRouteCols = [...colsBeforePrincipal, principalCol];
     let colIdx = 5;
     for (let i = 0; i < orderedRouteCols.length; i++) {
-      if (statusIndex >= 0 && colIdx === statusIndex) colIdx++;
+      if (colIdx === statusIndex) colIdx++;
       const baseIdx = colIdx;
       columnStyles[String(baseIdx)] = { cellWidth: subColWidth, halign: 'center' };
       columnStyles[String(baseIdx + 1)] = { cellWidth: subColWidth, halign: 'center' };
@@ -1265,7 +1232,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
             cellData.cell.styles.textColor = [220, 38, 38];
           }
           if (item && colIndex === statusIndex) {
-            const cellPrincipal = getSupervisaoCell(item, colunaPrincipal);
+            const cellPrincipal = getSupervisaoCell(item, principalCol.key);
             if (cellPrincipal.falta < 0) {
               cellData.cell.styles.textColor = [220, 38, 38];
             } else {

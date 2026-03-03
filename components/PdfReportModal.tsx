@@ -60,7 +60,6 @@ const PdfReportModal: React.FC<Props> = ({
 
   const [relatorioSupervisao, setRelatorioSupervisao] = useState<boolean | null>(null);
   const [selectedSupervisaoKeys, setSelectedSupervisaoKeys] = useState<Set<string>>(new Set());
-  const [colunaPrincipalSupervisao, setColunaPrincipalSupervisao] = useState<string>('');
   const [filtroResultadoSupervisao, setFiltroResultadoSupervisao] = useState<'faltantes' | 'estoque' | 'todos'>('todos');
 
   const rotasSupervisao = useMemo(() => extractRotasFromProjection(projection), [projection]);
@@ -128,10 +127,6 @@ const PdfReportModal: React.FC<Props> = ({
         setErrorMsg('Selecione pelo menos uma categoria para incluir no relatório.');
         return;
       }
-      if (!colunaPrincipalSupervisao) {
-        setErrorMsg('O campo "Coluna Principal (base para status)" não foi preenchido. Selecione uma opção.');
-        return;
-      }
     } else {
       if (considerarRequisicoes === null) {
         setErrorMsg('Selecione se deseja considerar requisições na projeção.');
@@ -152,7 +147,6 @@ const PdfReportModal: React.FC<Props> = ({
         await generateProjectionPdfV2Supervisao({
           data,
           visibleColumns: colOpts,
-          colunaPrincipal: colunaPrincipalSupervisao,
           filtroResultado: filtroResultadoSupervisao,
           horizonLabel,
           todayStart,
@@ -329,24 +323,6 @@ const PdfReportModal: React.FC<Props> = ({
 
               {visibleSupervisaoColumns.length > 0 && (
                 <>
-                  <div>
-                    <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
-                      Coluna Principal (base para status)
-                    </p>
-                    <select
-                      value={colunaPrincipalSupervisao}
-                      onChange={(e) => setColunaPrincipalSupervisao(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f] text-sm font-semibold text-gray-800 dark:text-gray-200"
-                    >
-                      <option value="">Selecione a coluna principal...</option>
-                      {visibleSupervisaoColumns.map((c) => (
-                        <option key={c.key} value={c.key}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
                   <div>
                     <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
                       Tipo de resultado a imprimir

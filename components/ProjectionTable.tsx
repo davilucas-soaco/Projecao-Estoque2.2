@@ -40,6 +40,14 @@ interface Props {
   selectedSetores?: Set<string>;
 }
 
+type RouteValueField = 'pedido' | 'falta';
+
+interface RouteValueFilterMenu {
+  colKey: string;
+  field: RouteValueField;
+  anchorRect: DOMRect;
+}
+
 const formatCellNum = (v: unknown): string | number => {
   if (v === undefined || v === null) return '-';
   const n = Number(v);
@@ -73,6 +81,9 @@ const ProjectionTable: React.FC<Props> = ({
   const [isResizing, setIsResizing] = useState(false);
   const [expandedShelves, setExpandedShelves] = useState<Set<string>>(new Set());
   const [selectedRowCodigo, setSelectedRowCodigo] = useState<string | null>(null);
+  const [routeValueFilterMenu, setRouteValueFilterMenu] = useState<RouteValueFilterMenu | null>(null);
+  const [routeValueFilterSearch, setRouteValueFilterSearch] = useState('');
+  const [routeValueFilters, setRouteValueFilters] = useState<Record<string, Set<string>>>({});
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<{
     codigo: string;
@@ -85,6 +96,7 @@ const ProjectionTable: React.FC<Props> = ({
   const resizeRef = useRef<number>(0);
   const didResizeRef = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const valueFilterMenuRef = useRef<HTMLDivElement>(null);
   const tooltipDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({
     dragging: false,
     offsetX: 0,
@@ -156,6 +168,18 @@ const ProjectionTable: React.FC<Props> = ({
       anchorRect: rect,
     });
   };
+
+  const getRouteDisplayValue = (
+    item: ProductConsolidated | ComponentData,
+    colKey: string,
+    field: RouteValueField
+  ): string => {
+    const rd = item.routeData[colKey] || { pedido: 0, falta: 0 };
+    const raw = field === 'pedido' ? rd.pedido : rd.falta;
+    return String(formatCellNum(raw));
+  };
+
+  const getRouteFilterKey = (colKey: string, field: RouteValueField) => `${colKey}|${field}`;
 
   const rotasCompletas = useMemo(() => extractRotasFromProjection(projectionSource), [projectionSource]);
 
@@ -232,6 +256,17 @@ const ProjectionTable: React.FC<Props> = ({
     return false;
   };
 
+  const hasPedidoInSelectedRotaColumns = (item: ProductConsolidated | ComponentData): boolean => {
+    if (!dateKeysForSelectedRotas) return false;
+    const keys = Array.from(dateKeysForSelectedRotas.keys);
+    if ((dateKeysForSelectedRotas.overdueDates?.size ?? 0) > 0) keys.unshift('ATRASADOS');
+    for (const key of keys) {
+      const rd = item.routeData[key];
+      if ((rd?.pedido ?? 0) > 0) return true;
+    }
+    return false;
+  };
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (tooltip && tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
@@ -243,12 +278,18 @@ const ProjectionTable: React.FC<Props> = ({
       if (selectedRowCodigo && tableContainerRef.current && !tableContainerRef.current.contains(e.target as Node)) {
         setSelectedRowCodigo(null);
       }
+      if (routeValueFilterMenu && valueFilterMenuRef.current && !valueFilterMenuRef.current.contains(e.target as Node)) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('th[data-route-filter-head]')) {
+          setRouteValueFilterMenu(null);
+        }
+      }
     };
     document.addEventListener('pointerdown', handleClickOutside, true);
     return () => {
       document.removeEventListener('pointerdown', handleClickOutside, true);
     };
-  }, [tooltip, selectedRowCodigo]);
+  }, [tooltip, selectedRowCodigo, routeValueFilterMenu]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -297,64 +338,9 @@ const ProjectionTable: React.FC<Props> = ({
     };
   }, [isResizing]);
 
-  const dataFilteredByColumns = useMemo(() => {
-    let result = data;
-    if (selectedRotas.size > 0) {
-      result = result.filter((item) => productHasRota(item.codigo, selectedRotas));
-    }
-    if (selectedSetores.size > 0) {
-      result = result.filter((item) => productHasSetor(item.codigo, selectedSetores));
-    }
-    return result;
-  }, [data, selectedRotas, selectedSetores, codigoToSetores, codigoToRotas]);
-
-  const sortedData = useMemo(() => {
-    if (sortCriteria.length === 0) return dataFilteredByColumns;
-    return [...dataFilteredByColumns].sort((a, b) => {
-      for (const criterion of sortCriteria) {
-        let valA: unknown;
-        let valB: unknown;
-        if (criterion.column.startsWith('route:')) {
-          const parts = criterion.column.split(':');
-          const routeName = parts[1];
-          const field = parts[2] as 'pedido' | 'falta';
-          valA = a.routeData[routeName]?.[field] || 0;
-          valB = b.routeData[routeName]?.[field] || 0;
-        } else {
-          valA = (a as unknown as Record<string, unknown>)[criterion.column] ?? '';
-          valB = (b as unknown as Record<string, unknown>)[criterion.column] ?? '';
-        }
-        const isAsc = criterion.direction === 'asc';
-        if (typeof valA === 'string' && typeof valB === 'string') {
-          const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
-          if (cmp !== 0) return isAsc ? cmp : -cmp;
-          continue;
-        }
-        const numA = Number(valA);
-        const numB = Number(valB);
-        if (valA === valB) continue;
-        if (numA < numB) return isAsc ? -1 : 1;
-        if (numA > numB) return isAsc ? 1 : -1;
-      }
-      return 0;
-    });
-  }, [dataFilteredByColumns, sortCriteria]);
-
   useEffect(() => {
-    onVisibleProductsCountChange?.(sortedData.length);
-  }, [sortedData.length, onVisibleProductsCountChange]);
-
-  const renderSortIndicator = (columnKey: string) => {
-    const idx = sortCriteria.findIndex(s => s.column === columnKey);
-    if (idx === -1) return null;
-    const criterion = sortCriteria[idx];
-    return (
-      <div className="inline-flex items-center ml-1 text-highlight">
-        {criterion.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-        {sortCriteria.length > 1 && <span className="ml-0.5 text-[9px] font-bold">{idx + 1}</span>}
-      </div>
-    );
-  };
+    setRouteValueFilterSearch('');
+  }, [routeValueFilterMenu?.colKey, routeValueFilterMenu?.field]);
 
   const allColumns = [
     ...(considerarRequisicoes ? [{ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true as const }] : []),
@@ -386,7 +372,164 @@ const ProjectionTable: React.FC<Props> = ({
     return allColumns;
   }, [rotaFilterActive, allColumns, dateKeysForSelectedRotas, dateColumns]);
 
+  const dataFilteredByColumns = useMemo(() => {
+    let result = data;
+    if (selectedRotas.size > 0) {
+      result = result.filter((item) => {
+        if (productHasRota(item.codigo, selectedRotas) || hasPedidoInSelectedRotaColumns(item)) return true;
+        if (item.isShelf && item.components?.length) {
+          return item.components.some(
+            (comp) => productHasRota(comp.codigo, selectedRotas) || hasPedidoInSelectedRotaColumns(comp)
+          );
+        }
+        return false;
+      });
+    }
+    if (selectedSetores.size > 0) {
+      result = result.filter((item) => {
+        if (productHasSetor(item.codigo, selectedSetores)) return true;
+        if (item.isShelf && item.components?.length) {
+          return item.components.some((comp) => productHasSetor(comp.codigo, selectedSetores));
+        }
+        return false;
+      });
+    }
+    return result;
+  }, [data, selectedRotas, selectedSetores, codigoToSetores, codigoToRotas]);
+
+  const routeFilterUniqueValues = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const col of visibleColumns) {
+      for (const field of ['pedido', 'falta'] as const) {
+        const key = getRouteFilterKey(col.key, field);
+        const values = new Set<string>();
+        for (const item of dataFilteredByColumns) {
+          values.add(getRouteDisplayValue(item, col.key, field));
+          if (item.isShelf && item.components?.length) {
+            for (const comp of item.components) {
+              values.add(getRouteDisplayValue(comp, col.key, field));
+            }
+          }
+        }
+        const ordered = Array.from(values).sort((a, b) => {
+          if (a === '-') return 1;
+          if (b === '-') return -1;
+          return Number(a) - Number(b);
+        });
+        map.set(key, ordered);
+      }
+    }
+    return map;
+  }, [visibleColumns, dataFilteredByColumns]);
+
+  const activeRouteValueFilterKeys = useMemo(
+    () => Object.keys(routeValueFilters).filter((k) => (routeValueFilters[k]?.size ?? 0) > 0),
+    [routeValueFilters]
+  );
+
+  const rowMatchesRouteValueFilters = (row: ProductConsolidated | ComponentData): boolean => {
+    if (activeRouteValueFilterKeys.length === 0) return true;
+    for (const key of activeRouteValueFilterKeys) {
+      const [colKey, fieldRaw] = key.split('|');
+      const field = fieldRaw as RouteValueField;
+      const allowed = routeValueFilters[key];
+      if (!allowed || allowed.size === 0) continue;
+      const val = getRouteDisplayValue(row, colKey, field);
+      if (!allowed.has(val)) return false;
+    }
+    return true;
+  };
+
+  const dataFilteredByValues = useMemo(() => {
+    if (activeRouteValueFilterKeys.length === 0) return dataFilteredByColumns;
+    return dataFilteredByColumns.filter((item) => {
+      if (rowMatchesRouteValueFilters(item)) return true;
+      if (item.isShelf && item.components?.length) {
+        return item.components.some((comp) => rowMatchesRouteValueFilters(comp));
+      }
+      return false;
+    });
+  }, [dataFilteredByColumns, activeRouteValueFilterKeys, routeValueFilters]);
+
+  const autoExpandedShelves = useMemo(() => {
+    const hasFilter = selectedRotas.size > 0 || selectedSetores.size > 0 || activeRouteValueFilterKeys.length > 0;
+    if (!hasFilter) return new Set<string>();
+    const set = new Set<string>();
+    for (const item of dataFilteredByValues) {
+      if (!item.isShelf || !item.components?.length) continue;
+      const hasMatchingComponent = item.components.some((comp) => {
+        const okRota =
+          selectedRotas.size === 0 ||
+          productHasRota(comp.codigo, selectedRotas) ||
+          hasPedidoInSelectedRotaColumns(comp);
+        const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
+        return okRota && okSetor && rowMatchesRouteValueFilters(comp);
+      });
+      if (hasMatchingComponent) set.add(item.codigo);
+    }
+    return set;
+  }, [dataFilteredByValues, selectedRotas, selectedSetores, activeRouteValueFilterKeys, routeValueFilters]);
+
+  const sortedData = useMemo(() => {
+    if (sortCriteria.length === 0) return dataFilteredByValues;
+    return [...dataFilteredByValues].sort((a, b) => {
+      for (const criterion of sortCriteria) {
+        let valA: unknown;
+        let valB: unknown;
+        if (criterion.column.startsWith('route:')) {
+          const parts = criterion.column.split(':');
+          const routeName = parts[1];
+          const field = parts[2] as 'pedido' | 'falta';
+          valA = a.routeData[routeName]?.[field] || 0;
+          valB = b.routeData[routeName]?.[field] || 0;
+        } else {
+          valA = (a as unknown as Record<string, unknown>)[criterion.column] ?? '';
+          valB = (b as unknown as Record<string, unknown>)[criterion.column] ?? '';
+        }
+        const isAsc = criterion.direction === 'asc';
+        if (typeof valA === 'string' && typeof valB === 'string') {
+          const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+          if (cmp !== 0) return isAsc ? cmp : -cmp;
+          continue;
+        }
+        const numA = Number(valA);
+        const numB = Number(valB);
+        if (valA === valB) continue;
+        if (numA < numB) return isAsc ? -1 : 1;
+        if (numA > numB) return isAsc ? 1 : -1;
+      }
+      return 0;
+    });
+  }, [dataFilteredByValues, sortCriteria]);
+
+  useEffect(() => {
+    onVisibleProductsCountChange?.(sortedData.length);
+  }, [sortedData.length, onVisibleProductsCountChange]);
+
+  const renderSortIndicator = (columnKey: string) => {
+    const idx = sortCriteria.findIndex(s => s.column === columnKey);
+    if (idx === -1) return null;
+    const criterion = sortCriteria[idx];
+    return (
+      <div className="inline-flex items-center ml-1 text-highlight">
+        {criterion.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+        {sortCriteria.length > 1 && <span className="ml-0.5 text-[9px] font-bold">{idx + 1}</span>}
+      </div>
+    );
+  };
+
   const totalColSpan = 5 + visibleColumns.length * 2;
+  const activeMenuKey = routeValueFilterMenu
+    ? getRouteFilterKey(routeValueFilterMenu.colKey, routeValueFilterMenu.field)
+    : null;
+  const activeMenuValues = activeMenuKey ? (routeFilterUniqueValues.get(activeMenuKey) ?? []) : [];
+  const filteredActiveMenuValues = useMemo(() => {
+    const term = routeValueFilterSearch.trim().toLowerCase();
+    if (!term) return activeMenuValues;
+    return activeMenuValues.filter((v) => v.toLowerCase().includes(term));
+  }, [activeMenuValues, routeValueFilterSearch]);
+  const activeSelectedValues = activeMenuKey ? (routeValueFilters[activeMenuKey] ?? new Set<string>()) : new Set<string>();
+  const activeAllSelected = activeMenuValues.length > 0 && activeSelectedValues.size === activeMenuValues.length;
 
   return (
     <div className="space-y-4 h-full flex flex-col">
@@ -452,6 +595,7 @@ const ProjectionTable: React.FC<Props> = ({
                 {visibleColumns.map(col => (
                   <th
                     key={col.key}
+                    data-route-filter-head
                     className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[90px] sticky top-0 z-[70]"
                     colSpan={2}
                   >
@@ -463,16 +607,24 @@ const ProjectionTable: React.FC<Props> = ({
                     </div>
                     <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
                       <div
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${col.key}:pedido`, e.ctrlKey); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          setRouteValueFilterMenu({ colKey: col.key, field: 'pedido', anchorRect: rect });
+                        }}
                         className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
-                        P {renderSortIndicator(`route:${col.key}:pedido`)}
+                        P {(routeValueFilters[getRouteFilterKey(col.key, 'pedido')]?.size ?? 0) > 0 ? '●' : ''}
                       </div>
                       <div
-                        onClick={(e) => { e.stopPropagation(); handleSort(`route:${col.key}:falta`, e.ctrlKey); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          setRouteValueFilterMenu({ colKey: col.key, field: 'falta', anchorRect: rect });
+                        }}
                         className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
-                        F {renderSortIndicator(`route:${col.key}:falta`)}
+                        F {(routeValueFilters[getRouteFilterKey(col.key, 'falta')]?.size ?? 0) > 0 ? '●' : ''}
                       </div>
                     </div>
                   </th>
@@ -481,7 +633,18 @@ const ProjectionTable: React.FC<Props> = ({
             </thead>
             <tbody className="text-gray-900 dark:text-gray-100">
               {sortedData.map((item, idx) => {
-                const isExpanded = expandedShelves.has(item.codigo);
+                const isExpanded = expandedShelves.has(item.codigo) || autoExpandedShelves.has(item.codigo);
+                const filteredComponents =
+                  item.isShelf && item.components
+                    ? item.components.filter((comp) => {
+                        const okRota =
+                          selectedRotas.size === 0 ||
+                          productHasRota(comp.codigo, selectedRotas) ||
+                          hasPedidoInSelectedRotaColumns(comp);
+                        const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
+                        return okRota && okSetor && rowMatchesRouteValueFilters(comp);
+                      })
+                    : [];
                 return (
                   <React.Fragment key={item.codigo}>
                     <tr
@@ -543,7 +706,7 @@ const ProjectionTable: React.FC<Props> = ({
                       })}
                     </tr>
 
-                    {item.isShelf && isExpanded && item.components?.map((comp) => (
+                    {item.isShelf && isExpanded && filteredComponents.map((comp) => (
                       <tr
                         key={`${item.codigo}-${comp.codigo}`}
                         onClick={(e) => {
@@ -612,6 +775,92 @@ const ProjectionTable: React.FC<Props> = ({
           </table>
         </div>
       </div>
+
+      {routeValueFilterMenu && (
+        <div
+          ref={valueFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden w-[280px]"
+          style={getTooltipInitialPosition(routeValueFilterMenu.anchorRect)}
+        >
+          <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933]">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">
+              Filtro {routeValueFilterMenu.field === 'pedido' ? 'P' : 'F'} ({routeValueFilterMenu.colKey})
+            </p>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={routeValueFilterSearch}
+              onChange={(e) => setRouteValueFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (!activeMenuKey) return;
+                  setRouteValueFilters((prev) => {
+                    const next = { ...prev };
+                    if (activeAllSelected) {
+                      delete next[activeMenuKey];
+                    } else {
+                      next[activeMenuKey] = new Set(activeMenuValues);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                {activeAllSelected ? 'Desmarcar todos' : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => {
+                  if (!activeMenuKey) return;
+                  setRouteValueFilters((prev) => {
+                    const next = { ...prev };
+                    delete next[activeMenuKey];
+                    return next;
+                  });
+                }}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredActiveMenuValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={activeSelectedValues.has(value)}
+                    onChange={(e) => {
+                      if (!activeMenuKey) return;
+                      setRouteValueFilters((prev) => {
+                        const next = { ...prev };
+                        const set = new Set(next[activeMenuKey] ?? []);
+                        if (e.target.checked) set.add(value);
+                        else set.delete(value);
+                        if (set.size === 0) delete next[activeMenuKey];
+                        else next[activeMenuKey] = set;
+                        return next;
+                      });
+                    }}
+                  />
+                  <span>{value}</span>
+                </label>
+              ))}
+              {filteredActiveMenuValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {tooltip && (
         <div
