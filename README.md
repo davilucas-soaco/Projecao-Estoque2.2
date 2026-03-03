@@ -19,7 +19,7 @@ Aplicação web para gestão de projeção de estoque, sequência de entrega e r
 Copie `.env.example` para `.env` e preencha:
 
 - **Backend (raiz do projeto):** `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `PORT`
-- **Frontend:** `VITE_API_URL` (URL do backend, ex.: `http://localhost:3000`), `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (se usar Supabase)
+- **Frontend:** `VITE_API_URL` (URL do backend, ex.: `http://localhost:3535`), `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (se usar Supabase)
 
 Nunca commite o arquivo `.env` (ele está no `.gitignore`).
 
@@ -33,7 +33,7 @@ npm install
 npm run dev
 ```
 
-O servidor sobe em `http://localhost:3000` (ou no `PORT` definido no `.env`). Endpoints:
+O servidor sobe em `http://localhost:3535` (ou no `PORT` definido no `.env`). Endpoints:
 
  - `GET /api/stock` — saldo de estoque (query em `server/queries/saldo-estoque.sql`)
 
@@ -46,7 +46,7 @@ npm install
 npm run dev
 ```
 
-Acesse a URL exibida no terminal (em geral `http://localhost:5173`). Configure `VITE_API_URL` para apontar ao backend.
+Acesse a URL exibida no terminal (em geral `http://localhost:5257`). Configure `VITE_API_URL` para apontar ao backend.
 
 ### 3. Supabase (shelf_ficha)
 

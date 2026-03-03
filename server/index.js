@@ -13,7 +13,7 @@ const envPath = path.resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3535;
 
 const dbConfig = {
   host: process.env.DB_HOST,
@@ -23,13 +23,13 @@ const dbConfig = {
   database: process.env.DB_NAME || process.env.DB_DATABASE,
 };
 
-// CORS (dev): permite localhost e faixas de rede local comuns no Vite (porta 5173)
+// CORS (dev): permite localhost e faixas de rede local comuns no Vite (porta 5257)
 const allowedOriginPatterns = [
-  /^http:\/\/localhost:5173$/,
-  /^http:\/\/127\.0\.0\.1:5173$/,
-  /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}:5173$/,
-  /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}:5173$/,
-  /^http:\/\/172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}:5173$/,
+  /^http:\/\/localhost:5257$/,
+  /^http:\/\/127\.0\.0\.1:5257$/,
+  /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}:5257$/,
+  /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}:5257$/,
+  /^http:\/\/172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}:5257$/,
 ];
 
 app.use(
@@ -46,7 +46,7 @@ app.use(
 );
 app.use(express.json());
 
-// Rota de saúde: abrir http://localhost:3000 no navegador mostra que a API está no ar
+// Rota de saúde: abrir http://localhost:3535 no navegador mostra que a API está no ar
 app.get('/', (_req, res) => {
   res.json({
     ok: true,

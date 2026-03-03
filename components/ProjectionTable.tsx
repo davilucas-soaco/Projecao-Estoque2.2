@@ -35,8 +35,6 @@ interface Props {
   dateColumns?: DateColumn[];
   /** Se false, a coluna "Só Móveis" não é renderizada (exclusivo da simulação) */
   considerarRequisicoes?: boolean;
-  horizonDays?: 15 | 30 | 45 | 60;
-  onHorizonDaysChange?: (days: 15 | 30 | 45 | 60) => void;
   onVisibleProductsCountChange?: (count: number) => void;
   projectionSource?: ProjecaoImportada[];
   selectedRotas?: Set<string>;
@@ -50,6 +48,15 @@ const formatCellNum = (v: unknown): string | number => {
   return Math.round(n);
 };
 
+const getTooltipInitialPosition = (anchorRect: DOMRect) => {
+  const maxX = Math.max(16, window.innerWidth - 340);
+  const maxY = Math.max(16, window.innerHeight - 320);
+  return {
+    left: Math.min(Math.max(8, anchorRect.right), maxX),
+    top: Math.min(Math.max(8, anchorRect.bottom + 8), maxY),
+  };
+};
+
 const ProjectionTable: React.FC<Props> = ({
   data,
   orders,
@@ -57,8 +64,6 @@ const ProjectionTable: React.FC<Props> = ({
   soMoveisHorizonLabel,
   dateColumns = [],
   considerarRequisicoes = true,
-  horizonDays = 60,
-  onHorizonDaysChange,
   onVisibleProductsCountChange,
   projectionSource = [],
   selectedRotas = new Set(),
@@ -84,6 +89,11 @@ const ProjectionTable: React.FC<Props> = ({
   const didResizeRef = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const columnFilterRef = useRef<HTMLDivElement>(null);
+  const tooltipDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({
+    dragging: false,
+    offsetX: 0,
+    offsetY: 0,
+  });
 
   const toggleShelf = (codigo: string) => {
     setExpandedShelves(prev => {
@@ -137,7 +147,6 @@ const ProjectionTable: React.FC<Props> = ({
     colLabel: string
   ) => {
     e.stopPropagation();
-    setSelectedRowCodigo(item.codigo);
     const rd = item.routeData[colKey];
     if (!rd || rd.pedido === 0) return;
     const breakdown = rd.breakdown && rd.breakdown.length > 0 ? rd.breakdown : [{ destino: 'Total', qty: rd.pedido } as { destino: string; qty: number; numeroPedido?: string }];
@@ -165,6 +174,22 @@ const ProjectionTable: React.FC<Props> = ({
     return keys.size > 0 ? keys : null;
   }, [rotasCompletas, selectedRotas]);
 
+  const codigoToRotas = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    projectionSource.forEach((r) => {
+      const cod = (r.cod ?? '').trim().toUpperCase();
+      const rm = (r.rm ?? '').trim();
+      const obs = (r.observacoes ?? '').toString().trim();
+      if (!cod || !rm || !obs) return;
+      const prefixMatch = obs.match(/^\d+\s*[-–]\s*(.*)$/);
+      const base = (prefixMatch ? prefixMatch[1] : obs).trim();
+      if (!base.toUpperCase().startsWith('ROTA')) return;
+      if (!map.has(cod)) map.set(cod, new Set());
+      map.get(cod)!.add(base);
+    });
+    return map;
+  }, [projectionSource]);
+
   const codigoToSetores = useMemo(() => {
     const map = new Map<string, Set<string>>();
     projectionSource.forEach((r) => {
@@ -177,13 +202,12 @@ const ProjectionTable: React.FC<Props> = ({
     return map;
   }, [projectionSource]);
 
-  const productHasRota = (item: ProductConsolidated | ComponentData, rotas: Set<string>): boolean => {
+  const productHasRota = (codigo: string, rotas: Set<string>): boolean => {
     if (rotas.size === 0) return true;
-    for (const rd of Object.values(item.routeData)) {
-      if (!rd?.breakdown) continue;
-      for (const b of rd.breakdown) {
-        if (rotas.has(b.destino)) return true;
-      }
+    const prodRotas = codigoToRotas.get(codigo.trim().toUpperCase());
+    if (!prodRotas) return false;
+    for (const r of rotas) {
+      if (prodRotas.has(r)) return true;
     }
     return false;
   };
@@ -217,12 +241,38 @@ const ProjectionTable: React.FC<Props> = ({
       }
     };
     document.addEventListener('mousedown', handleCloseMenus);
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('pointerdown', handleClickOutside, true);
     return () => {
       document.removeEventListener('mousedown', handleCloseMenus);
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('pointerdown', handleClickOutside, true);
     };
   }, [tooltip, showColumnFilter, selectedRowCodigo]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!tooltipDragRef.current.dragging) return;
+      if (!tooltipRef.current) return;
+      const nextX = e.clientX - tooltipDragRef.current.offsetX;
+      const nextY = e.clientY - tooltipDragRef.current.offsetY;
+      const maxX = Math.max(8, window.innerWidth - 340);
+      const maxY = Math.max(8, window.innerHeight - 120);
+      const x = Math.min(Math.max(8, nextX), maxX);
+      const y = Math.min(Math.max(8, nextY), maxY);
+      tooltipRef.current.style.left = `${x}px`;
+      tooltipRef.current.style.top = `${y}px`;
+    };
+    const handleMouseUp = () => {
+      tooltipDragRef.current.dragging = false;
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -267,13 +317,13 @@ const ProjectionTable: React.FC<Props> = ({
       });
     }
     if (selectedRotas.size > 0) {
-      result = result.filter((item) => productHasRota(item, selectedRotas));
+      result = result.filter((item) => productHasRota(item.codigo, selectedRotas));
     }
     if (selectedSetores.size > 0) {
       result = result.filter((item) => productHasSetor(item.codigo, selectedSetores));
     }
     return result;
-  }, [data, selectedColumnKeys, dateColumns.length, selectedRotas, selectedSetores, codigoToSetores]);
+  }, [data, selectedColumnKeys, dateColumns.length, selectedRotas, selectedSetores, codigoToSetores, codigoToRotas]);
 
   const sortedData = useMemo(() => {
     if (sortCriteria.length === 0) return dataFilteredByColumns;
@@ -644,12 +694,23 @@ const ProjectionTable: React.FC<Props> = ({
         <div
           ref={tooltipRef}
           className="fixed z-[100] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[220px] max-w-[320px]"
-          style={{
-            left: Math.min(tooltip.anchorRect.right, window.innerWidth - 260),
-            top: tooltip.anchorRect.bottom + 8,
-          }}
+          style={getTooltipInitialPosition(tooltip.anchorRect)}
         >
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-[#1f2933]">
+          <div
+            onMouseDown={(e) => {
+              if (!tooltipRef.current) return;
+              const rect = tooltipRef.current.getBoundingClientRect();
+              tooltipDragRef.current = {
+                dragging: true,
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+              };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-[#1f2933] cursor-move"
+            title="Arraste para mover"
+          >
             <div className="flex flex-col">
               <span className="text-[11px] font-bold text-neutral uppercase tracking-widest">{tooltip.codigo}</span>
               <span className="text-[10px] text-gray-600 dark:text-gray-400">{tooltip.colLabel}</span>
@@ -664,12 +725,12 @@ const ProjectionTable: React.FC<Props> = ({
           <div className="px-4 py-3">
             <p className="text-[10px] text-neutral mb-2">Quantidade pedida: <strong>{tooltip.pedido}</strong></p>
             <p className="text-[9px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Destinos:</p>
-            <ul className="space-y-2">
+            <ul className="space-y-2 max-h-56 overflow-auto pr-1">
               {tooltip.breakdown.map((b, i) => (
                 <li key={i} className="text-[11px]">
                   <div className="flex justify-between gap-4 items-baseline">
-                    <span>{b.destino}</span>
-                    <span className="font-bold text-secondary">{b.qty}</span>
+                    <span className="text-gray-800 dark:text-gray-100">{b.destino}</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-100">{b.qty}</span>
                   </div>
                   {b.numeroPedido && (
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 pl-0">Pedido: {b.numeroPedido}</p>
@@ -697,4 +758,4 @@ const ProjectionTable: React.FC<Props> = ({
   );
 };
 
-export default ProjectionTable;
+export default React.memo(ProjectionTable);

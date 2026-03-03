@@ -7,11 +7,11 @@ function getApiBaseCandidates(): string[] {
   if (CONFIGURED_API_BASE) candidates.push(CONFIGURED_API_BASE);
 
   if (typeof window !== 'undefined') {
-    const fromHost = `${window.location.protocol}//${window.location.hostname}:3000`;
+    const fromHost = `${window.location.protocol}//${window.location.hostname}:3535`;
     candidates.push(fromHost);
   }
 
-  candidates.push('http://localhost:3000');
+  candidates.push('http://localhost:3535');
 
   // Remove duplicados e barras finais
   return Array.from(new Set(candidates.map((u) => u.replace(/\/+$/, ''))));

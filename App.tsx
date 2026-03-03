@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, startTransition } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart3,
@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
-import { getHorizonInfo, getDateColumns, getTodayStart, getSoMoveisHorizonInfo } from './utils';
+import { getDateColumns, getTodayStart, getSoMoveisHorizonInfo } from './utils';
 import { fetchStock } from './api';
 import {
   supabase,
@@ -52,7 +52,6 @@ const STORAGE_KEYS = {
 };
 
 type ProjectionSubMode = 'PADRAO' | 'SIMULADO';
-type HorizonDays = 15 | 30 | 45 | 60;
 
 interface SimulationState {
   data: ProjecaoImportada[];
@@ -128,7 +127,10 @@ const App: React.FC = () => {
 
   // Simulação: totalmente isolada, apenas LocalStorage
   const [simulationState, setSimulationState] = useState<SimulationState>(loadSimulationFromStorage);
-  const [horizonDays, setHorizonDays] = useState<HorizonDays>(60);
+  const [selectedDateKeys, setSelectedDateKeys] = useState<Set<string>>(() => {
+    const initialColumns = getDateColumns(60).filter((c) => !c.isAtrasados);
+    return new Set(initialColumns.slice(0, 18).map((c) => c.key));
+  });
   const ordersSimulation: Order[] = useMemo(() => mapProjecaoImportadaToOrders(simulationState.data), [simulationState.data]);
 
   useEffect(() => {
@@ -369,29 +371,57 @@ const App: React.FC = () => {
     alert('Sistema restaurado com sucesso!');
   };
 
-  const dateColumns = useMemo(() => getDateColumns(horizonDays), [horizonDays]);
-  const horizonInfo = useMemo(() => getHorizonInfo(horizonDays), [horizonDays]);
+  const allDateColumns = useMemo(() => getDateColumns(60), []);
+  const dateColumns = useMemo(() => {
+    const atrasados = allDateColumns.find((c) => c.isAtrasados);
+    const future = allDateColumns.filter((c) => !c.isAtrasados && selectedDateKeys.has(c.key));
+    return [...(atrasados ? [atrasados] : []), ...future];
+  }, [allDateColumns, selectedDateKeys]);
+  const selectableDateOptions = useMemo(
+    () => allDateColumns.filter((c) => !c.isAtrasados).map((c) => ({ key: c.key, label: c.label })),
+    [allDateColumns]
+  );
+  const horizonInfo = useMemo(() => {
+    const future = dateColumns.filter((c) => !c.isAtrasados);
+    if (future.length === 0) return { label: 'Horizonte: sem datas selecionadas' };
+    const first = future[0];
+    const last = future[future.length - 1];
+    return { label: `Horizonte: ${first.label} até ${last.label}` };
+  }, [dateColumns]);
   const soMoveisHorizonInfo = useMemo(() => getSoMoveisHorizonInfo(), []);
   const todayStart = useMemo(() => getTodayStart(), []);
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+
+  const handleProjectionRotasChange = useCallback((next: Set<string>) => {
+    startTransition(() => setProjectionFilterRotas(next));
+  }, []);
+
+  const handleProjectionSetoresChange = useCallback((next: Set<string>) => {
+    startTransition(() => setProjectionFilterSetores(next));
+  }, []);
+
+  const handleProjectionDatesChange = useCallback((next: Set<string>) => {
+    startTransition(() => setSelectedDateKeys(next));
+  }, []);
 
   const consolidatedData = useMemo(
     () =>
-      buildConsolidatedData(orders, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
+      buildConsolidatedData(orders, stock, shelfFicha, deferredSearchTerm, dateColumns, todayStart, {
         considerarRequisicoes: true,
         flattenShelfProducts: true,
         soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       }),
-    [orders, stock, shelfFicha, searchTerm, dateColumns, todayStart, soMoveisHorizonInfo.endDate]
+    [orders, stock, shelfFicha, deferredSearchTerm, dateColumns, todayStart, soMoveisHorizonInfo.endDate]
   );
 
   const consolidatedDataSimulation = useMemo(
     () =>
-      buildConsolidatedData(ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
+      buildConsolidatedData(ordersSimulation, stock, shelfFicha, deferredSearchTerm, dateColumns, todayStart, {
         considerarRequisicoes: simulationState.considerarRequisicoes,
         flattenShelfProducts: true,
         soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       }),
-    [ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, simulationState.considerarRequisicoes, soMoveisHorizonInfo.endDate]
+    [ordersSimulation, stock, shelfFicha, deferredSearchTerm, dateColumns, todayStart, simulationState.considerarRequisicoes, soMoveisHorizonInfo.endDate]
   );
   const simulationEligibleRowsCount = useMemo(
     () =>
@@ -527,11 +557,12 @@ const App: React.FC = () => {
               filterDescCod={searchTerm}
               onFilterDescCodChange={setSearchTerm}
               selectedRotas={projectionFilterRotas}
-              onSelectedRotasChange={setProjectionFilterRotas}
+              onSelectedRotasChange={handleProjectionRotasChange}
               selectedSetores={projectionFilterSetores}
-              onSelectedSetoresChange={setProjectionFilterSetores}
-              horizonDays={horizonDays}
-              onHorizonDaysChange={setHorizonDays}
+              onSelectedSetoresChange={handleProjectionSetoresChange}
+              dateOptions={selectableDateOptions}
+              selectedDateKeys={selectedDateKeys}
+              onSelectedDateKeysChange={handleProjectionDatesChange}
               onGeneratePdf={() => setIsPdfModalOpen(true)}
             />
             <ProjectionTable
@@ -541,8 +572,6 @@ const App: React.FC = () => {
               soMoveisHorizonLabel={soMoveisHorizonInfo.label}
               dateColumns={dateColumns}
               considerarRequisicoes={true}
-              horizonDays={horizonDays}
-              onHorizonDaysChange={setHorizonDays}
               onVisibleProductsCountChange={setVisibleProductsPadrao}
               projectionSource={projection}
               selectedRotas={projectionFilterRotas}
@@ -596,11 +625,12 @@ const App: React.FC = () => {
                   filterDescCod={searchTerm}
                   onFilterDescCodChange={setSearchTerm}
                   selectedRotas={projectionFilterRotas}
-                  onSelectedRotasChange={setProjectionFilterRotas}
+                  onSelectedRotasChange={handleProjectionRotasChange}
                   selectedSetores={projectionFilterSetores}
-                  onSelectedSetoresChange={setProjectionFilterSetores}
-                  horizonDays={horizonDays}
-                  onHorizonDaysChange={setHorizonDays}
+                  onSelectedSetoresChange={handleProjectionSetoresChange}
+                  dateOptions={selectableDateOptions}
+                  selectedDateKeys={selectedDateKeys}
+                  onSelectedDateKeysChange={handleProjectionDatesChange}
                   onGeneratePdf={() => setIsPdfModalOpen(true)}
                 />
                 <ProjectionTable
@@ -610,8 +640,6 @@ const App: React.FC = () => {
                   soMoveisHorizonLabel={soMoveisHorizonInfo.label}
                   dateColumns={dateColumns}
                   considerarRequisicoes={simulationState.considerarRequisicoes}
-                  horizonDays={horizonDays}
-                  onHorizonDaysChange={setHorizonDays}
                   onVisibleProductsCountChange={setVisibleProductsSimulacao}
                   projectionSource={simulationState.data}
                   selectedRotas={projectionFilterRotas}
