@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowDown, ArrowUp, Download, MapPin, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronsUpDown, Download, MapPin, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
 import { ProjecaoImportada } from '../types';
 import { CATEGORY_ENTREGA_GT, CATEGORY_INSERIR_ROMANEIO, CATEGORY_REQUISICAO, CATEGORY_RETIRADA, getCategoriaFromObservacoes, getHorizonInfo, isCategoriaEspecial, parseOrderDate } from '../utils';
 import * as XLSX from 'xlsx';
@@ -102,6 +102,7 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
       )
   );
   const [resizingColumn, setResizingColumn] = useState<ProjectionColumnKey | null>(null);
+  const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const resizeStartX = useRef<number>(0);
   const resizeStartWidth = useRef<number>(0);
   const didResizeRef = useRef(false);
@@ -345,6 +346,13 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
             </div>
           </div>
           <div className="flex gap-3 items-center">
+            <button
+              onClick={() => setFiltersCollapsed((prev) => !prev)}
+              className="text-[10px] font-black text-white/90 hover:text-white uppercase flex items-center gap-1.5"
+            >
+              <ChevronsUpDown className="w-3.5 h-3.5" />
+              {filtersCollapsed ? 'Mostrar Filtros' : 'Esconder Filtros'}
+            </button>
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
@@ -362,23 +370,25 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
           </div>
         </div>
 
-        <div className="p-3 bg-[#eef3fb] dark:bg-[#1a1a1a] border-b border-[#dce3f1] dark:border-gray-700 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
-          {FILTER_KEYS.map((key) => {
-            const col = COLUMNS.find((c) => c.key === key)!;
-            return (
-              <input
-                key={`f-${col.key}`}
-                type="text"
-                placeholder={`Filtro ${col.label}`}
-                value={filters[col.key]}
-                onChange={(e) => setFilters((prev) => ({ ...prev, [col.key]: e.target.value }))}
-                className="bg-white dark:bg-[#2a2a2a] text-[10px] border border-[#c6d3ee] dark:border-gray-600 rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-[#1E22AA] text-gray-900 dark:text-gray-100 transition-all placeholder:text-gray-500"
-              />
-            );
-          })}
-        </div>
+        {!filtersCollapsed && (
+          <div className="p-3 bg-[#eef3fb] dark:bg-[#1a1a1a] border-b border-[#dce3f1] dark:border-gray-700 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+            {FILTER_KEYS.map((key) => {
+              const col = COLUMNS.find((c) => c.key === key)!;
+              return (
+                <input
+                  key={`f-${col.key}`}
+                  type="text"
+                  placeholder={`Filtro ${col.label}`}
+                  value={filters[col.key]}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, [col.key]: e.target.value }))}
+                  className="bg-white dark:bg-[#2a2a2a] text-[10px] border border-[#c6d3ee] dark:border-gray-600 rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-[#1E22AA] text-gray-900 dark:text-gray-100 transition-all placeholder:text-gray-500"
+                />
+              );
+            })}
+          </div>
+        )}
 
-        <div className="overflow-auto max-h-[650px]">
+        <div className={`overflow-auto ${filtersCollapsed ? 'max-h-[760px]' : 'max-h-[650px]'}`}>
           <table className="w-full text-left text-xs border-separate border-spacing-0 table-fixed">
             <colgroup>
               {COLUMNS.map((col) => (

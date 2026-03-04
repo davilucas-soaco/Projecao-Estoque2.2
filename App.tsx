@@ -47,9 +47,12 @@ const STORAGE_KEYS = {
   USERS: 'sa_industrial_accounts_v2',
   SHELF_FICHA: 'sa_industrial_shelf_ficha_v2',
   USER_SESSION: 'sa_industrial_user_session_v2',
+  USER_LAST_ACTIVITY: 'sa_industrial_user_last_activity_v1',
   LOGO: 'sa_industrial_company_logo_v1',
   SIMULATION: 'sa_industrial_simulation_v1',
 };
+
+const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 type ProjectionSubMode = 'PADRAO' | 'SIMULADO';
 
@@ -81,6 +84,8 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [projectionFilterRotas, setProjectionFilterRotas] = useState<Set<string>>(new Set());
   const [projectionFilterSetores, setProjectionFilterSetores] = useState<Set<string>>(new Set());
+  const [projectionFiltersCollapsedPadrao, setProjectionFiltersCollapsedPadrao] = useState(false);
+  const [projectionFiltersCollapsedSimulacao, setProjectionFiltersCollapsedSimulacao] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
   const [showErpPanel, setShowErpPanel] = useState(false);
@@ -92,7 +97,15 @@ const App: React.FC = () => {
   // Auth State
   const [currentUser, setCurrentUser] = useState<{ profile: UserProfile, name: string } | null>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.USER_SESSION);
-    return saved ? JSON.parse(saved) : null;
+    if (!saved) return null;
+    const lastActivityRaw = localStorage.getItem(STORAGE_KEYS.USER_LAST_ACTIVITY);
+    const lastActivity = Number(lastActivityRaw || '0');
+    if (!lastActivity || Date.now() - lastActivity > SESSION_IDLE_TIMEOUT_MS) {
+      localStorage.removeItem(STORAGE_KEYS.USER_SESSION);
+      localStorage.removeItem(STORAGE_KEYS.USER_LAST_ACTIVITY);
+      return null;
+    }
+    return JSON.parse(saved);
   });
 
   const [users, setUsers] = useState<UserAccount[]>(() => {
@@ -140,6 +153,42 @@ const App: React.FC = () => {
       localStorage.removeItem(STORAGE_KEYS.SIMULATION);
     }
   }, [simulationState]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let lastPersist = Date.now();
+    const markActive = () => {
+      const now = Date.now();
+      if (now - lastPersist < 15000) return;
+      lastPersist = now;
+      localStorage.setItem(STORAGE_KEYS.USER_LAST_ACTIVITY, String(now));
+    };
+
+    const checkIdle = () => {
+      const last = Number(localStorage.getItem(STORAGE_KEYS.USER_LAST_ACTIVITY) || '0');
+      if (!last || Date.now() - last > SESSION_IDLE_TIMEOUT_MS) {
+        setCurrentUser(null);
+        localStorage.removeItem(STORAGE_KEYS.USER_SESSION);
+        localStorage.removeItem(STORAGE_KEYS.USER_LAST_ACTIVITY);
+      }
+    };
+
+    localStorage.setItem(STORAGE_KEYS.USER_LAST_ACTIVITY, String(Date.now()));
+    const interval = window.setInterval(checkIdle, 30000);
+    window.addEventListener('mousedown', markActive, { passive: true });
+    window.addEventListener('keydown', markActive);
+    window.addEventListener('touchstart', markActive, { passive: true });
+    window.addEventListener('mousemove', markActive, { passive: true });
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('mousedown', markActive);
+      window.removeEventListener('keydown', markActive);
+      window.removeEventListener('touchstart', markActive);
+      window.removeEventListener('mousemove', markActive);
+    };
+  }, [currentUser]);
 
   const queryClient = useQueryClient();
 
@@ -260,11 +309,13 @@ const App: React.FC = () => {
     const user = { profile, name };
     setCurrentUser(user);
     localStorage.setItem(STORAGE_KEYS.USER_SESSION, JSON.stringify(user));
+    localStorage.setItem(STORAGE_KEYS.USER_LAST_ACTIVITY, String(Date.now()));
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem(STORAGE_KEYS.USER_SESSION);
+    localStorage.removeItem(STORAGE_KEYS.USER_LAST_ACTIVITY);
     setShowUserMenu(false);
     setActiveTab('PROJECAO');
   };
@@ -563,6 +614,8 @@ const App: React.FC = () => {
               dateOptions={selectableDateOptions}
               selectedDateKeys={selectedDateKeys}
               onSelectedDateKeysChange={handleProjectionDatesChange}
+              collapsed={projectionFiltersCollapsedPadrao}
+              onToggleCollapsed={() => setProjectionFiltersCollapsedPadrao((prev) => !prev)}
               onGeneratePdf={() => setIsPdfModalOpen(true)}
             />
             <ProjectionTable
@@ -631,6 +684,8 @@ const App: React.FC = () => {
                   dateOptions={selectableDateOptions}
                   selectedDateKeys={selectedDateKeys}
                   onSelectedDateKeysChange={handleProjectionDatesChange}
+                  collapsed={projectionFiltersCollapsedSimulacao}
+                  onToggleCollapsed={() => setProjectionFiltersCollapsedSimulacao((prev) => !prev)}
                   onGeneratePdf={() => setIsPdfModalOpen(true)}
                 />
                 <ProjectionTable

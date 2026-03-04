@@ -11,6 +11,8 @@ import {
   Minus,
   CornerDownRight,
   X,
+  Download,
+  Filter,
 } from 'lucide-react';
 
 interface SortCriterion {
@@ -63,6 +65,14 @@ const getTooltipInitialPosition = (anchorRect: DOMRect) => {
     top: Math.min(Math.max(8, anchorRect.bottom + 8), maxY),
   };
 };
+
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 
 const ProjectionTable: React.FC<Props> = ({
   data,
@@ -531,9 +541,89 @@ const ProjectionTable: React.FC<Props> = ({
   const activeSelectedValues = activeMenuKey ? (routeValueFilters[activeMenuKey] ?? new Set<string>()) : new Set<string>();
   const activeAllSelected = activeMenuValues.length > 0 && activeSelectedValues.size === activeMenuValues.length;
 
+  const exportProjectionExcel = () => {
+    const topHeader = [
+      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:6px 8px;">CÓDIGO</th>`,
+      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:6px 8px;">DESCRIÇÃO</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:6px 8px;">ESTOQUE</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:6px 8px;">PEDIDO</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:6px 8px;">FALTA</th>`,
+      ...visibleColumns.map(
+        (col) =>
+          `<th colspan="2" style="background:#1E22AA;color:#fff;border:1px solid #203f77;padding:6px 8px;text-align:center;">${escapeHtml(
+            col.label
+          )}</th>`
+      ),
+    ].join('');
+
+    const pfHeader = [
+      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
+      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
+      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
+      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
+      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
+      ...visibleColumns.flatMap(() => [
+        `<th style="background:#1d6f2f;color:#fff;border:1px solid #203f77;padding:4px 8px;">P</th>`,
+        `<th style="background:#9b0f0f;color:#fff;border:1px solid #203f77;padding:4px 8px;">F</th>`,
+      ]),
+    ].join('');
+
+    const bodyRows = sortedData
+      .map((item, idx) => {
+        const rowBg = idx % 2 === 0 ? '#ffffff' : '#f6f8fc';
+        const baseCells = [
+          `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};font-weight:700;">${escapeHtml(item.codigo)}</td>`,
+          `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};">${escapeHtml(item.descricao)}</td>`,
+          `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;">${escapeHtml(
+            item.isShelf ? '-' : item.estoqueAtual
+          )}</td>`,
+          `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;">${escapeHtml(
+            item.totalPedido === 0 ? '-' : item.totalPedido
+          )}</td>`,
+          `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;">${escapeHtml(
+            item.isShelf ? '-' : formatCellNum(item.pendenteProducao)
+          )}</td>`,
+        ];
+
+        const routeCells = visibleColumns.flatMap((col) => {
+          const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
+          return [
+            `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;color:#0a58ca;font-weight:700;">${escapeHtml(
+              formatCellNum(rd.pedido)
+            )}</td>`,
+            `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;color:${
+              rd.falta < 0 ? '#b06a00' : '#8d99ae'
+            };font-weight:700;">${escapeHtml(item.isShelf ? '-' : formatCellNum(rd.falta))}</td>`,
+          ];
+        });
+
+        return `<tr>${[...baseCells, ...routeCells].join('')}</tr>`;
+      })
+      .join('');
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body><table><tr>${topHeader}</tr><tr>${pfHeader}</tr>${bodyRows}</table></body></html>`;
+    const blob = new Blob([`\ufeff${html}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `projecao_estoque_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4 h-full flex flex-col">
       <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0">
+        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-end">
+          <button
+            type="button"
+            onClick={exportProjectionExcel}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Exportar Excel
+          </button>
+        </div>
         <div ref={tableContainerRef} className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-215px)]">
           <table className="w-full text-left text-sm border-separate border-spacing-0 min-w-max">
             <thead className="sticky top-0 z-[70]">
@@ -614,6 +704,7 @@ const ProjectionTable: React.FC<Props> = ({
                         }}
                         className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
+                        <Filter className="w-2.5 h-2.5 opacity-80" />
                         P {(routeValueFilters[getRouteFilterKey(col.key, 'pedido')]?.size ?? 0) > 0 ? '●' : ''}
                       </div>
                       <div
@@ -624,6 +715,7 @@ const ProjectionTable: React.FC<Props> = ({
                         }}
                         className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
+                        <Filter className="w-2.5 h-2.5 opacity-80" />
                         F {(routeValueFilters[getRouteFilterKey(col.key, 'falta')]?.size ?? 0) > 0 ? '●' : ''}
                       </div>
                     </div>

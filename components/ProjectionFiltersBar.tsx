@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, FileDown, CalendarDays, ChevronDown } from 'lucide-react';
+import { Search, FileDown, CalendarDays, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import type { ProjecaoImportada } from '../types';
 import { extractRotasFromProjection } from '../utils';
 import MultiSelectWithSearch from './MultiSelectWithSearch';
@@ -20,6 +20,8 @@ interface ProjectionFiltersBarProps {
   dateOptions: DateOption[];
   selectedDateKeys: Set<string>;
   onSelectedDateKeysChange: (v: Set<string>) => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   onGeneratePdf: () => void;
 }
 
@@ -34,6 +36,8 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
   dateOptions,
   selectedDateKeys,
   onSelectedDateKeysChange,
+  collapsed,
+  onToggleCollapsed,
   onGeneratePdf,
 }) => {
   const [localDescCod, setLocalDescCod] = useState(filterDescCod);
@@ -84,8 +88,22 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
   const dateButtonLabel = selectedDateCount === 0 ? 'Nenhum dia' : `${selectedDateCount} dia(s)`;
 
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 p-4 mb-4 rounded-xl border border-[#cfd8ea] dark:border-gray-600 bg-white dark:bg-[#252525]">
-      <div className="flex flex-wrap items-end gap-4">
+    <div className="p-3 mb-4 rounded-xl border border-[#cfd8ea] dark:border-gray-600 bg-white dark:bg-[#252525]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtros da projeção</div>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-[11px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
+        >
+          <ChevronsUpDown className="w-3.5 h-3.5" />
+          {collapsed ? 'Mostrar filtros' : 'Esconder filtros'}
+        </button>
+      </div>
+
+      {!collapsed && (
+        <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-wrap items-end gap-4">
         <div>
           <label className="text-[10px] font-bold uppercase tracking-wider text-neutral block mb-1">
             Descrição / Cód. produto
@@ -121,8 +139,8 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
             emptyMessage="Nenhum setor encontrado"
           />
         )}
-      </div>
-      <div className="flex items-end gap-3">
+          </div>
+          <div className="flex items-end gap-3">
         <div className="relative" ref={dateSelectorRef}>
           <label className="text-[10px] font-bold uppercase tracking-wider text-neutral block mb-1">Datas visíveis</label>
           <button
@@ -194,7 +212,9 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
           <FileDown className="w-4 h-4" />
           Gerar PDF
         </button>
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
