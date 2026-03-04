@@ -46,6 +46,16 @@ interface SpecialHorizonContext {
 
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+type PdfRowItem = ProductConsolidated | ComponentData;
+
+function compareByDescricaoAsc(a: PdfRowItem, b: PdfRowItem): number {
+  const descA = String(a.descricao ?? '').trim();
+  const descB = String(b.descricao ?? '').trim();
+  const byDesc = descA.localeCompare(descB, 'pt-BR', { sensitivity: 'base' });
+  if (byDesc !== 0) return byDesc;
+  return String(a.codigo ?? '').localeCompare(String(b.codigo ?? ''), 'pt-BR', { numeric: true, sensitivity: 'base' });
+}
+
 function formatDateShortBR(date: Date): string {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
@@ -301,7 +311,7 @@ export async function generateProjectionPdf(options: GeneratePdfOptions): Promis
     return rows;
   };
 
-  const allRows = flattenRows();
+  const allRows = flattenRows().sort(compareByDescricaoAsc);
 
   for (let chunkIdx = 0; chunkIdx < colChunks.length; chunkIdx++) {
     const cols = colChunks[chunkIdx];
@@ -552,7 +562,7 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
 
     if (itemsForCol.length === 0) continue;
 
-    itemsForCol.sort((a, b) => a.codigo.localeCompare(b.codigo, undefined, { numeric: true }));
+    itemsForCol.sort(compareByDescricaoAsc);
 
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
@@ -759,7 +769,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
     return rows;
   };
 
-  const allRows = flattenRows();
+  const allRows = flattenRows().sort(compareByDescricaoAsc);
 
   const isLandscape = orientation === 'l';
   const dateColsPerPage = Math.max(1, isLandscape ? visibleColumns.length : Math.min(visibleColumns.length, 10));
@@ -1044,22 +1054,24 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
     const principalCol = chunkCols[chunkCols.length - 1];
     const colsBeforePrincipal = chunkCols.slice(0, -1);
     const pageSelectedKeys = new Set(chunkCols.map((c) => c.key));
-    const dataFiltered = allRows.filter((item) => {
-      if (
-        !itemHasPedidoInSupervisaoCategorias(item, pageSelectedKeys, {
-          allowedDateKeys: specialHorizon.allowedDateKeys,
-          limitSpecialToAllowedDates: true,
-        })
-      ) {
-        return false;
-      }
-      const cellPrincipal = getSupervisaoCell(item, principalCol.key);
-      const statusFalta = cellPrincipal.falta;
-      const status = statusFalta < 0 ? 'Faltando' : 'Em Estoque';
-      if (filtroResultado === 'faltantes' && status !== 'Faltando') return false;
-      if (filtroResultado === 'estoque' && status !== 'Em Estoque') return false;
-      return true;
-    });
+    const dataFiltered = allRows
+      .filter((item) => {
+        if (
+          !itemHasPedidoInSupervisaoCategorias(item, pageSelectedKeys, {
+            allowedDateKeys: specialHorizon.allowedDateKeys,
+            limitSpecialToAllowedDates: true,
+          })
+        ) {
+          return false;
+        }
+        const cellPrincipal = getSupervisaoCell(item, principalCol.key);
+        const statusFalta = cellPrincipal.falta;
+        const status = statusFalta < 0 ? 'Faltando' : 'Em Estoque';
+        if (filtroResultado === 'faltantes' && status !== 'Faltando') return false;
+        if (filtroResultado === 'estoque' && status !== 'Em Estoque') return false;
+        return true;
+      })
+      .sort(compareByDescricaoAsc);
 
     if (chunkIdx > 0) {
       doc.addPage(orientation === 'l' ? 'a4' : 'a4', orientation);

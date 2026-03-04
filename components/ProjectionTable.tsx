@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProductConsolidated, Order, ComponentData, ProjecaoImportada } from '../types';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ROUTE_SO_MOVEIS, extractRotasFromProjection, dateToKey } from '../utils';
+import { ROUTE_SO_MOVEIS, extractRotasFromProjection, dateToKey, normalizeText } from '../utils';
 import {
   AlertTriangle,
   TrendingDown,
@@ -277,23 +277,30 @@ const ProjectionTable: React.FC<Props> = ({
     return false;
   };
 
+  const selectedRotasNorm = useMemo(() => {
+    const set = new Set<string>();
+    selectedRotas.forEach((r) => set.add(normalizeText(r)));
+    return set;
+  }, [selectedRotas]);
+
+  const productHasSelectedRotaInBreakdown = (item: ProductConsolidated | ComponentData): boolean => {
+    if (selectedRotasNorm.size === 0) return true;
+    for (const rd of Object.values(item.routeData ?? {})) {
+      const breakdown = rd?.breakdown ?? [];
+      for (const b of breakdown) {
+        const destinoNorm = normalizeText(b?.destino ?? '');
+        if (destinoNorm && selectedRotasNorm.has(destinoNorm)) return true;
+      }
+    }
+    return false;
+  };
+
   const productHasSetor = (codigo: string, setores: Set<string>): boolean => {
     if (setores.size === 0) return true;
     const prodSetores = codigoToSetores.get(codigo.trim().toUpperCase());
     if (!prodSetores) return false;
     for (const s of setores) {
       if (prodSetores.has(s)) return true;
-    }
-    return false;
-  };
-
-  const hasPedidoInSelectedRotaColumns = (item: ProductConsolidated | ComponentData): boolean => {
-    if (!dateKeysForSelectedRotas) return false;
-    const keys = Array.from(dateKeysForSelectedRotas.keys);
-    if ((dateKeysForSelectedRotas.overdueDates?.size ?? 0) > 0) keys.unshift('ATRASADOS');
-    for (const key of keys) {
-      const rd = item.routeData[key];
-      if ((rd?.pedido ?? 0) > 0) return true;
     }
     return false;
   };
@@ -407,10 +414,10 @@ const ProjectionTable: React.FC<Props> = ({
     let result = data;
     if (selectedRotas.size > 0) {
       result = result.filter((item) => {
-        if (productHasRota(item.codigo, selectedRotas) || hasPedidoInSelectedRotaColumns(item)) return true;
+        if (productHasRota(item.codigo, selectedRotas) || productHasSelectedRotaInBreakdown(item)) return true;
         if (item.isShelf && item.components?.length) {
           return item.components.some(
-            (comp) => productHasRota(comp.codigo, selectedRotas) || hasPedidoInSelectedRotaColumns(comp)
+            (comp) => productHasRota(comp.codigo, selectedRotas) || productHasSelectedRotaInBreakdown(comp)
           );
         }
         return false;
@@ -467,7 +474,7 @@ const ProjectionTable: React.FC<Props> = ({
         const okRota =
           selectedRotas.size === 0 ||
           productHasRota(comp.codigo, selectedRotas) ||
-          hasPedidoInSelectedRotaColumns(comp);
+          productHasSelectedRotaInBreakdown(comp);
         const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
         return okRota && okSetor && rowMatchesRouteValueFilters(comp);
       });
@@ -516,7 +523,7 @@ const ProjectionTable: React.FC<Props> = ({
         const okRota =
           selectedRotas.size === 0 ||
           productHasRota(comp.codigo, selectedRotas) ||
-          hasPedidoInSelectedRotaColumns(comp);
+          productHasSelectedRotaInBreakdown(comp);
         const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
         return okRota && okSetor && rowMatchesRouteValueFilters(comp);
       });
