@@ -636,29 +636,38 @@ const ProjectionTable: React.FC<Props> = ({
   const activeAllSelected = activeMenuValues.length > 0 && activeSelectedValues.size === activeMenuValues.length;
 
   const exportProjectionExcel = () => {
+    const colGroup = [
+      `<col style="width:140px">`,
+      `<col style="width:520px">`,
+      `<col style="width:100px">`,
+      `<col style="width:100px">`,
+      `<col style="width:100px">`,
+      ...visibleColumns.flatMap(() => [`<col style="width:68px">`, `<col style="width:68px">`]),
+    ].join('');
+
     const topHeader = [
-      `<th style="background:#041E42;border:1px solid #203f77;padding:8px 10px;"></th>`,
-      `<th style="background:#041E42;border:1px solid #203f77;padding:8px 10px;"></th>`,
-      `<th style="background:#062c61;border:1px solid #203f77;padding:8px 10px;"></th>`,
-      `<th style="background:#062c61;border:1px solid #203f77;padding:8px 10px;"></th>`,
-      `<th style="background:#062c61;border:1px solid #203f77;padding:8px 10px;"></th>`,
+      `<th style="background:#041E42;border:1px solid #203f77;padding:12px 12px;height:34px;"></th>`,
+      `<th style="background:#041E42;border:1px solid #203f77;padding:12px 12px;height:34px;"></th>`,
+      `<th style="background:#062c61;border:1px solid #203f77;padding:12px 12px;height:34px;"></th>`,
+      `<th style="background:#062c61;border:1px solid #203f77;padding:12px 12px;height:34px;"></th>`,
+      `<th style="background:#062c61;border:1px solid #203f77;padding:12px 12px;height:34px;"></th>`,
       ...visibleColumns.map(
         (col) =>
-          `<th colspan="2" style="background:#1E22AA;color:#fff;border:1px solid #203f77;padding:6px 8px;text-align:center;">${escapeHtml(
+          `<th colspan="2" style="background:#1E22AA;color:#fff;border:1px solid #203f77;padding:10px 10px;height:34px;text-align:center;">${escapeHtml(
             col.label
           )}</th>`
       ),
     ].join('');
 
     const secondHeader = [
-      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">CÓDIGO</th>`,
-      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">DESCRIÇÃO</th>`,
-      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">ESTOQUE</th>`,
-      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">PEDIDO</th>`,
-      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">FALTA</th>`,
+      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">CÓDIGO</th>`,
+      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">DESCRIÇÃO</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">ESTOQUE</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">PEDIDO</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">FALTA</th>`,
       ...visibleColumns.flatMap(() => [
-        `<th style="background:#1d6f2f;color:#fff;border:1px solid #203f77;padding:4px 8px;">P</th>`,
-        `<th style="background:#9b0f0f;color:#fff;border:1px solid #203f77;padding:4px 8px;">F</th>`,
+        `<th style="background:#1d6f2f;color:#fff;border:1px solid #203f77;padding:8px 8px;height:32px;">P</th>`,
+        `<th style="background:#9b0f0f;color:#fff;border:1px solid #203f77;padding:8px 8px;height:32px;">F</th>`,
       ]),
     ].join('');
 
@@ -695,7 +704,7 @@ const ProjectionTable: React.FC<Props> = ({
       })
       .join('');
 
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body><table><tr>${topHeader}</tr><tr>${secondHeader}</tr>${bodyRows}</table></body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body><table style="border-collapse:collapse;table-layout:fixed;"><colgroup>${colGroup}</colgroup><tr>${topHeader}</tr><tr>${secondHeader}</tr>${bodyRows}</table></body></html>`;
     const blob = new Blob([`\ufeff${html}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -798,7 +807,10 @@ const ProjectionTable: React.FC<Props> = ({
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          setRouteValueFilterMenu({ colKey: col.key, field: 'pedido', anchorRect: rect });
+                          setRouteValueFilterMenu((prev) => {
+                            if (prev?.colKey === col.key && prev.field === 'pedido') return null;
+                            return { colKey: col.key, field: 'pedido', anchorRect: rect };
+                          });
                         }}
                         className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
@@ -809,7 +821,10 @@ const ProjectionTable: React.FC<Props> = ({
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          setRouteValueFilterMenu({ colKey: col.key, field: 'falta', anchorRect: rect });
+                          setRouteValueFilterMenu((prev) => {
+                            if (prev?.colKey === col.key && prev.field === 'falta') return null;
+                            return { colKey: col.key, field: 'falta', anchorRect: rect };
+                          });
                         }}
                         className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
@@ -871,7 +886,13 @@ const ProjectionTable: React.FC<Props> = ({
                     >
                       {row.descricao}
                     </td>
-                    <td className="px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800">{row.estoqueAtual}</td>
+                    <td
+                      className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${
+                        Number(row.estoqueAtual) < 0 ? 'text-[#B06A66]' : ''
+                      }`}
+                    >
+                      {row.estoqueAtual}
+                    </td>
                     <td className="px-3 py-1.5 text-center font-medium text-[11px]">{row.totalPedido === 0 ? '-' : row.totalPedido}</td>
                     <td className="px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800">
                       {row.kind === 'item' ? (Number(row.falta) < 0 ? formatCellNum(row.falta) : '-') : formatCellNum(row.falta)}
@@ -944,6 +965,28 @@ const ProjectionTable: React.FC<Props> = ({
               value={routeValueFilterSearch}
               onChange={(e) => setRouteValueFilterSearch(e.target.value)}
             />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (!routeValueFilterMenu) return;
+                  setSortCriteria([{ column: `route:${routeValueFilterMenu.colKey}:${routeValueFilterMenu.field}`, direction: 'asc' }]);
+                }}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (!routeValueFilterMenu) return;
+                  setSortCriteria([{ column: `route:${routeValueFilterMenu.colKey}:${routeValueFilterMenu.field}`, direction: 'desc' }]);
+                }}
+              >
+                Ordenar DESC
+              </button>
+            </div>
             <div className="flex items-center justify-between">
               <button
                 type="button"

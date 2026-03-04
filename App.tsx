@@ -55,6 +55,18 @@ const STORAGE_KEYS = {
 const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 type ProjectionSubMode = 'PADRAO' | 'SIMULADO';
+type MainTab = 'PROJECAO' | 'ROMANEIO' | 'USUARIOS';
+
+const normalizePath = (path: string): string => decodeURIComponent(path || '/').toLowerCase();
+
+const getInitialRouteState = (): { tab: MainTab; subMode: ProjectionSubMode } => {
+  if (typeof window === 'undefined') return { tab: 'PROJECAO', subMode: 'PADRAO' };
+  const p = normalizePath(window.location.pathname);
+  if (p.includes('/romaneio')) return { tab: 'ROMANEIO', subMode: 'PADRAO' };
+  if (p.includes('/gestao')) return { tab: 'USUARIOS', subMode: 'PADRAO' };
+  if (p.includes('/projecao-simulado')) return { tab: 'PROJECAO', subMode: 'SIMULADO' };
+  return { tab: 'PROJECAO', subMode: 'PADRAO' };
+};
 
 interface SimulationState {
   data: ProjecaoImportada[];
@@ -76,8 +88,9 @@ const loadSimulationFromStorage = (): SimulationState => {
 };
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'PROJECAO' | 'ROMANEIO' | 'USUARIOS'>('PROJECAO');
-  const [projectionSubMode, setProjectionSubMode] = useState<ProjectionSubMode>('PADRAO');
+  const initialRouteState = useMemo(() => getInitialRouteState(), []);
+  const [activeTab, setActiveTab] = useState<MainTab>(initialRouteState.tab);
+  const [projectionSubMode, setProjectionSubMode] = useState<ProjectionSubMode>(initialRouteState.subMode);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isImportSimulationModalOpen, setIsImportSimulationModalOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
@@ -308,6 +321,7 @@ const App: React.FC = () => {
     setCurrentUser(user);
     localStorage.setItem(STORAGE_KEYS.USER_SESSION, JSON.stringify(user));
     localStorage.setItem(STORAGE_KEYS.USER_LAST_ACTIVITY, String(Date.now()));
+    if (typeof window !== 'undefined') window.history.replaceState({}, '', '/projecao-padrao');
   };
 
   const handleLogout = () => {
@@ -316,7 +330,51 @@ const App: React.FC = () => {
     localStorage.removeItem(STORAGE_KEYS.USER_LAST_ACTIVITY);
     setShowUserMenu(false);
     setActiveTab('PROJECAO');
+    if (typeof window !== 'undefined') window.history.replaceState({}, '', '/login');
   };
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = () => {
+      const p = normalizePath(window.location.pathname);
+      if (p.includes('/romaneio')) {
+        setActiveTab('ROMANEIO');
+        return;
+      }
+      if (p.includes('/gestao')) {
+        setActiveTab('USUARIOS');
+        return;
+      }
+      if (p.includes('/projecao-simulado')) {
+        setActiveTab('PROJECAO');
+        setProjectionSubMode('SIMULADO');
+        return;
+      }
+      if (p.includes('/projecao') || p.includes('/login')) {
+        setActiveTab('PROJECAO');
+        setProjectionSubMode('PADRAO');
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!currentUser) {
+      if (normalizePath(window.location.pathname) !== '/login') {
+        window.history.replaceState({}, '', '/login');
+      }
+      return;
+    }
+    let nextPath = '/projecao-padrao';
+    if (activeTab === 'ROMANEIO') nextPath = '/romaneio';
+    else if (activeTab === 'USUARIOS') nextPath = '/gestao';
+    else if (projectionSubMode === 'SIMULADO') nextPath = '/projecao-simulado';
+    if (normalizePath(window.location.pathname) !== nextPath) {
+      window.history.replaceState({}, '', nextPath);
+    }
+  }, [currentUser, activeTab, projectionSubMode]);
+
 
   const handleAddUser = async (user: UserAccount) => {
     if (supabase) {

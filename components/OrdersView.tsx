@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronsUpDown, Download, MapPin, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
 import { ProjecaoImportada } from '../types';
 import { CATEGORY_ENTREGA_GT, CATEGORY_INSERIR_ROMANEIO, CATEGORY_REQUISICAO, CATEGORY_RETIRADA, getCategoriaFromObservacoes, getHorizonInfo, isCategoriaEspecial, parseOrderDate } from '../utils';
 import * as XLSX from 'xlsx';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 interface Props {
   projection: ProjecaoImportada[];
@@ -106,6 +107,9 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
   const resizeStartX = useRef<number>(0);
   const resizeStartWidth = useRef<number>(0);
   const didResizeRef = useRef(false);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const deferredFilters = useDeferredValue(filters);
+  const deferredKpiFilter = useDeferredValue(kpiFilter);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -170,7 +174,7 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
   const filteredRows = useMemo(() => {
     let rows = projection.filter((row) =>
       FILTER_KEYS.every((key) => {
-        const term = safeStr(filters[key]).toLowerCase().trim();
+        const term = safeStr(deferredFilters[key]).toLowerCase().trim();
         if (!term) return true;
         if (key === 'previsaoAtual') {
           const br = formatDateBR(safeStr(row.previsaoAtual)).toLowerCase();
@@ -181,17 +185,17 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     );
 
     rows = rows.filter((row) => {
-      if (kpiFilter === 'all') return true;
+      if (deferredKpiFilter === 'all') return true;
 
       const categoria = getCategoriaFromObservacoes(row.observacoes);
       const hasRm = safeStr(row.rm).trim() !== '' && safeStr(row.rm).trim() !== '&nbsp;';
       const isRotaCategoria = categoria && !isCategoriaEspecial(categoria);
 
-      if (kpiFilter === 'so_moveis') return categoria === CATEGORY_REQUISICAO;
-      if (kpiFilter === 'g_teresina') return categoria === CATEGORY_ENTREGA_GT;
-      if (kpiFilter === 'cliente_busca') return categoria === CATEGORY_RETIRADA;
-      if (kpiFilter === 'em_rota') return Boolean(isRotaCategoria && hasRm);
-      if (kpiFilter === 'sem_vinculo') return categoria === CATEGORY_INSERIR_ROMANEIO;
+      if (deferredKpiFilter === 'so_moveis') return categoria === CATEGORY_REQUISICAO;
+      if (deferredKpiFilter === 'g_teresina') return categoria === CATEGORY_ENTREGA_GT;
+      if (deferredKpiFilter === 'cliente_busca') return categoria === CATEGORY_RETIRADA;
+      if (deferredKpiFilter === 'em_rota') return Boolean(isRotaCategoria && hasRm);
+      if (deferredKpiFilter === 'sem_vinculo') return categoria === CATEGORY_INSERIR_ROMANEIO;
       return true;
     });
 
@@ -221,7 +225,18 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     }
 
     return rows;
-  }, [projection, filters, sortCriteria, kpiFilter]);
+  }, [projection, deferredFilters, sortCriteria, deferredKpiFilter]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: filteredRows.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 34,
+    overscan: 12,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const topPadding = virtualRows.length > 0 ? virtualRows[0].start : 0;
+  const bottomPadding =
+    virtualRows.length > 0 ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end : 0;
 
   const kpis = useMemo(() => {
     const horizon = getHorizonInfo();
@@ -326,28 +341,6 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     XLSX.writeFile(wb, 'romaneio_projecao.xlsx');
   };
 
-  const tableRows = useMemo(
-    () =>
-      filteredRows.map((row, idx) => (
-        <tr
-          key={`${row.idChave}-${idx}`}
-          className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-[#f4f7fc] dark:bg-[#2a2a2a]'} hover:bg-[#e8eefb] dark:hover:bg-gray-800/30 transition-colors`}
-        >
-          {COLUMNS.map((col) => (
-            <td
-              key={`${row.idChave}-${col.key}-${idx}`}
-              style={{ width: `${columnWidths[col.key]}px`, minWidth: `${columnWidths[col.key]}px`, maxWidth: `${columnWidths[col.key]}px` }}
-              className="px-3 py-2 border-b border-[#e2e8f4] dark:border-gray-800 whitespace-nowrap truncate"
-              title={col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
-            >
-              {col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
-            </td>
-          ))}
-        </tr>
-      )),
-    [filteredRows, columnWidths]
-  );
-
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-[#cfd8ea] dark:border-gray-700 overflow-hidden shadow-sm bg-[#f7f9fd] dark:bg-[#252525]">
@@ -410,7 +403,7 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
           </div>
         )}
 
-        <div className={`overflow-auto ${filtersCollapsed ? 'max-h-[760px]' : 'max-h-[650px]'}`}>
+        <div ref={tableContainerRef} className={`overflow-auto ${filtersCollapsed ? 'max-h-[760px]' : 'max-h-[650px]'}`}>
           <table className="w-full text-left text-xs border-separate border-spacing-0 table-fixed">
             <colgroup>
               {COLUMNS.map((col) => (
@@ -440,7 +433,38 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
               </tr>
             </thead>
             <tbody className="text-gray-800 dark:text-gray-300">
-              {tableRows}
+              {topPadding > 0 && (
+                <tr>
+                  <td colSpan={COLUMNS.length} style={{ height: `${topPadding}px`, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {virtualRows.map((vRow) => {
+                const row = filteredRows[vRow.index];
+                return (
+                  <tr
+                    key={`${row.idChave}-${vRow.index}`}
+                    data-index={vRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    className={`${vRow.index % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-[#f4f7fc] dark:bg-[#2a2a2a]'} hover:bg-[#e8eefb] dark:hover:bg-gray-800/30 transition-colors`}
+                  >
+                    {COLUMNS.map((col) => (
+                      <td
+                        key={`${row.idChave}-${col.key}-${vRow.index}`}
+                        style={{ width: `${columnWidths[col.key]}px`, minWidth: `${columnWidths[col.key]}px`, maxWidth: `${columnWidths[col.key]}px` }}
+                        className="px-3 py-2 border-b border-[#e2e8f4] dark:border-gray-800 whitespace-nowrap truncate"
+                        title={col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
+                      >
+                        {col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {bottomPadding > 0 && (
+                <tr>
+                  <td colSpan={COLUMNS.length} style={{ height: `${bottomPadding}px`, padding: 0, border: 0 }} />
+                </tr>
+              )}
               {filteredRows.length === 0 && (
                 <tr>
                   <td colSpan={COLUMNS.length} className="px-4 py-12 text-center text-neutral italic">
