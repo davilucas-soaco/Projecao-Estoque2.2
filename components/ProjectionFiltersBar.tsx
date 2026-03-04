@@ -20,8 +20,6 @@ interface ProjectionFiltersBarProps {
   dateOptions: DateOption[];
   selectedDateKeys: Set<string>;
   onSelectedDateKeysChange: (v: Set<string>) => void;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
   onGeneratePdf: () => void;
 }
 
@@ -36,11 +34,10 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
   dateOptions,
   selectedDateKeys,
   onSelectedDateKeysChange,
-  collapsed,
-  onToggleCollapsed,
   onGeneratePdf,
 }) => {
   const [localDescCod, setLocalDescCod] = useState(filterDescCod);
+  const [collapsed, setCollapsed] = useState(false);
   const [dateSearch, setDateSearch] = useState('');
   const [showDateSelector, setShowDateSelector] = useState(false);
   const dateSelectorRef = useRef<HTMLDivElement>(null);
@@ -93,7 +90,7 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
         <div className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtros da projeção</div>
         <button
           type="button"
-          onClick={onToggleCollapsed}
+          onClick={() => setCollapsed((prev) => !prev)}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-[11px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
         >
           <ChevronsUpDown className="w-3.5 h-3.5" />

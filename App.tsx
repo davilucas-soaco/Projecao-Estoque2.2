@@ -84,8 +84,6 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [projectionFilterRotas, setProjectionFilterRotas] = useState<Set<string>>(new Set());
   const [projectionFilterSetores, setProjectionFilterSetores] = useState<Set<string>>(new Set());
-  const [projectionFiltersCollapsedPadrao, setProjectionFiltersCollapsedPadrao] = useState(false);
-  const [projectionFiltersCollapsedSimulacao, setProjectionFiltersCollapsedSimulacao] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
   const [showErpPanel, setShowErpPanel] = useState(false);
@@ -614,8 +612,6 @@ const App: React.FC = () => {
               dateOptions={selectableDateOptions}
               selectedDateKeys={selectedDateKeys}
               onSelectedDateKeysChange={handleProjectionDatesChange}
-              collapsed={projectionFiltersCollapsedPadrao}
-              onToggleCollapsed={() => setProjectionFiltersCollapsedPadrao((prev) => !prev)}
               onGeneratePdf={() => setIsPdfModalOpen(true)}
             />
             <ProjectionTable
@@ -684,8 +680,6 @@ const App: React.FC = () => {
                   dateOptions={selectableDateOptions}
                   selectedDateKeys={selectedDateKeys}
                   onSelectedDateKeysChange={handleProjectionDatesChange}
-                  collapsed={projectionFiltersCollapsedSimulacao}
-                  onToggleCollapsed={() => setProjectionFiltersCollapsedSimulacao((prev) => !prev)}
                   onGeneratePdf={() => setIsPdfModalOpen(true)}
                 />
                 <ProjectionTable

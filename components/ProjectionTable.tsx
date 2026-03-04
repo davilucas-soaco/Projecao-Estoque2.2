@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProductConsolidated, Order, ComponentData, ProjecaoImportada } from '../types';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ROUTE_SO_MOVEIS, extractRotasFromProjection, dateToKey } from '../utils';
 import {
   AlertTriangle,
@@ -48,6 +49,21 @@ interface RouteValueFilterMenu {
   colKey: string;
   field: RouteValueField;
   anchorRect: DOMRect;
+}
+
+interface FlatRow {
+  key: string;
+  kind: 'item' | 'component';
+  parentCodigo?: string;
+  isShelf?: boolean;
+  isExpanded?: boolean;
+  codigo: string;
+  descricao: string;
+  estoqueAtual: number | string;
+  totalPedido: number;
+  falta: number | string;
+  routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number; numeroPedido?: string }[] }>;
+  rowBgClass: string;
 }
 
 const formatCellNum = (v: unknown): string | number => {
@@ -407,31 +423,6 @@ const ProjectionTable: React.FC<Props> = ({
     return result;
   }, [data, selectedRotas, selectedSetores, codigoToSetores, codigoToRotas]);
 
-  const routeFilterUniqueValues = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const col of visibleColumns) {
-      for (const field of ['pedido', 'falta'] as const) {
-        const key = getRouteFilterKey(col.key, field);
-        const values = new Set<string>();
-        for (const item of dataFilteredByColumns) {
-          values.add(getRouteDisplayValue(item, col.key, field));
-          if (item.isShelf && item.components?.length) {
-            for (const comp of item.components) {
-              values.add(getRouteDisplayValue(comp, col.key, field));
-            }
-          }
-        }
-        const ordered = Array.from(values).sort((a, b) => {
-          if (a === '-') return 1;
-          if (b === '-') return -1;
-          return Number(a) - Number(b);
-        });
-        map.set(key, ordered);
-      }
-    }
-    return map;
-  }, [visibleColumns, dataFilteredByColumns]);
-
   const activeRouteValueFilterKeys = useMemo(
     () => Object.keys(routeValueFilters).filter((k) => (routeValueFilters[k]?.size ?? 0) > 0),
     [routeValueFilters]
@@ -512,6 +503,92 @@ const ProjectionTable: React.FC<Props> = ({
     });
   }, [dataFilteredByValues, sortCriteria]);
 
+  const filteredComponentsByParent = useMemo(() => {
+    const map = new Map<string, ComponentData[]>();
+    for (const item of sortedData) {
+      if (!item.isShelf || !item.components?.length) continue;
+      const filtered = item.components.filter((comp) => {
+        const okRota =
+          selectedRotas.size === 0 ||
+          productHasRota(comp.codigo, selectedRotas) ||
+          hasPedidoInSelectedRotaColumns(comp);
+        const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
+        return okRota && okSetor && rowMatchesRouteValueFilters(comp);
+      });
+      map.set(item.codigo, filtered);
+    }
+    return map;
+  }, [sortedData, selectedRotas, selectedSetores, activeRouteValueFilterKeys, routeValueFilters, dateKeysForSelectedRotas]);
+
+  const flatRows = useMemo<FlatRow[]>(() => {
+    const rows: FlatRow[] = [];
+    let rowIndex = 0;
+    for (const item of sortedData) {
+      const isExpanded = expandedShelves.has(item.codigo) || autoExpandedShelves.has(item.codigo);
+      const rowBgClass = rowIndex % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]';
+      rows.push({
+        key: item.codigo,
+        kind: 'item',
+        isShelf: !!item.isShelf,
+        isExpanded,
+        codigo: item.codigo,
+        descricao: item.descricao,
+        estoqueAtual: item.isShelf ? '-' : item.estoqueAtual,
+        totalPedido: item.totalPedido,
+        falta: item.isShelf ? '-' : item.pendenteProducao,
+        routeData: item.routeData,
+        rowBgClass,
+      });
+      rowIndex += 1;
+      if (isExpanded) {
+        const comps = filteredComponentsByParent.get(item.codigo) ?? [];
+        for (const comp of comps) {
+          const compBg = rowIndex % 2 === 0 ? 'bg-gray-100/30 dark:bg-gray-800/20' : 'bg-gray-100/30 dark:bg-gray-800/20';
+          rows.push({
+            key: `${item.codigo}-${comp.codigo}`,
+            kind: 'component',
+            parentCodigo: item.codigo,
+            codigo: comp.codigo,
+            descricao: comp.descricao,
+            estoqueAtual: comp.estoqueAtual,
+            totalPedido: comp.totalPedido,
+            falta: comp.falta,
+            routeData: comp.routeData,
+            rowBgClass: compBg,
+          });
+          rowIndex += 1;
+        }
+      }
+    }
+    return rows;
+  }, [sortedData, expandedShelves, autoExpandedShelves, filteredComponentsByParent]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: flatRows.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: (idx) => (flatRows[idx]?.kind === 'component' ? 28 : 34),
+    overscan: 10,
+  });
+
+  const columnVirtualizer = useVirtualizer({
+    count: visibleColumns.length,
+    horizontal: true,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 96,
+    overscan: 6,
+  });
+
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const virtualColumns = columnVirtualizer.getVirtualItems();
+  const topRowPadding = virtualRows.length > 0 ? virtualRows[0].start : 0;
+  const bottomRowPadding =
+    virtualRows.length > 0 ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end : 0;
+  const leftColPadding = virtualColumns.length > 0 ? virtualColumns[0].start : 0;
+  const rightColPadding =
+    virtualColumns.length > 0
+      ? columnVirtualizer.getTotalSize() - virtualColumns[virtualColumns.length - 1].end
+      : 0;
+
   useEffect(() => {
     onVisibleProductsCountChange?.(sortedData.length);
   }, [sortedData.length, onVisibleProductsCountChange]);
@@ -532,7 +609,24 @@ const ProjectionTable: React.FC<Props> = ({
   const activeMenuKey = routeValueFilterMenu
     ? getRouteFilterKey(routeValueFilterMenu.colKey, routeValueFilterMenu.field)
     : null;
-  const activeMenuValues = activeMenuKey ? (routeFilterUniqueValues.get(activeMenuKey) ?? []) : [];
+  const activeMenuValues = useMemo(() => {
+    if (!routeValueFilterMenu || !activeMenuKey) return [];
+    const values = new Set<string>();
+    const { colKey, field } = routeValueFilterMenu;
+    for (const item of dataFilteredByColumns) {
+      values.add(getRouteDisplayValue(item, colKey, field));
+      if (item.isShelf && item.components?.length) {
+        for (const comp of item.components) {
+          values.add(getRouteDisplayValue(comp, colKey, field));
+        }
+      }
+    }
+    return Array.from(values).sort((a, b) => {
+      if (a === '-') return 1;
+      if (b === '-') return -1;
+      return Number(a) - Number(b);
+    });
+  }, [routeValueFilterMenu, activeMenuKey, dataFilteredByColumns]);
   const filteredActiveMenuValues = useMemo(() => {
     const term = routeValueFilterSearch.trim().toLowerCase();
     if (!term) return activeMenuValues;
@@ -543,11 +637,11 @@ const ProjectionTable: React.FC<Props> = ({
 
   const exportProjectionExcel = () => {
     const topHeader = [
-      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:6px 8px;">CÓDIGO</th>`,
-      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:6px 8px;">DESCRIÇÃO</th>`,
-      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:6px 8px;">ESTOQUE</th>`,
-      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:6px 8px;">PEDIDO</th>`,
-      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:6px 8px;">FALTA</th>`,
+      `<th style="background:#041E42;border:1px solid #203f77;padding:8px 10px;"></th>`,
+      `<th style="background:#041E42;border:1px solid #203f77;padding:8px 10px;"></th>`,
+      `<th style="background:#062c61;border:1px solid #203f77;padding:8px 10px;"></th>`,
+      `<th style="background:#062c61;border:1px solid #203f77;padding:8px 10px;"></th>`,
+      `<th style="background:#062c61;border:1px solid #203f77;padding:8px 10px;"></th>`,
       ...visibleColumns.map(
         (col) =>
           `<th colspan="2" style="background:#1E22AA;color:#fff;border:1px solid #203f77;padding:6px 8px;text-align:center;">${escapeHtml(
@@ -556,12 +650,12 @@ const ProjectionTable: React.FC<Props> = ({
       ),
     ].join('');
 
-    const pfHeader = [
-      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
-      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
-      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
-      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
-      `<th style="background:#0f2f66;border:1px solid #203f77;"></th>`,
+    const secondHeader = [
+      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">CÓDIGO</th>`,
+      `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">DESCRIÇÃO</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">ESTOQUE</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">PEDIDO</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:7px 8px;text-align:center;">FALTA</th>`,
       ...visibleColumns.flatMap(() => [
         `<th style="background:#1d6f2f;color:#fff;border:1px solid #203f77;padding:4px 8px;">P</th>`,
         `<th style="background:#9b0f0f;color:#fff;border:1px solid #203f77;padding:4px 8px;">F</th>`,
@@ -572,8 +666,8 @@ const ProjectionTable: React.FC<Props> = ({
       .map((item, idx) => {
         const rowBg = idx % 2 === 0 ? '#ffffff' : '#f6f8fc';
         const baseCells = [
-          `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};font-weight:700;">${escapeHtml(item.codigo)}</td>`,
-          `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};">${escapeHtml(item.descricao)}</td>`,
+          `<td style="border:1px solid #d8e0ef;padding:6px 8px;background:${rowBg};font-weight:700;text-align:center;vertical-align:middle;">${escapeHtml(item.codigo)}</td>`,
+          `<td style="border:1px solid #d8e0ef;padding:6px 8px;background:${rowBg};text-align:center;vertical-align:middle;">${escapeHtml(item.descricao)}</td>`,
           `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;">${escapeHtml(
             item.isShelf ? '-' : item.estoqueAtual
           )}</td>`,
@@ -601,7 +695,7 @@ const ProjectionTable: React.FC<Props> = ({
       })
       .join('');
 
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body><table><tr>${topHeader}</tr><tr>${pfHeader}</tr>${bodyRows}</table></body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body><table><tr>${topHeader}</tr><tr>${secondHeader}</tr>${bodyRows}</table></body></html>`;
     const blob = new Blob([`\ufeff${html}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -682,11 +776,15 @@ const ProjectionTable: React.FC<Props> = ({
                   </div>
                 </th>
 
-                {visibleColumns.map(col => (
+                {leftColPadding > 0 && <th colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
+                {virtualColumns.map((vCol) => {
+                  const col = visibleColumns[vCol.index];
+                  return (
                   <th
                     key={col.key}
                     data-route-filter-head
-                    className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 min-w-[90px] sticky top-0 z-[70]"
+                    className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 sticky top-0 z-[70]"
+                    style={{ width: `${vCol.size}px`, minWidth: `${vCol.size}px` }}
                     colSpan={2}
                   >
                     <div className="text-[8px] opacity-70 uppercase tracking-widest leading-none mb-0.5 font-medium">
@@ -720,139 +818,98 @@ const ProjectionTable: React.FC<Props> = ({
                       </div>
                     </div>
                   </th>
-                ))}
+                );})}
+                {rightColPadding > 0 && <th colSpan={2} style={{ width: `${rightColPadding}px`, minWidth: `${rightColPadding}px` }} />}
               </tr>
             </thead>
             <tbody className="text-gray-900 dark:text-gray-100">
-              {sortedData.map((item, idx) => {
-                const isExpanded = expandedShelves.has(item.codigo) || autoExpandedShelves.has(item.codigo);
-                const filteredComponents =
-                  item.isShelf && item.components
-                    ? item.components.filter((comp) => {
-                        const okRota =
-                          selectedRotas.size === 0 ||
-                          productHasRota(comp.codigo, selectedRotas) ||
-                          hasPedidoInSelectedRotaColumns(comp);
-                        const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
-                        return okRota && okSetor && rowMatchesRouteValueFilters(comp);
-                      })
-                    : [];
+              {topRowPadding > 0 && (
+                <tr>
+                  <td colSpan={totalColSpan} style={{ height: `${topRowPadding}px`, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {virtualRows.map((vRow) => {
+                const row = flatRows[vRow.index];
+                const isSelected = selectedRowCodigo === row.key || selectedRowCodigo === row.parentCodigo;
+                const isItem = row.kind === 'item';
                 return (
-                  <React.Fragment key={item.codigo}>
-                    <tr
-                      onClick={() => setSelectedRowCodigo((prev) => (prev === item.codigo ? null : item.codigo))}
-                      className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]'} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group cursor-pointer ${
-                        selectedRowCodigo === item.codigo ? 'ring-1 ring-secondary/40 bg-blue-50/70 dark:bg-blue-900/20' : ''
+                  <tr
+                    key={row.key}
+                    data-index={vRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isItem) setSelectedRowCodigo((prev) => (prev === row.key ? null : row.key));
+                      else if (row.parentCodigo) setSelectedRowCodigo((prev) => (prev === row.parentCodigo ? null : row.parentCodigo));
+                    }}
+                    className={`${row.rowBgClass} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group cursor-pointer ${
+                      isSelected ? 'ring-1 ring-secondary/40 bg-blue-50/70 dark:bg-blue-900/20' : ''
+                    } ${row.kind === 'component' ? 'border-l-4 border-secondary' : ''}`}
+                  >
+                    <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                      <div className={`flex items-center gap-2 ${row.kind === 'component' ? 'pl-4' : ''}`}>
+                        {isItem && row.isShelf && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleShelf(row.key);
+                            }}
+                            className="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                          >
+                            {row.isExpanded ? <Minus className="w-3 h-3 text-secondary" /> : <Plus className="w-3 h-3 text-secondary" />}
+                          </button>
+                        )}
+                        {row.kind === 'component' && <CornerDownRight className="w-3 h-3 text-neutral opacity-50" />}
+                        {row.codigo}
+                      </div>
+                    </td>
+                    <td
+                      style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
+                      className={`px-3 py-1.5 sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate ${
+                        row.kind === 'component' ? 'text-[10px] italic text-neutral' : 'text-[11px]'
                       }`}
                     >
-                      <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                        <div className="flex items-center gap-2">
-                          {item.isShelf && (
-                            <button
-                              onClick={() => toggleShelf(item.codigo)}
-                              className="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
-                            >
-                              {isExpanded ? <Minus className="w-3 h-3 text-secondary" /> : <Plus className="w-3 h-3 text-secondary" />}
-                            </button>
-                          )}
-                          {item.codigo}
-                        </div>
-                      </td>
-                      <td
-                        style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
-                        className="px-3 py-1.5 text-[11px] sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate"
-                      >
-                        {item.descricao}
-                      </td>
-                      <td className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${item.estoqueAtual < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                        {item.isShelf ? '-' : item.estoqueAtual}
-                      </td>
-                      <td className="px-3 py-1.5 text-center font-medium text-[11px] text-gray-900 dark:text-gray-100">
-                        {item.totalPedido === 0 ? '-' : item.totalPedido}
-                      </td>
-                      <td className={`px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${item.pendenteProducao < 0 ? 'text-highlight' : 'text-green-600 dark:text-green-400'}`}>
-                        {item.isShelf ? '-' : (item.pendenteProducao < 0 ? (
-                          <div className="flex items-center justify-center gap-1">
-                            {item.pendenteProducao}
-                            <TrendingDown className="w-2.5 h-2.5" />
-                          </div>
-                        ) : '-')}
-                      </td>
-
-                      {visibleColumns.map(col => {
-                        const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
-                        return (
-                          <React.Fragment key={col.key}>
-                            <td
-                              data-tooltip-cell
-                              onClick={(e) => handlePClick(e, item, col.key, col.label)}
-                              className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
-                            >
-                              {formatCellNum(rd.pedido)}
-                            </td>
-                            <td className={`px-2 py-1.5 text-center font-bold text-[11px] ${rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'}`}>
-                              {item.isShelf ? '-' : formatCellNum(rd.falta)}
-                            </td>
-                          </React.Fragment>
-                        );
-                      })}
-                    </tr>
-
-                    {item.isShelf && isExpanded && filteredComponents.map((comp) => (
-                      <tr
-                        key={`${item.codigo}-${comp.codigo}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedRowCodigo((prev) => (prev === item.codigo ? null : item.codigo));
-                        }}
-                        className={`bg-gray-100/30 dark:bg-gray-800/20 border-l-4 border-secondary animate-in slide-in-from-top-1 duration-200 ${
-                          selectedRowCodigo === item.codigo ? 'ring-1 ring-secondary/40 bg-blue-50/50 dark:bg-blue-900/15' : ''
-                        }`}
-                      >
-                        <td className="px-3 py-1 text-[10px] font-mono sticky left-0 z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)]">
-                          <div className="flex items-center gap-2 pl-4">
-                            <CornerDownRight className="w-3 h-3 text-neutral opacity-50" />
-                            {comp.codigo}
-                          </div>
-                        </td>
-                        <td
-                          style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
-                          className="px-3 py-1 text-[10px] sticky left-[110px] z-[50] bg-gray-100/95 dark:bg-[#2a2a2a] border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_8px_rgba(0,0,0,0.12)] truncate italic text-neutral"
-                        >
-                          {comp.descricao}
-                        </td>
-                        <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400 border-l border-gray-100 dark:border-gray-800">
-                          {comp.estoqueAtual}
-                        </td>
-                        <td className="px-3 py-1 text-center font-medium text-[10px] text-gray-600 dark:text-gray-400">
-                          {comp.totalPedido === 0 ? '-' : comp.totalPedido}
-                        </td>
-                        <td className={`px-3 py-1 text-center font-bold text-[10px] border-r border-gray-100 dark:border-gray-800 ${comp.falta < 0 ? 'text-highlight' : 'text-green-600'}`}>
-                          {formatCellNum(comp.falta)}
-                        </td>
-
-                        {visibleColumns.map(col => {
-                          const cRd = comp.routeData[col.key] || { pedido: 0, falta: 0 };
-                          return (
-                            <React.Fragment key={col.key}>
-                              <td
-                                data-tooltip-cell
-                                onClick={(e) => handlePClick(e, comp, col.key, col.label)}
-                                className="px-2 py-1 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600/70 font-bold text-[10px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
-                              >
-                                {formatCellNum(cRd.pedido)}
-                              </td>
-                              <td className={`px-2 py-1 text-center font-bold text-[10px] ${cRd.falta < 0 ? 'text-highlight/70' : 'text-gray-300'}`}>
-                                {formatCellNum(cRd.falta)}
-                              </td>
-                            </React.Fragment>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </React.Fragment>
+                      {row.descricao}
+                    </td>
+                    <td className="px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800">{row.estoqueAtual}</td>
+                    <td className="px-3 py-1.5 text-center font-medium text-[11px]">{row.totalPedido === 0 ? '-' : row.totalPedido}</td>
+                    <td className="px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800">
+                      {row.kind === 'item' ? (Number(row.falta) < 0 ? formatCellNum(row.falta) : '-') : formatCellNum(row.falta)}
+                    </td>
+                    {leftColPadding > 0 && <td colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
+                    {virtualColumns.map((vCol) => {
+                      const col = visibleColumns[vCol.index];
+                      const rd = row.routeData[col.key] || { pedido: 0, falta: 0 };
+                      return (
+                        <React.Fragment key={`${row.key}-${col.key}`}>
+                          <td
+                            data-tooltip-cell
+                            onClick={(e) => handlePClick(e, row as unknown as ProductConsolidated, col.key, col.label)}
+                            className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
+                            style={{ width: `${Math.max(40, vCol.size / 2)}px` }}
+                          >
+                            {formatCellNum(rd.pedido)}
+                          </td>
+                          <td
+                            className={`px-2 py-1.5 text-center font-bold text-[11px] ${
+                              rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'
+                            }`}
+                            style={{ width: `${Math.max(40, vCol.size / 2)}px` }}
+                          >
+                            {row.kind === 'item' && row.isShelf ? '-' : formatCellNum(rd.falta)}
+                          </td>
+                        </React.Fragment>
+                      );
+                    })}
+                    {rightColPadding > 0 && <td colSpan={2} style={{ width: `${rightColPadding}px`, minWidth: `${rightColPadding}px` }} />}
+                  </tr>
                 );
               })}
+              {bottomRowPadding > 0 && (
+                <tr>
+                  <td colSpan={totalColSpan} style={{ height: `${bottomRowPadding}px`, padding: 0, border: 0 }} />
+                </tr>
+              )}
               {sortedData.length === 0 && (
                 <tr>
                   <td colSpan={totalColSpan} className="px-4 py-16 text-center text-neutral">

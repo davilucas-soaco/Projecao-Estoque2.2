@@ -326,6 +326,28 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     XLSX.writeFile(wb, 'romaneio_projecao.xlsx');
   };
 
+  const tableRows = useMemo(
+    () =>
+      filteredRows.map((row, idx) => (
+        <tr
+          key={`${row.idChave}-${idx}`}
+          className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-[#f4f7fc] dark:bg-[#2a2a2a]'} hover:bg-[#e8eefb] dark:hover:bg-gray-800/30 transition-colors`}
+        >
+          {COLUMNS.map((col) => (
+            <td
+              key={`${row.idChave}-${col.key}-${idx}`}
+              style={{ width: `${columnWidths[col.key]}px`, minWidth: `${columnWidths[col.key]}px`, maxWidth: `${columnWidths[col.key]}px` }}
+              className="px-3 py-2 border-b border-[#e2e8f4] dark:border-gray-800 whitespace-nowrap truncate"
+              title={col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
+            >
+              {col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
+            </td>
+          ))}
+        </tr>
+      )),
+    [filteredRows, columnWidths]
+  );
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-[#cfd8ea] dark:border-gray-700 overflow-hidden shadow-sm bg-[#f7f9fd] dark:bg-[#252525]">
@@ -418,23 +440,7 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
               </tr>
             </thead>
             <tbody className="text-gray-800 dark:text-gray-300">
-              {filteredRows.map((row, idx) => (
-                <tr
-                  key={`${row.idChave}-${idx}`}
-                  className={`${idx % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-[#f4f7fc] dark:bg-[#2a2a2a]'} hover:bg-[#e8eefb] dark:hover:bg-gray-800/30 transition-colors`}
-                >
-                  {COLUMNS.map((col) => (
-                    <td
-                      key={`${row.idChave}-${col.key}-${idx}`}
-                      style={{ width: `${columnWidths[col.key]}px`, minWidth: `${columnWidths[col.key]}px`, maxWidth: `${columnWidths[col.key]}px` }}
-                      className="px-3 py-2 border-b border-[#e2e8f4] dark:border-gray-800 whitespace-nowrap truncate"
-                      title={col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
-                    >
-                      {col.key === 'previsaoAtual' ? formatDateBR(safeStr(row.previsaoAtual)) : safeStr(row[col.key])}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              {tableRows}
               {filteredRows.length === 0 && (
                 <tr>
                   <td colSpan={COLUMNS.length} className="px-4 py-12 text-center text-neutral italic">
