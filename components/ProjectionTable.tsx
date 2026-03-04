@@ -90,6 +90,11 @@ const escapeHtml = (value: unknown): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 
+const CODE_COL_W = 110;
+const STOCK_COL_W = 96;
+const PEDIDO_COL_W = 96;
+const FALTA_COL_W = 96;
+
 const ProjectionTable: React.FC<Props> = ({
   data,
   orders,
@@ -704,7 +709,26 @@ const ProjectionTable: React.FC<Props> = ({
       })
       .join('');
 
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body><table style="border-collapse:collapse;table-layout:fixed;"><colgroup>${colGroup}</colgroup><tr>${topHeader}</tr><tr>${secondHeader}</tr>${bodyRows}</table></body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8" />
+<!--[if gte mso 9]><xml>
+<x:ExcelWorkbook xmlns:x="urn:schemas-microsoft-com:office:excel">
+<x:ExcelWorksheets>
+<x:ExcelWorksheet>
+<x:Name>Projeção</x:Name>
+<x:WorksheetOptions>
+<x:FreezePanes/>
+<x:FrozenNoSplit/>
+<x:SplitHorizontal>2</x:SplitHorizontal>
+<x:TopRowBottomPane>2</x:TopRowBottomPane>
+<x:SplitVertical>5</x:SplitVertical>
+<x:LeftColumnRightPane>5</x:LeftColumnRightPane>
+<x:ActivePane>0</x:ActivePane>
+</x:WorksheetOptions>
+</x:ExcelWorksheet>
+</x:ExcelWorksheets>
+</x:ExcelWorkbook>
+</xml><![endif]-->
+</head><body><table style="border-collapse:collapse;table-layout:fixed;"><colgroup>${colGroup}</colgroup><tr>${topHeader}</tr><tr>${secondHeader}</tr>${bodyRows}</table></body></html>`;
     const blob = new Blob([`\ufeff${html}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -734,6 +758,7 @@ const ProjectionTable: React.FC<Props> = ({
                 <th
                   onClick={(e) => handleSort('codigo', e.ctrlKey)}
                   className="px-3 py-2 sticky left-0 top-0 z-[80] bg-primary border-b border-white/10 w-[110px] shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors"
+                  style={{ width: `${CODE_COL_W}px`, minWidth: `${CODE_COL_W}px` }}
                 >
                   <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold">
                     <span>Código</span>
@@ -759,7 +784,8 @@ const ProjectionTable: React.FC<Props> = ({
                 </th>
                 <th
                   onClick={(e) => handleSort('estoqueAtual', e.ctrlKey)}
-                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-l border-white/10 sticky top-0 z-[70] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-l border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  style={{ left: `${CODE_COL_W + descriptionWidth}px`, width: `${STOCK_COL_W}px`, minWidth: `${STOCK_COL_W}px` }}
                 >
                   <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
                     <span>Estoque</span>
@@ -768,7 +794,8 @@ const ProjectionTable: React.FC<Props> = ({
                 </th>
                 <th
                   onClick={(e) => handleSort('totalPedido', e.ctrlKey)}
-                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 sticky top-0 z-[70] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  style={{ left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W}px`, width: `${PEDIDO_COL_W}px`, minWidth: `${PEDIDO_COL_W}px` }}
                 >
                   <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
                     <span>Pedido</span>
@@ -777,7 +804,8 @@ const ProjectionTable: React.FC<Props> = ({
                 </th>
                 <th
                   onClick={(e) => handleSort('pendenteProducao', e.ctrlKey)}
-                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-r border-white/10 sticky top-0 z-[70] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-r border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  style={{ left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W + PEDIDO_COL_W}px`, width: `${FALTA_COL_W}px`, minWidth: `${FALTA_COL_W}px` }}
                 >
                   <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
                     <span>Falta</span>
@@ -855,7 +883,10 @@ const ProjectionTable: React.FC<Props> = ({
                     onClick={(e) => {
                       e.stopPropagation();
                       if (isItem) setSelectedRowCodigo((prev) => (prev === row.key ? null : row.key));
-                      else if (row.parentCodigo) setSelectedRowCodigo((prev) => (prev === row.parentCodigo ? null : row.parentCodigo));
+                      else if (row.parentCodigo) {
+                        const parentCodigo = row.parentCodigo;
+                        setSelectedRowCodigo((prev) => (prev === parentCodigo ? null : parentCodigo));
+                      }
                     }}
                     className={`${row.rowBgClass} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group cursor-pointer ${
                       isSelected ? 'ring-1 ring-secondary/40 bg-blue-50/70 dark:bg-blue-900/20' : ''
@@ -890,11 +921,20 @@ const ProjectionTable: React.FC<Props> = ({
                       className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${
                         Number(row.estoqueAtual) < 0 ? 'text-[#B06A66]' : ''
                       }`}
+                      style={{ position: 'sticky', left: `${CODE_COL_W + descriptionWidth}px`, zIndex: 38, background: 'inherit', width: `${STOCK_COL_W}px`, minWidth: `${STOCK_COL_W}px` }}
                     >
                       {row.estoqueAtual}
                     </td>
-                    <td className="px-3 py-1.5 text-center font-medium text-[11px]">{row.totalPedido === 0 ? '-' : row.totalPedido}</td>
-                    <td className="px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800">
+                    <td
+                      className="px-3 py-1.5 text-center font-medium text-[11px]"
+                      style={{ position: 'sticky', left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W}px`, zIndex: 38, background: 'inherit', width: `${PEDIDO_COL_W}px`, minWidth: `${PEDIDO_COL_W}px` }}
+                    >
+                      {row.totalPedido === 0 ? '-' : row.totalPedido}
+                    </td>
+                    <td
+                      className="px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800"
+                      style={{ position: 'sticky', left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W + PEDIDO_COL_W}px`, zIndex: 38, background: 'inherit', width: `${FALTA_COL_W}px`, minWidth: `${FALTA_COL_W}px` }}
+                    >
                       {row.kind === 'item' ? (Number(row.falta) < 0 ? formatCellNum(row.falta) : '-') : formatCellNum(row.falta)}
                     </td>
                     {leftColPadding > 0 && <td colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
