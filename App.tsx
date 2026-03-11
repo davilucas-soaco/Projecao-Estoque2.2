@@ -97,6 +97,7 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [projectionFilterRotas, setProjectionFilterRotas] = useState<Set<string>>(new Set());
   const [projectionFilterSetores, setProjectionFilterSetores] = useState<Set<string>>(new Set());
+  const [projectionFilterCategorias, setProjectionFilterCategorias] = useState<Set<string>>(new Set());
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
   const [showErpPanel, setShowErpPanel] = useState(false);
@@ -507,6 +508,10 @@ const App: React.FC = () => {
     startTransition(() => setProjectionFilterSetores(next));
   }, []);
 
+  const handleProjectionCategoriasChange = useCallback((next: Set<string>) => {
+    startTransition(() => setProjectionFilterCategorias(next));
+  }, []);
+
   const handleProjectionDatesChange = useCallback((next: Set<string>) => {
     startTransition(() => setSelectedDateKeys(next));
   }, []);
@@ -553,13 +558,13 @@ const App: React.FC = () => {
   const getDataForPdf = useCallback(
     (considerarRequisicoes: boolean) => {
       const ords = projectionSubMode === 'SIMULADO' ? ordersSimulation : orders;
-      return buildConsolidatedData(ords, stock, shelfFicha, searchTerm, dateColumns, todayStart, {
+      return buildConsolidatedData(ords, stock, shelfFicha, searchTerm, allDateColumns, todayStart, {
         considerarRequisicoes,
         flattenShelfProducts: true,
         soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       });
     },
-    [projectionSubMode, orders, ordersSimulation, stock, shelfFicha, searchTerm, dateColumns, todayStart, soMoveisHorizonInfo.endDate]
+    [projectionSubMode, orders, ordersSimulation, stock, shelfFicha, searchTerm, allDateColumns, todayStart, soMoveisHorizonInfo.endDate]
   );
 
   if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
@@ -667,6 +672,8 @@ const App: React.FC = () => {
               onSelectedRotasChange={handleProjectionRotasChange}
               selectedSetores={projectionFilterSetores}
               onSelectedSetoresChange={handleProjectionSetoresChange}
+              selectedCategorias={projectionFilterCategorias}
+              onSelectedCategoriasChange={handleProjectionCategoriasChange}
               dateOptions={selectableDateOptions}
               selectedDateKeys={selectedDateKeys}
               onSelectedDateKeysChange={handleProjectionDatesChange}
@@ -683,6 +690,7 @@ const App: React.FC = () => {
               projectionSource={projection}
               selectedRotas={projectionFilterRotas}
               selectedSetores={projectionFilterSetores}
+              selectedCategorias={projectionFilterCategorias}
             />
           </div>
         </div>
@@ -735,6 +743,8 @@ const App: React.FC = () => {
                   onSelectedRotasChange={handleProjectionRotasChange}
                   selectedSetores={projectionFilterSetores}
                   onSelectedSetoresChange={handleProjectionSetoresChange}
+                  selectedCategorias={projectionFilterCategorias}
+                  onSelectedCategoriasChange={handleProjectionCategoriasChange}
                   dateOptions={selectableDateOptions}
                   selectedDateKeys={selectedDateKeys}
                   onSelectedDateKeysChange={handleProjectionDatesChange}
@@ -751,6 +761,7 @@ const App: React.FC = () => {
                   projectionSource={simulationState.data}
                   selectedRotas={projectionFilterRotas}
                   selectedSetores={projectionFilterSetores}
+                  selectedCategorias={projectionFilterCategorias}
                 />
               </>
             )}

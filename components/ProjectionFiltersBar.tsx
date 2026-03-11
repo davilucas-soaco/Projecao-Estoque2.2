@@ -17,6 +17,8 @@ interface ProjectionFiltersBarProps {
   onSelectedRotasChange: (v: Set<string>) => void;
   selectedSetores: Set<string>;
   onSelectedSetoresChange: (v: Set<string>) => void;
+  selectedCategorias: Set<string>;
+  onSelectedCategoriasChange: (v: Set<string>) => void;
   dateOptions: DateOption[];
   selectedDateKeys: Set<string>;
   onSelectedDateKeysChange: (v: Set<string>) => void;
@@ -31,6 +33,8 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
   onSelectedRotasChange,
   selectedSetores,
   onSelectedSetoresChange,
+  selectedCategorias,
+  onSelectedCategoriasChange,
   dateOptions,
   selectedDateKeys,
   onSelectedDateKeysChange,
@@ -73,6 +77,15 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
       if (s) set.add(s);
     });
     return Array.from(set).sort();
+  }, [projectionSource]);
+
+  const categoriasDisponiveis = React.useMemo(() => {
+    const set = new Set<string>();
+    projectionSource.forEach((r) => {
+      const cat = (r.tipoF ?? '').trim();
+      if (cat) set.add(cat);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
   }, [projectionSource]);
 
   const filteredDateOptions = useMemo(() => {
@@ -134,6 +147,16 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
             onSelectionChange={onSelectedSetoresChange}
             placeholder="Buscar setor..."
             emptyMessage="Nenhum setor encontrado"
+          />
+        )}
+        {categoriasDisponiveis.length > 0 && (
+          <MultiSelectWithSearch
+            label="Categorias"
+            options={categoriasDisponiveis}
+            selected={selectedCategorias}
+            onSelectionChange={onSelectedCategoriasChange}
+            placeholder="Buscar categoria..."
+            emptyMessage="Nenhuma categoria encontrada"
           />
         )}
           </div>

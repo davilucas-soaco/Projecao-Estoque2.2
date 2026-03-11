@@ -1,7 +1,16 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProductConsolidated, Order, ComponentData, ProjecaoImportada } from '../types';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ROUTE_SO_MOVEIS, extractRotasFromProjection, dateToKey, normalizeText } from '../utils';
+import {
+  ROUTE_SO_MOVEIS,
+  CATEGORY_ENTREGA_GT,
+  CATEGORY_RETIRADA,
+  CATEGORY_REQUISICAO,
+  extractRotasFromProjection,
+  dateToKey,
+  normalizeText,
+  getCategoriaFromObservacoes,
+} from '../utils';
 import {
   AlertTriangle,
   TrendingDown,
@@ -41,6 +50,7 @@ interface Props {
   projectionSource?: ProjecaoImportada[];
   selectedRotas?: Set<string>;
   selectedSetores?: Set<string>;
+  selectedCategorias?: Set<string>;
 }
 
 type RouteValueField = 'pedido' | 'falta';
@@ -94,6 +104,16 @@ const CODE_COL_W = 110;
 const STOCK_COL_W = 96;
 const PEDIDO_COL_W = 96;
 const FALTA_COL_W = 96;
+const DESTINO_CATEGORIAS_ESPECIAIS = new Set<string>([
+  normalizeText(CATEGORY_REQUISICAO),
+  normalizeText(CATEGORY_ENTREGA_GT),
+  normalizeText(CATEGORY_RETIRADA),
+]);
+
+const normalizeCategoria = (value: string): string => {
+  const categoria = getCategoriaFromObservacoes(value) || value;
+  return normalizeText(categoria);
+};
 
 const ProjectionTable: React.FC<Props> = ({
   data,
@@ -106,6 +126,7 @@ const ProjectionTable: React.FC<Props> = ({
   projectionSource = [],
   selectedRotas = new Set(),
   selectedSetores = new Set(),
+  selectedCategorias = new Set(),
 }) => {
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [descriptionWidth, setDescriptionWidth] = useState(280);
@@ -184,7 +205,8 @@ const ProjectionTable: React.FC<Props> = ({
     e: React.MouseEvent,
     item: ProductConsolidated | ComponentData,
     colKey: string,
-    colLabel: string
+    colLabel: string,
+    highlightCodigo: string
   ) => {
     e.stopPropagation();
     const rd = item.routeData[colKey];
@@ -200,13 +222,15 @@ const ProjectionTable: React.FC<Props> = ({
       valor: rd.pedido,
       anchorRect: rect,
     });
+    setSelectedRowCodigo(highlightCodigo);
   };
 
   const handleFClick = (
     e: React.MouseEvent,
     item: ProductConsolidated | ComponentData,
     colKey: string,
-    colLabel: string
+    colLabel: string,
+    highlightCodigo: string
   ) => {
     e.stopPropagation();
     const rd = item.routeData[colKey];
@@ -225,6 +249,7 @@ const ProjectionTable: React.FC<Props> = ({
       valor: Math.abs(falta),
       anchorRect: rect,
     });
+    setSelectedRowCodigo(highlightCodigo);
   };
 
   const getRouteDisplayValue = (
@@ -294,6 +319,18 @@ const ProjectionTable: React.FC<Props> = ({
     return map;
   }, [projectionSource]);
 
+  const codigoToCategorias = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    projectionSource.forEach((r) => {
+      const cod = (r.cod ?? '').trim().toUpperCase();
+      const categoria = (r.tipoF ?? '').trim();
+      if (!cod || !categoria) return;
+      if (!map.has(cod)) map.set(cod, new Set());
+      map.get(cod)!.add(categoria);
+    });
+    return map;
+  }, [projectionSource]);
+
   const productHasRota = (codigo: string, rotas: Set<string>): boolean => {
     if (rotas.size === 0) return true;
     const prodRotas = codigoToRotas.get(codigo.trim().toUpperCase());
@@ -332,15 +369,73 @@ const ProjectionTable: React.FC<Props> = ({
     return false;
   };
 
+  const productHasCategoria = (codigo: string, categorias: Set<string>): boolean => {
+    if (categorias.size === 0) return true;
+    const prodCategorias = codigoToCategorias.get(codigo.trim().toUpperCase());
+    if (!prodCategorias) return false;
+    for (const c of categorias) {
+      if (prodCategorias.has(c)) return true;
+    }
+    return false;
+  };
+
+  const selectedDestinoCategoriasNorm = useMemo(() => {
+    const set = new Set<string>();
+    selectedCategorias.forEach((categoria) => {
+      const norm = normalizeCategoria(categoria);
+      if (DESTINO_CATEGORIAS_ESPECIAIS.has(norm)) set.add(norm);
+    });
+    return set;
+  }, [selectedCategorias]);
+
+  const dateKeysForSelectedCategorias = useMemo(() => {
+    if (selectedDestinoCategoriasNorm.size === 0) return null;
+    const keys = new Set<string>();
+
+    const collectFromRouteData = (
+      routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number; numeroPedido?: string }[] }>
+    ) => {
+      for (const [colKey, rd] of Object.entries(routeData ?? {})) {
+        if (!rd || (rd.pedido ?? 0) <= 0) continue;
+
+        if (colKey === ROUTE_SO_MOVEIS) {
+          if (selectedDestinoCategoriasNorm.has(normalizeText(CATEGORY_REQUISICAO))) {
+            keys.add(colKey);
+          }
+          continue;
+        }
+
+        const breakdown = rd.breakdown ?? [];
+        if (breakdown.length === 0) continue;
+        const matchesCategoria = breakdown.some((b) => selectedDestinoCategoriasNorm.has(normalizeCategoria(b.destino ?? '')));
+        if (matchesCategoria) keys.add(colKey);
+      }
+    };
+
+    for (const item of data) {
+      const itemMatchesCategoria =
+        productHasCategoria(item.codigo, selectedCategorias) ||
+        (item.isShelf && item.components?.some((comp) => productHasCategoria(comp.codigo, selectedCategorias)));
+      if (!itemMatchesCategoria) continue;
+      collectFromRouteData(item.routeData);
+      if (item.isShelf && item.components?.length) {
+        for (const comp of item.components) collectFromRouteData(comp.routeData);
+      }
+    }
+
+    return keys;
+  }, [data, selectedCategorias, selectedDestinoCategoriasNorm, productHasCategoria]);
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (tooltip && tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
         const target = e.target as HTMLElement;
         if (!target.closest('td[data-tooltip-cell]')) {
           setTooltip(null);
+          setSelectedRowCodigo(null);
         }
       }
-      if (selectedRowCodigo && tableContainerRef.current && !tableContainerRef.current.contains(e.target as Node)) {
+      if (!tooltip && selectedRowCodigo && tableContainerRef.current && !tableContainerRef.current.contains(e.target as Node)) {
         setSelectedRowCodigo(null);
       }
       if (routeValueFilterMenu && valueFilterMenuRef.current && !valueFilterMenuRef.current.contains(e.target as Node)) {
@@ -413,29 +508,39 @@ const ProjectionTable: React.FC<Props> = ({
   ];
   const rotaFilterActive = selectedRotas.size > 0;
 
-  const visibleColumns = useMemo(() => {
-    if (rotaFilterActive) {
-      const cols: { key: string; label: string; isSoMoveis: false }[] = [];
-      const overdueDates = Array.from(dateKeysForSelectedRotas?.overdueDates ?? []);
-      if (overdueDates.length > 0) {
-        const label =
-          overdueDates.length <= 2
-            ? overdueDates.join(' • ')
-            : `${overdueDates[0]} +${overdueDates.length - 1}`;
-        cols.push({ key: 'ATRASADOS', label, isSoMoveis: false });
-      }
-      const formatDateKey = (key: string) => {
-        const [yy, mm, dd] = key.split('-');
-        return `${dd}/${mm}/${yy.slice(-2)}`;
-      };
-      for (const key of dateKeysForSelectedRotas?.keys ?? []) {
-        const col = dateColumns.find((c) => c.key === key);
-        cols.push({ key, label: col?.label ?? formatDateKey(key), isSoMoveis: false });
-      }
-      return cols;
+  const rotaScopedColumns = useMemo(() => {
+    if (!rotaFilterActive) return null;
+    const cols: { key: string; label: string; isSoMoveis: false }[] = [];
+    const overdueDates = Array.from(dateKeysForSelectedRotas?.overdueDates ?? []);
+    if (overdueDates.length > 0) {
+      const label =
+        overdueDates.length <= 2
+          ? overdueDates.join(' • ')
+          : `${overdueDates[0]} +${overdueDates.length - 1}`;
+      cols.push({ key: 'ATRASADOS', label, isSoMoveis: false });
     }
-    return allColumns;
-  }, [rotaFilterActive, allColumns, dateKeysForSelectedRotas, dateColumns]);
+    const formatDateKey = (key: string) => {
+      const [yy, mm, dd] = key.split('-');
+      return `${dd}/${mm}/${yy.slice(-2)}`;
+    };
+    for (const key of dateKeysForSelectedRotas?.keys ?? []) {
+      const col = dateColumns.find((c) => c.key === key);
+      cols.push({ key, label: col?.label ?? formatDateKey(key), isSoMoveis: false });
+    }
+    return cols;
+  }, [rotaFilterActive, dateKeysForSelectedRotas, dateColumns]);
+
+  const visibleColumns = useMemo(() => {
+    const baseColumns = rotaScopedColumns ?? allColumns;
+
+    // Filtro de colunas por categoria só é aplicado para categorias de destino (Requisição, GT, Retirada).
+    if (!dateKeysForSelectedCategorias || dateKeysForSelectedCategorias.size === 0) return baseColumns;
+
+    const filtered = baseColumns.filter((c) => dateKeysForSelectedCategorias.has(c.key));
+
+    // Fallback seguro para não ocultar dados por inconsistência entre tipoF x destino consolidado.
+    return filtered.length > 0 ? filtered : baseColumns;
+  }, [rotaScopedColumns, allColumns, dateKeysForSelectedCategorias]);
 
   const dataFilteredByColumns = useMemo(() => {
     let result = data;
@@ -459,8 +564,17 @@ const ProjectionTable: React.FC<Props> = ({
         return false;
       });
     }
+    if (selectedCategorias.size > 0) {
+      result = result.filter((item) => {
+        if (productHasCategoria(item.codigo, selectedCategorias)) return true;
+        if (item.isShelf && item.components?.length) {
+          return item.components.some((comp) => productHasCategoria(comp.codigo, selectedCategorias));
+        }
+        return false;
+      });
+    }
     return result;
-  }, [data, selectedRotas, selectedSetores, codigoToSetores, codigoToRotas]);
+  }, [data, selectedRotas, selectedSetores, selectedCategorias, codigoToSetores, codigoToRotas, codigoToCategorias]);
 
   const activeRouteValueFilterKeys = useMemo(
     () => Object.keys(routeValueFilters).filter((k) => (routeValueFilters[k]?.size ?? 0) > 0),
@@ -492,7 +606,11 @@ const ProjectionTable: React.FC<Props> = ({
   }, [dataFilteredByColumns, activeRouteValueFilterKeys, routeValueFilters]);
 
   const autoExpandedShelves = useMemo(() => {
-    const hasFilter = selectedRotas.size > 0 || selectedSetores.size > 0 || activeRouteValueFilterKeys.length > 0;
+    const hasFilter =
+      selectedRotas.size > 0 ||
+      selectedSetores.size > 0 ||
+      selectedCategorias.size > 0 ||
+      activeRouteValueFilterKeys.length > 0;
     if (!hasFilter) return new Set<string>();
     const set = new Set<string>();
     for (const item of dataFilteredByValues) {
@@ -503,12 +621,13 @@ const ProjectionTable: React.FC<Props> = ({
           productHasRota(comp.codigo, selectedRotas) ||
           productHasSelectedRotaInBreakdown(comp);
         const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
-        return okRota && okSetor && rowMatchesRouteValueFilters(comp);
+        const okCategoria = selectedCategorias.size === 0 || productHasCategoria(comp.codigo, selectedCategorias);
+        return okRota && okSetor && okCategoria && rowMatchesRouteValueFilters(comp);
       });
       if (hasMatchingComponent) set.add(item.codigo);
     }
     return set;
-  }, [dataFilteredByValues, selectedRotas, selectedSetores, activeRouteValueFilterKeys, routeValueFilters]);
+  }, [dataFilteredByValues, selectedRotas, selectedSetores, selectedCategorias, activeRouteValueFilterKeys, routeValueFilters]);
 
   const sortedData = useMemo(() => {
     if (sortCriteria.length === 0) return dataFilteredByValues;
@@ -552,12 +671,13 @@ const ProjectionTable: React.FC<Props> = ({
           productHasRota(comp.codigo, selectedRotas) ||
           productHasSelectedRotaInBreakdown(comp);
         const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
-        return okRota && okSetor && rowMatchesRouteValueFilters(comp);
+        const okCategoria = selectedCategorias.size === 0 || productHasCategoria(comp.codigo, selectedCategorias);
+        return okRota && okSetor && okCategoria && rowMatchesRouteValueFilters(comp);
       });
       map.set(item.codigo, filtered);
     }
     return map;
-  }, [sortedData, selectedRotas, selectedSetores, activeRouteValueFilterKeys, routeValueFilters, dateKeysForSelectedRotas]);
+  }, [sortedData, selectedRotas, selectedSetores, selectedCategorias, activeRouteValueFilterKeys, routeValueFilters, dateKeysForSelectedRotas]);
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
@@ -916,6 +1036,7 @@ const ProjectionTable: React.FC<Props> = ({
                     ref={rowVirtualizer.measureElement}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (tooltip) return;
                       if (isItem) setSelectedRowCodigo((prev) => (prev === row.key ? null : row.key));
                       else if (row.parentCodigo) {
                         const parentCodigo = row.parentCodigo;
@@ -979,7 +1100,15 @@ const ProjectionTable: React.FC<Props> = ({
                         <React.Fragment key={`${row.key}-${col.key}`}>
                           <td
                             data-tooltip-cell
-                            onClick={(e) => handlePClick(e, row as unknown as ProductConsolidated, col.key, col.label)}
+                            onClick={(e) =>
+                              handlePClick(
+                                e,
+                                row as unknown as ProductConsolidated,
+                                col.key,
+                                col.label,
+                                row.kind === 'item' ? row.key : (row.parentCodigo ?? row.key)
+                              )
+                            }
                             className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
                             style={{ width: `${Math.max(40, vCol.size / 2)}px` }}
                           >
@@ -988,7 +1117,14 @@ const ProjectionTable: React.FC<Props> = ({
                           <td
                             data-tooltip-cell
                             onClick={rd.falta < 0 && row.kind === 'item' && !row.isShelf
-                              ? (e) => handleFClick(e, row as unknown as ProductConsolidated, col.key, col.label)
+                              ? (e) =>
+                                  handleFClick(
+                                    e,
+                                    row as unknown as ProductConsolidated,
+                                    col.key,
+                                    col.label,
+                                    row.kind === 'item' ? row.key : (row.parentCodigo ?? row.key)
+                                  )
                               : undefined
                             }
                             className={`px-2 py-1.5 text-center font-bold text-[11px] ${
@@ -1159,7 +1295,10 @@ const ProjectionTable: React.FC<Props> = ({
               <span className="text-[10px] text-gray-600 dark:text-gray-400">{tooltip.colLabel}</span>
             </div>
             <button
-              onClick={() => setTooltip(null)}
+              onClick={() => {
+                setTooltip(null);
+                setSelectedRowCodigo(null);
+              }}
               className="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             >
               <X className="w-4 h-4" />

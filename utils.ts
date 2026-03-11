@@ -226,15 +226,60 @@ function getDestinoFromCategoriaKey(categoriaKey: string): string {
   return categoriaKey;
 }
 
+function getRequisicaoRouteData(item: {
+  routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }>;
+}) {
+  return (
+    item.routeData['Requisição'] ??
+    item.routeData['Requisicao'] ??
+    item.routeData['Só Móveis'] ??
+    item.routeData['So Moveis'] ??
+    item.routeData['SÓ MÓVEIS'] ??
+    item.routeData['SO MOVEIS']
+  );
+}
+
 /** Verifica se um destino do breakdown corresponde ao destino da supervisão (aceita variantes) */
 function destinoMatches(destinoBreakdown: string, destinoSupervisao: string): boolean {
   if (destinoBreakdown === destinoSupervisao) return true;
   const b = (destinoBreakdown ?? '').trim().toLowerCase();
   const s = (destinoSupervisao ?? '').trim().toLowerCase();
+  const normalize = (v: string) =>
+    (v ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  const bn = normalize(b);
+  const sn = normalize(s);
   if (b === s) return true;
   if (destinoSupervisao === SUPERVISAO_RETIRADA && (b === 'retirada' || b.includes('retirada'))) return true;
   if (destinoSupervisao === SUPERVISAO_ENTREGA_GT && b.includes('entrega') && b.includes('teresina')) return true;
-  if (destinoSupervisao === SUPERVISAO_SO_MOVEIS && (b === 'requisição' || b.includes('requisição') || b.includes('requisicao'))) return true;
+  if (
+    destinoSupervisao === SUPERVISAO_SO_MOVEIS &&
+    (
+      b === 'requisição' ||
+      b.includes('requisição') ||
+      b.includes('requisicao') ||
+      bn.includes('so moveis') ||
+      bn.includes('moveis')
+    )
+  ) return true;
+  if (s.startsWith('rota') && b.startsWith('rota')) {
+    const normalizeRota = (v: string) =>
+      v
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s*-\s*\d{2}\/\d{2}\/\d{4}\s*$/, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    const bn = normalizeRota(b);
+    const sn = normalizeRota(s);
+    if (bn === sn) return true;
+    if (bn.includes(sn) || sn.includes(bn)) return true;
+  }
   return false;
 }
 
@@ -275,8 +320,8 @@ export function getSupervisaoCellForItem(
     !!options?.allowedDateKeys &&
     options.allowedDateKeys.size > 0;
 
-  if (destino === SUPERVISAO_SO_MOVEIS && !limitByAllowedDates) {
-    const rd = item.routeData['Requisição'];
+  if (destino === SUPERVISAO_SO_MOVEIS) {
+    const rd = getRequisicaoRouteData(item);
     return rd ? { pedido: Math.round(rd.pedido), falta: Math.round(rd.falta) } : { pedido: 0, falta: 0 };
   }
 
@@ -350,7 +395,9 @@ export function itemHasPedidoInSupervisaoCategorias(
     }
 
     if (destino === SUPERVISAO_SO_MOVEIS) {
-      const rd = item.routeData['Requisição'];
+      const rd = getRequisicaoRouteData(item as {
+        routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }>;
+      });
       if (rd?.pedido > 0) return true;
       continue;
     }

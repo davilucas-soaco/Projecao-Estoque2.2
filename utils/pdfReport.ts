@@ -1030,6 +1030,32 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       limitSpecialToAllowedDates: isSpecialHorizonColumn(colKey),
     });
 
+  const getCellMetrics = (cell: { pedido: number; falta: number }) => {
+    const pedido = Math.max(0, Math.round(cell.pedido || 0));
+    const falta = Math.min(0, Math.round(cell.falta || 0));
+    const faltante = Math.max(0, -falta);
+    const atendido = Math.max(0, pedido - faltante);
+    return { pedido, falta, faltante, atendido };
+  };
+
+  const getDisplayedCell = (cell: { pedido: number; falta: number }) => {
+    const m = getCellMetrics(cell);
+    return { pedido: m.pedido, falta: m.falta };
+  };
+
+  const getStatusFromMetrics = (m: { faltante: number; atendido: number }) => {
+    if (m.faltante > 0 && m.atendido > 0) return 'Parcial';
+    if (m.faltante > 0) return 'Faltando';
+    return 'Em Estoque';
+  };
+
+  const matchesResultadoFilter = (m: { faltante: number; atendido: number }) => {
+    const status = getStatusFromMetrics(m);
+    if (filtroResultado === 'faltantes') return status === 'Faltando' || status === 'Parcial';
+    if (filtroResultado === 'estoque') return m.atendido > 0;
+    return true;
+  };
+
   const flattenRows = (): Array<ProductConsolidated | ComponentData> => {
     const rows: Array<ProductConsolidated | ComponentData> = [];
     for (const item of data) {
@@ -1064,11 +1090,8 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
         ) {
           return false;
         }
-        const cellPrincipal = getSupervisaoCell(item, principalCol.key);
-        const statusFalta = cellPrincipal.falta;
-        const status = statusFalta < 0 ? 'Faltando' : 'Em Estoque';
-        if (filtroResultado === 'faltantes' && status !== 'Faltando') return false;
-        if (filtroResultado === 'estoque' && status !== 'Em Estoque') return false;
+        const principal = getCellMetrics(getSupervisaoCell(item, principalCol.key));
+        if (!matchesResultadoFilter(principal)) return false;
         return true;
       })
       .sort(compareByDescricaoAsc);
@@ -1119,16 +1142,17 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
 
       const cellPrincipal = getSupervisaoCell(item, principalCol.key);
-      const status = cellPrincipal.falta < 0 ? 'Faltando' : 'Em Estoque';
+      const principalCellDisplayed = getDisplayedCell(cellPrincipal);
+      const principalMetricsDisplayed = getCellMetrics(principalCellDisplayed);
+      const status = getStatusFromMetrics(principalMetricsDisplayed);
 
       const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
 
       for (const col of colsBeforePrincipal) {
-        const cell = getSupervisaoCell(item, col.key);
+        const cell = getDisplayedCell(getSupervisaoCell(item, col.key));
         row.push(...formatSupervisaoPF(cell.pedido, cell.falta));
       }
-      const principalCell = getSupervisaoCell(item, principalCol.key);
-      row.push(...formatSupervisaoPF(principalCell.pedido, principalCell.falta), status);
+      row.push(...formatSupervisaoPF(principalCellDisplayed.pedido, principalCellDisplayed.falta), status);
       // Blindagem final de apresentação: se P está vazio/traço, F da mesma coluna também deve ficar vazio/traço.
       const normalizedRow = [...row];
       let pfIdx = 5;
@@ -1244,8 +1268,8 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
             cellData.cell.styles.textColor = [220, 38, 38];
           }
           if (item && colIndex === statusIndex) {
-            const cellPrincipal = getSupervisaoCell(item, principalCol.key);
-            if (cellPrincipal.falta < 0) {
+            const principal = getCellMetrics(getDisplayedCell(getSupervisaoCell(item, principalCol.key)));
+            if (principal.faltante > 0) {
               cellData.cell.styles.textColor = [220, 38, 38];
             } else {
               cellData.cell.styles.textColor = [34, 197, 94];
@@ -1261,7 +1285,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
           if (colIndex >= routeStartIndex && item) {
             const colKey = colIndexToKey[colIndex];
             if (!colKey) return;
-            const cell = getSupervisaoCell(item, colKey);
+            const cell = getDisplayedCell(getSupervisaoCell(item, colKey));
             if (isPCol(colIndex) && cell.pedido > 0) {
               cellData.cell.styles.fillColor = BG_AMARELO_CLARO;
               cellData.cell.styles.textColor = FONT_AMARELO;
