@@ -120,8 +120,9 @@ const ProjectionTable: React.FC<Props> = ({
     codigo: string;
     colKey: string;
     colLabel: string;
+    type: 'P' | 'F';
     breakdown: { destino: string; qty: number; numeroPedido?: string }[];
-    pedido: number;
+    valor: number;
     anchorRect: DOMRect;
   } | null>(null);
   const resizeRef = useRef<number>(0);
@@ -194,8 +195,34 @@ const ProjectionTable: React.FC<Props> = ({
       codigo: item.codigo,
       colKey,
       colLabel,
+      type: 'P',
       breakdown,
-      pedido: rd.pedido,
+      valor: rd.pedido,
+      anchorRect: rect,
+    });
+  };
+
+  const handleFClick = (
+    e: React.MouseEvent,
+    item: ProductConsolidated | ComponentData,
+    colKey: string,
+    colLabel: string
+  ) => {
+    e.stopPropagation();
+    const rd = item.routeData[colKey];
+    const falta = rd?.falta ?? 0;
+    if (!rd || falta >= 0) return;
+    const breakdown = (rd.breakdownFalta && rd.breakdownFalta.length > 0)
+      ? rd.breakdownFalta
+      : [{ destino: 'Total', qty: Math.abs(falta) } as { destino: string; qty: number; numeroPedido?: string }];
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setTooltip({
+      codigo: item.codigo,
+      colKey,
+      colLabel,
+      type: 'F',
+      breakdown,
+      valor: Math.abs(falta),
       anchorRect: rect,
     });
   };
@@ -959,9 +986,14 @@ const ProjectionTable: React.FC<Props> = ({
                             {formatCellNum(rd.pedido)}
                           </td>
                           <td
+                            data-tooltip-cell
+                            onClick={rd.falta < 0 && row.kind === 'item' && !row.isShelf
+                              ? (e) => handleFClick(e, row as unknown as ProductConsolidated, col.key, col.label)
+                              : undefined
+                            }
                             className={`px-2 py-1.5 text-center font-bold text-[11px] ${
                               rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'
-                            }`}
+                            } ${rd.falta < 0 && row.kind === 'item' && !row.isShelf ? 'cursor-pointer hover:bg-orange-100/50 dark:hover:bg-orange-900/20 transition-colors' : ''}`}
                             style={{ width: `${Math.max(40, vCol.size / 2)}px` }}
                           >
                             {row.kind === 'item' && row.isShelf ? '-' : formatCellNum(rd.falta)}
@@ -1134,8 +1166,12 @@ const ProjectionTable: React.FC<Props> = ({
             </button>
           </div>
           <div className="px-4 py-3">
-            <p className="text-[10px] text-neutral mb-2">Quantidade pedida: <strong>{tooltip.pedido}</strong></p>
-            <p className="text-[9px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Destinos:</p>
+            <p className="text-[10px] text-neutral mb-2">
+              {tooltip.type === 'P' ? 'Quantidade pedida:' : 'Quantidade em falta:'} <strong>{tooltip.valor}</strong>
+            </p>
+            <p className="text-[9px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+              {tooltip.type === 'P' ? 'Destinos:' : 'Destinos não atendidos:'}
+            </p>
             <ul className="space-y-2 max-h-56 overflow-auto pr-1">
               {tooltip.breakdown.map((b, i) => (
                 <li key={i} className="text-[11px]">
@@ -1162,7 +1198,7 @@ const ProjectionTable: React.FC<Props> = ({
           ) : (
             <>Colunas por data de saída (<strong>previsao_atual</strong>). Requisições não consideradas.</>
           )}{' '}
-          Clique em <strong>P</strong> para ver o detalhamento por destino.
+          Clique em <strong>P</strong> para ver o detalhamento por destino. Clique em <strong>F</strong> para ver os destinos não atendidos por falta de estoque.
         </span>
       </div>
     </div>

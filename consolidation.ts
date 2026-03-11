@@ -289,6 +289,33 @@ export function buildConsolidatedData(
     ? [CATEGORY_REQUISICAO, 'ATRASADOS', ...dateColumns.filter((c) => !c.isAtrasados).map((c) => c.key)]
     : ['ATRASADOS', ...dateColumns.filter((c) => !c.isAtrasados).map((c) => c.key)];
 
+  function buildBreakdownFalta(
+    breakdown: { destino: string; qty: number; numeroPedido?: string }[],
+    balanceAtStart: number,
+    missing: number
+  ): { destino: string; qty: number; numeroPedido?: string }[] {
+    if (missing <= 0 || !breakdown?.length) return [];
+    const result: { destino: string; qty: number; numeroPedido?: string }[] = [];
+    let remaining = missing;
+    let balance = balanceAtStart;
+    for (const b of breakdown) {
+      if (remaining <= 0) break;
+      const qty = b.qty;
+      if (balance >= qty) {
+        balance -= qty;
+        continue;
+      }
+      const unfulfilled = balance > 0 ? qty - balance : qty;
+      balance = 0;
+      const take = Math.min(unfulfilled, remaining);
+      if (take > 0) {
+        result.push({ destino: b.destino, qty: take, ...(b.numeroPedido ? { numeroPedido: b.numeroPedido } : {}) });
+        remaining -= take;
+      }
+    }
+    return result;
+  }
+
   productMap.forEach((prod) => {
     if (!prod.isShelf) {
       let runningBalance = Math.max(0, prod.estoqueAtual);
@@ -298,6 +325,7 @@ export function buildConsolidatedData(
         const rd = prod.routeData[colKey];
         if (!rd) continue;
         const needed = rd.pedido;
+        const balanceAtStart = runningBalance;
         if (runningBalance >= needed) {
           rd.falta = 0;
           runningBalance -= needed;
@@ -305,6 +333,7 @@ export function buildConsolidatedData(
           const missing = needed - runningBalance;
           rd.falta = -missing;
           totalFalta += rd.falta;
+          rd.breakdownFalta = buildBreakdownFalta(rd.breakdown ?? [], balanceAtStart, missing);
           runningBalance = 0;
         }
       }
@@ -320,6 +349,7 @@ export function buildConsolidatedData(
           const rd = comp.routeData[colKey];
           if (!rd) continue;
           const needed = rd.pedido;
+          const balanceAtStart = runningBalance;
           if (runningBalance >= needed) {
             rd.falta = 0;
             runningBalance -= needed;
@@ -327,6 +357,7 @@ export function buildConsolidatedData(
             const missing = needed - runningBalance;
             rd.falta = -missing;
             compTotalFalta += rd.falta;
+            rd.breakdownFalta = buildBreakdownFalta(rd.breakdown ?? [], balanceAtStart, missing);
             runningBalance = 0;
           }
           if (!prod.routeData[colKey]) prod.routeData[colKey] = { pedido: 0, falta: 0 };

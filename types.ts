@@ -136,6 +136,8 @@ export interface RouteCellData {
   pedido: number;
   falta: number;
   breakdown?: DestinoBreakdown[];
+  /** Destinos/pedidos que não puderam ser atendidos por falta de estoque (para tooltip da coluna F) */
+  breakdownFalta?: DestinoBreakdown[];
 }
 
 export interface ComponentData {
