@@ -379,6 +379,20 @@ const ProjectionTable: React.FC<Props> = ({
     return false;
   };
 
+  const rowHasSelectedCategoriaInRouteData = (
+    row: ProductConsolidated | ComponentData,
+    selectedDestinoNorm: Set<string>
+  ): boolean => {
+    if (selectedDestinoNorm.size === 0) return false;
+    for (const [colKey, rd] of Object.entries(row.routeData ?? {})) {
+      if (!rd || (rd.pedido ?? 0) <= 0) continue;
+      if (colKey === ROUTE_SO_MOVEIS && selectedDestinoNorm.has(normalizeText(CATEGORY_REQUISICAO))) return true;
+      const breakdown = rd.breakdown ?? [];
+      if (breakdown.some((b) => selectedDestinoNorm.has(normalizeCategoria(b.destino ?? '')))) return true;
+    }
+    return false;
+  };
+
   const selectedDestinoCategoriasNorm = useMemo(() => {
     const set = new Set<string>();
     selectedCategorias.forEach((categoria) => {
@@ -567,14 +581,28 @@ const ProjectionTable: React.FC<Props> = ({
     if (selectedCategorias.size > 0) {
       result = result.filter((item) => {
         if (productHasCategoria(item.codigo, selectedCategorias)) return true;
+        if (rowHasSelectedCategoriaInRouteData(item, selectedDestinoCategoriasNorm)) return true;
         if (item.isShelf && item.components?.length) {
-          return item.components.some((comp) => productHasCategoria(comp.codigo, selectedCategorias));
+          return item.components.some(
+            (comp) =>
+              productHasCategoria(comp.codigo, selectedCategorias) ||
+              rowHasSelectedCategoriaInRouteData(comp, selectedDestinoCategoriasNorm)
+          );
         }
         return false;
       });
     }
     return result;
-  }, [data, selectedRotas, selectedSetores, selectedCategorias, codigoToSetores, codigoToRotas, codigoToCategorias]);
+  }, [
+    data,
+    selectedRotas,
+    selectedSetores,
+    selectedCategorias,
+    selectedDestinoCategoriasNorm,
+    codigoToSetores,
+    codigoToRotas,
+    codigoToCategorias,
+  ]);
 
   const activeRouteValueFilterKeys = useMemo(
     () => Object.keys(routeValueFilters).filter((k) => (routeValueFilters[k]?.size ?? 0) > 0),
@@ -615,13 +643,17 @@ const ProjectionTable: React.FC<Props> = ({
     const set = new Set<string>();
     for (const item of dataFilteredByValues) {
       if (!item.isShelf || !item.components?.length) continue;
+      const parentMatchesCategoria = selectedCategorias.size === 0 || productHasCategoria(item.codigo, selectedCategorias);
       const hasMatchingComponent = item.components.some((comp) => {
         const okRota =
           selectedRotas.size === 0 ||
           productHasRota(comp.codigo, selectedRotas) ||
           productHasSelectedRotaInBreakdown(comp);
         const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
-        const okCategoria = selectedCategorias.size === 0 || productHasCategoria(comp.codigo, selectedCategorias);
+        const okCategoria =
+          selectedCategorias.size === 0 ||
+          parentMatchesCategoria ||
+          productHasCategoria(comp.codigo, selectedCategorias);
         return okRota && okSetor && okCategoria && rowMatchesRouteValueFilters(comp);
       });
       if (hasMatchingComponent) set.add(item.codigo);
@@ -665,13 +697,17 @@ const ProjectionTable: React.FC<Props> = ({
     const map = new Map<string, ComponentData[]>();
     for (const item of sortedData) {
       if (!item.isShelf || !item.components?.length) continue;
+      const parentMatchesCategoria = selectedCategorias.size === 0 || productHasCategoria(item.codigo, selectedCategorias);
       const filtered = item.components.filter((comp) => {
         const okRota =
           selectedRotas.size === 0 ||
           productHasRota(comp.codigo, selectedRotas) ||
           productHasSelectedRotaInBreakdown(comp);
         const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
-        const okCategoria = selectedCategorias.size === 0 || productHasCategoria(comp.codigo, selectedCategorias);
+        const okCategoria =
+          selectedCategorias.size === 0 ||
+          parentMatchesCategoria ||
+          productHasCategoria(comp.codigo, selectedCategorias);
         return okRota && okSetor && okCategoria && rowMatchesRouteValueFilters(comp);
       });
       map.set(item.codigo, filtered);
