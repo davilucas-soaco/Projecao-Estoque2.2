@@ -32,19 +32,19 @@ interface SortCriterion {
 type KpiFilterType = 'all' | 'so_moveis' | 'g_teresina' | 'cliente_busca' | 'em_rota' | 'sem_vinculo';
 
 const COLUMNS: { key: ProjectionColumnKey; label: string; width: number }[] = [
-  { key: 'idChave', label: 'idChave', width: 200 },
-  { key: 'observacoes', label: 'Observações', width: 220 },
-  { key: 'rm', label: 'RM', width: 110 },
-  { key: 'pd', label: 'PD', width: 130 },
+  { key: 'idChave', label: 'ID Chave', width: 200 },
+  { key: 'observacoes', label: 'Rota / Observações', width: 240 },
+  { key: 'rm', label: 'Romaneio', width: 110 },
+  { key: 'pd', label: 'Pedido', width: 130 },
   { key: 'cliente', label: 'Cliente', width: 240 },
-  { key: 'cod', label: 'Cod', width: 110 },
-  { key: 'descricaoProduto', label: 'Descrição do produto', width: 360 },
+  { key: 'cod', label: 'Código do Produto', width: 140 },
+  { key: 'descricaoProduto', label: 'Descrição do Produto', width: 360 },
   { key: 'setorProducao', label: 'Setor de Produção', width: 200 },
-  { key: 'requisicaoLojaGrupo', label: 'Requisição de loja do grupo?', width: 220 },
+  { key: 'requisicaoLojaGrupo', label: 'Req. Loja do Grupo', width: 200 },
   { key: 'uf', label: 'UF', width: 80 },
-  { key: 'municipioEntrega', label: 'Município de entrega', width: 200 },
-  { key: 'qtdePendenteReal', label: 'Qtde Pendente Real', width: 170 },
-  { key: 'previsaoAtual', label: 'Previsão atual', width: 140 },
+  { key: 'municipioEntrega', label: 'Município de Entrega', width: 200 },
+  { key: 'qtdePendenteReal', label: 'Qtd. Pendente', width: 150 },
+  { key: 'previsaoAtual', label: 'Previsão Atual', width: 140 },
 ];
 
 const FILTER_KEYS: ProjectionColumnKey[] = [
@@ -74,21 +74,41 @@ const formatDateBR = (value: string): string => {
   return d.toLocaleDateString('pt-BR');
 };
 
+const getFilterDisplayValue = (row: ProjecaoImportada, key: ProjectionColumnKey): string => {
+  if (key === 'previsaoAtual') return formatDateBR(safeStr(row.previsaoAtual)) || '-';
+  const v = safeStr(row[key]).trim();
+  return v || '-';
+};
+
+const rowMatchesKpiFilter = (row: ProjecaoImportada, kpiFilter: KpiFilterType): boolean => {
+  if (kpiFilter === 'all') return true;
+  const categoria = getCategoriaFromObservacoes(row.observacoes);
+  const hasRm = safeStr(row.rm).trim() !== '' && safeStr(row.rm).trim() !== '&nbsp;';
+  const isRotaCategoria = categoria && !isCategoriaEspecial(categoria);
+
+  if (kpiFilter === 'so_moveis') return categoria === CATEGORY_REQUISICAO;
+  if (kpiFilter === 'g_teresina') return categoria === CATEGORY_ENTREGA_GT;
+  if (kpiFilter === 'cliente_busca') return categoria === CATEGORY_RETIRADA;
+  if (kpiFilter === 'em_rota') return Boolean(isRotaCategoria && hasRm);
+  if (kpiFilter === 'sem_vinculo') return categoria === CATEGORY_INSERIR_ROMANEIO;
+  return true;
+};
+
 const OrdersView: React.FC<Props> = ({ projection }) => {
-  const [filters, setFilters] = useState<Record<ProjectionColumnKey, string>>({
-    idChave: '',
-    observacoes: '',
-    rm: '',
-    pd: '',
-    cliente: '',
-    cod: '',
-    descricaoProduto: '',
-    setorProducao: '',
-    requisicaoLojaGrupo: '',
-    uf: '',
-    municipioEntrega: '',
-    qtdePendenteReal: '',
-    previsaoAtual: '',
+  const [filters, setFilters] = useState<Record<ProjectionColumnKey, Set<string>>>({
+    idChave: new Set(),
+    observacoes: new Set(),
+    rm: new Set(),
+    pd: new Set(),
+    cliente: new Set(),
+    cod: new Set(),
+    descricaoProduto: new Set(),
+    setorProducao: new Set(),
+    requisicaoLojaGrupo: new Set(),
+    uf: new Set(),
+    municipioEntrega: new Set(),
+    qtdePendenteReal: new Set(),
+    previsaoAtual: new Set(),
   });
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [kpiFilter, setKpiFilter] = useState<KpiFilterType>('all');
@@ -104,10 +124,27 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
   );
   const [resizingColumn, setResizingColumn] = useState<ProjectionColumnKey | null>(null);
   const [filtersCollapsed, setFiltersCollapsed] = useState(false);
+  const [openFilterKey, setOpenFilterKey] = useState<ProjectionColumnKey | null>(null);
+  const [filterSearch, setFilterSearch] = useState<Record<ProjectionColumnKey, string>>({
+    idChave: '',
+    observacoes: '',
+    rm: '',
+    pd: '',
+    cliente: '',
+    cod: '',
+    descricaoProduto: '',
+    setorProducao: '',
+    requisicaoLojaGrupo: '',
+    uf: '',
+    municipioEntrega: '',
+    qtdePendenteReal: '',
+    previsaoAtual: '',
+  });
   const resizeStartX = useRef<number>(0);
   const resizeStartWidth = useRef<number>(0);
   const didResizeRef = useRef(false);
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const filtersPanelRef = useRef<HTMLDivElement>(null);
   const deferredFilters = useDeferredValue(filters);
   const deferredKpiFilter = useDeferredValue(kpiFilter);
 
@@ -138,6 +175,17 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
       document.body.style.cursor = '';
     };
   }, [resizingColumn]);
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (!openFilterKey) return;
+      if (filtersPanelRef.current && !filtersPanelRef.current.contains(e.target as Node)) {
+        setOpenFilterKey(null);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [openFilterKey]);
 
   const startResizing = (e: React.MouseEvent, key: ProjectionColumnKey) => {
     e.preventDefault();
@@ -171,33 +219,38 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     });
   };
 
+  const rowsAfterKpi = useMemo(
+    () => projection.filter((row) => rowMatchesKpiFilter(row, deferredKpiFilter)),
+    [projection, deferredKpiFilter]
+  );
+
+  const filterOptions = useMemo(() => {
+    const options = {} as Record<ProjectionColumnKey, string[]>;
+    for (const key of FILTER_KEYS) {
+      const set = new Set<string>();
+      for (const row of rowsAfterKpi) {
+        const allowedByOtherFilters = FILTER_KEYS.every((otherKey) => {
+          if (otherKey === key) return true;
+          const selected = filters[otherKey];
+          if (!selected || selected.size === 0) return true;
+          return selected.has(getFilterDisplayValue(row, otherKey));
+        });
+        if (!allowedByOtherFilters) continue;
+        set.add(getFilterDisplayValue(row, key));
+      }
+      options[key] = Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    }
+    return options;
+  }, [rowsAfterKpi, filters]);
+
   const filteredRows = useMemo(() => {
-    let rows = projection.filter((row) =>
+    let rows = rowsAfterKpi.filter((row) =>
       FILTER_KEYS.every((key) => {
-        const term = safeStr(deferredFilters[key]).toLowerCase().trim();
-        if (!term) return true;
-        if (key === 'previsaoAtual') {
-          const br = formatDateBR(safeStr(row.previsaoAtual)).toLowerCase();
-          return br.includes(term) || safeStr(row.previsaoAtual).toLowerCase().includes(term);
-        }
-        return safeStr(row[key]).toLowerCase().includes(term);
+        const selected = deferredFilters[key];
+        if (!selected || selected.size === 0) return true;
+        return selected.has(getFilterDisplayValue(row, key));
       })
     );
-
-    rows = rows.filter((row) => {
-      if (deferredKpiFilter === 'all') return true;
-
-      const categoria = getCategoriaFromObservacoes(row.observacoes);
-      const hasRm = safeStr(row.rm).trim() !== '' && safeStr(row.rm).trim() !== '&nbsp;';
-      const isRotaCategoria = categoria && !isCategoriaEspecial(categoria);
-
-      if (deferredKpiFilter === 'so_moveis') return categoria === CATEGORY_REQUISICAO;
-      if (deferredKpiFilter === 'g_teresina') return categoria === CATEGORY_ENTREGA_GT;
-      if (deferredKpiFilter === 'cliente_busca') return categoria === CATEGORY_RETIRADA;
-      if (deferredKpiFilter === 'em_rota') return Boolean(isRotaCategoria && hasRm);
-      if (deferredKpiFilter === 'sem_vinculo') return categoria === CATEGORY_INSERIR_ROMANEIO;
-      return true;
-    });
 
     if (sortCriteria.length > 0) {
       rows = [...rows].sort((a, b) => {
@@ -225,7 +278,7 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     }
 
     return rows;
-  }, [projection, deferredFilters, sortCriteria, deferredKpiFilter]);
+  }, [rowsAfterKpi, deferredFilters, sortCriteria]);
 
   const rowVirtualizer = useVirtualizer({
     count: filteredRows.length,
@@ -291,26 +344,45 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
   }, [projection]);
 
   const hasActiveFilters = useMemo(
-    () => FILTER_KEYS.some((k) => safeStr(filters[k]).trim() !== '') || kpiFilter !== 'all',
+    () => FILTER_KEYS.some((k) => (filters[k]?.size ?? 0) > 0) || kpiFilter !== 'all',
     [filters, kpiFilter]
   );
 
+  useEffect(() => {
+    setFilters((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of FILTER_KEYS) {
+        const selected = prev[key] ?? new Set<string>();
+        if (selected.size === 0) continue;
+        const available = new Set(filterOptions[key] ?? []);
+        const pruned = new Set(Array.from(selected).filter((v) => available.has(v)));
+        if (pruned.size !== selected.size) {
+          next[key] = pruned;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [filterOptions]);
+
   const clearFilters = () => {
     setFilters({
-      idChave: '',
-      observacoes: '',
-      rm: '',
-      pd: '',
-      cliente: '',
-      cod: '',
-      descricaoProduto: '',
-      setorProducao: '',
-      requisicaoLojaGrupo: '',
-      uf: '',
-      municipioEntrega: '',
-      qtdePendenteReal: '',
-      previsaoAtual: '',
+      idChave: new Set(),
+      observacoes: new Set(),
+      rm: new Set(),
+      pd: new Set(),
+      cliente: new Set(),
+      cod: new Set(),
+      descricaoProduto: new Set(),
+      setorProducao: new Set(),
+      requisicaoLojaGrupo: new Set(),
+      uf: new Set(),
+      municipioEntrega: new Set(),
+      qtdePendenteReal: new Set(),
+      previsaoAtual: new Set(),
     });
+    setOpenFilterKey(null);
     setKpiFilter('all');
   };
 
@@ -341,9 +413,16 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
     XLSX.writeFile(wb, 'romaneio_projecao.xlsx');
   };
 
+  const getFilterSummary = (key: ProjectionColumnKey): string => {
+    const selected = filters[key];
+    if (!selected || selected.size === 0) return 'Todos';
+    if (selected.size === 1) return Array.from(selected)[0];
+    return `${selected.size} selecionados`;
+  };
+
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-[#cfd8ea] dark:border-gray-700 overflow-hidden shadow-sm bg-[#f7f9fd] dark:bg-[#252525]">
+      <div className="rounded-xl border border-[#cfd8ea] dark:border-gray-700 shadow-sm bg-[#f7f9fd] dark:bg-[#252525]">
         <div className="p-4 grid grid-cols-1 md:grid-cols-6 gap-3 bg-[#f1f5ff] dark:bg-[#1a1a1a] border-b border-[#dce3f1] dark:border-gray-800">
           <KpiCard icon={<ShoppingCart className="text-[#1E22AA]" />} label="Total Pedidos Únicos" value={kpis.uniqueTotal} active={kpiFilter === 'all'} onClick={() => setKpiFilter('all')} />
           <KpiCard icon={<Store className="text-emerald-600" />} label="Requisições" value={kpis.reqTotal} subLabel={`No Horizonte: ${kpis.horizonLabel.replace('Horizonte: ', '')}`} subValue={kpis.reqHorizon} active={kpiFilter === 'so_moveis'} onClick={() => setKpiFilter('so_moveis')} />
@@ -353,55 +432,133 @@ const OrdersView: React.FC<Props> = ({ projection }) => {
           <KpiCard icon={<AlertCircle className="text-red-500" />} label="Pedidos Sem Vínculo" value={kpis.semVincTotal} active={kpiFilter === 'sem_vinculo'} onClick={() => setKpiFilter('sem_vinculo')} />
         </div>
 
-        <div className="p-4 border-b border-[#dce3f1] dark:border-gray-800 flex justify-between items-center bg-gradient-to-r from-[#041E42] to-[#1E22AA]">
-          <div className="flex items-center gap-4">
-            <h3 className="font-bold text-sm text-white">Romaneio / Pedidos (Espelho da Projeção)</h3>
-            <div className="text-[10px] text-white/90 bg-white/10 px-2 py-0.5 rounded border border-white/20">
-              Mostrando {filteredRows.length} de {projection.length} itens
+        <div className="p-3 bg-[#eef3fb] dark:bg-[#1a1a1a] border-b border-[#dce3f1] dark:border-gray-700">
+          <div className="rounded-lg border border-[#cfd8ea] dark:border-gray-700 bg-white/70 dark:bg-[#1f1f1f] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-3">
+                <h3 className="font-bold text-sm text-[#041E42] dark:text-gray-100">Romaneio / Pedidos (Espelho da Projeção)</h3>
+                <div className="text-[10px] text-[#4f5f7d] dark:text-gray-300 bg-[#eef3fb] dark:bg-[#252525] px-2 py-0.5 rounded border border-[#d9e2f3] dark:border-gray-700">
+                  Mostrando {filteredRows.length} de {projection.length} itens
+                </div>
+              </div>
+              <div className="flex gap-3 items-center">
+                <button
+                  onClick={() => setFiltersCollapsed((prev) => !prev)}
+                  className="text-[10px] font-black text-[#4f5f7d] dark:text-gray-300 hover:text-[#1E22AA] dark:hover:text-white uppercase flex items-center gap-1.5"
+                >
+                  <ChevronsUpDown className="w-3.5 h-3.5" />
+                  {filtersCollapsed ? 'Mostrar Filtros' : 'Esconder Filtros'}
+                </button>
+                {hasActiveFilters && (
+                  <button
+                    onClick={clearFilters}
+                    className="text-[10px] font-black text-[#1E22AA] dark:text-[#FFAD00] hover:underline uppercase flex items-center gap-1.5"
+                  >
+                    <X className="w-3.5 h-3.5" /> Limpar Filtros
+                  </button>
+                )}
+                <button
+                  onClick={exportExcel}
+                  className="text-[11px] font-bold flex items-center gap-2 bg-white dark:bg-[#252525] text-[#041E42] dark:text-gray-100 border border-[#d3dff5] dark:border-gray-600 px-4 py-1.5 rounded hover:bg-[#f3f6ff] dark:hover:bg-gray-700 transition-colors shadow-sm active:scale-95"
+                >
+                  <Download className="w-3.5 h-3.5" /> Excel
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="flex gap-3 items-center">
-            <button
-              onClick={() => setFiltersCollapsed((prev) => !prev)}
-              className="text-[10px] font-black text-white/90 hover:text-white uppercase flex items-center gap-1.5"
-            >
-              <ChevronsUpDown className="w-3.5 h-3.5" />
-              {filtersCollapsed ? 'Mostrar Filtros' : 'Esconder Filtros'}
-            </button>
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="text-[10px] font-black text-[#FFAD00] hover:text-yellow-300 uppercase flex items-center gap-1.5"
-              >
-                <X className="w-3.5 h-3.5" /> Limpar Filtros
-              </button>
+
+            {!filtersCollapsed && (
+              <div ref={filtersPanelRef} className="relative z-40 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
+                {FILTER_KEYS.map((key) => {
+                  const col = COLUMNS.find((c) => c.key === key)!;
+                  const selected = filters[key] ?? new Set<string>();
+                  const searchTerm = filterSearch[key]?.toLowerCase().trim() ?? '';
+                  const options = filterOptions[key] ?? [];
+                  const visibleOptions = searchTerm
+                    ? options.filter((o) => o.toLowerCase().includes(searchTerm))
+                    : options;
+                  const allSelected = options.length > 0 && selected.size === options.length;
+                  return (
+                    <div key={`f-${col.key}`} className="relative">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-[#4f5f7d] dark:text-gray-400 mb-1">
+                        {col.label}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setOpenFilterKey((prev) => (prev === key ? null : key))}
+                        className="w-full bg-white dark:bg-[#2a2a2a] text-[11px] border border-[#c6d3ee] dark:border-gray-600 rounded px-2 py-1.5 text-left text-gray-900 dark:text-gray-100 transition-all hover:border-[#1E22AA] flex items-center justify-between"
+                      >
+                        <span className="truncate">{getFilterSummary(key)}</span>
+                        <ChevronsUpDown className="w-3 h-3 text-neutral" />
+                      </button>
+                      {openFilterKey === key && (
+                        <div className="absolute z-[120] mt-1 w-full max-h-72 overflow-hidden rounded-lg border border-[#c6d3ee] dark:border-gray-600 bg-white dark:bg-[#252525] shadow-xl">
+                          <div className="p-2 border-b border-[#e3eaf7] dark:border-gray-700">
+                            <input
+                              type="text"
+                              value={filterSearch[key]}
+                              onChange={(e) =>
+                                setFilterSearch((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.value,
+                                }))
+                              }
+                              placeholder={`Pesquisar ${col.label.toLowerCase()}...`}
+                              className="w-full bg-white dark:bg-[#1f1f1f] text-[11px] border border-[#c6d3ee] dark:border-gray-600 rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-[#1E22AA] text-gray-900 dark:text-gray-100"
+                            />
+                            <div className="flex items-center justify-between mt-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFilters((prev) => ({
+                                    ...prev,
+                                    [key]: allSelected ? new Set<string>() : new Set(options),
+                                  }));
+                                }}
+                                className="text-[10px] font-bold text-[#1E22AA] hover:underline"
+                              >
+                                {allSelected ? 'Desmarcar todos' : 'Selecionar todos'}
+                              </button>
+                              <span className="text-[10px] text-neutral">
+                                {selected.size} selecionado(s)
+                              </span>
+                            </div>
+                          </div>
+                          <div className="max-h-48 overflow-auto p-1">
+                            {visibleOptions.map((option) => (
+                              <label
+                                key={`${key}-${option}`}
+                                className="flex items-center gap-2 text-[11px] px-2 py-1 rounded hover:bg-[#eef3fb] dark:hover:bg-gray-700/40 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selected.has(option)}
+                                  onChange={(e) => {
+                                    setFilters((prev) => {
+                                      const next = { ...prev };
+                                      const set = new Set(next[key] ?? []);
+                                      if (e.target.checked) set.add(option);
+                                      else set.delete(option);
+                                      next[key] = set;
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                <span className="truncate">{option}</span>
+                              </label>
+                            ))}
+                            {visibleOptions.length === 0 && (
+                              <p className="text-[11px] text-neutral px-2 py-2 italic">Nenhum valor encontrado.</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
-            <button
-              onClick={exportExcel}
-              className="text-[11px] font-bold flex items-center gap-2 bg-white text-[#041E42] border border-white/30 px-4 py-1.5 rounded hover:bg-[#f3f6ff] transition-colors shadow-sm active:scale-95"
-            >
-              <Download className="w-3.5 h-3.5" /> Excel
-            </button>
           </div>
         </div>
-
-        {!filtersCollapsed && (
-          <div className="p-3 bg-[#eef3fb] dark:bg-[#1a1a1a] border-b border-[#dce3f1] dark:border-gray-700 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
-            {FILTER_KEYS.map((key) => {
-              const col = COLUMNS.find((c) => c.key === key)!;
-              return (
-                <input
-                  key={`f-${col.key}`}
-                  type="text"
-                  placeholder={`Filtro ${col.label}`}
-                  value={filters[col.key]}
-                  onChange={(e) => setFilters((prev) => ({ ...prev, [col.key]: e.target.value }))}
-                  className="bg-white dark:bg-[#2a2a2a] text-[10px] border border-[#c6d3ee] dark:border-gray-600 rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-[#1E22AA] text-gray-900 dark:text-gray-100 transition-all placeholder:text-gray-500"
-                />
-              );
-            })}
-          </div>
-        )}
 
         <div ref={tableContainerRef} className={`overflow-auto ${filtersCollapsed ? 'max-h-[760px]' : 'max-h-[650px]'}`}>
           <table className="w-full text-left text-xs border-separate border-spacing-0 table-fixed">
