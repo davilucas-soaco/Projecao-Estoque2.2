@@ -25,6 +25,8 @@ const dbConfig = {
 
 // CORS (dev): permite localhost e faixas de rede local comuns no Vite (porta 5257)
 const allowedOriginPatterns = [
+  /^https?:\/\/[^/]+:3000$/,
+  /^https?:\/\/[^/]+:5257$/,
   /^http:\/\/localhost:5257$/,
   /^http:\/\/127\.0\.0\.1:5257$/,
   /^http:\/\/170\.84\.146\.147:5257$/,
@@ -34,13 +36,17 @@ const allowedOriginPatterns = [
   /^http:\/\/172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}:5257$/,
 ];
 
+const corsAllowAll = String(process.env.CORS_ALLOW_ALL || '').toLowerCase() === 'true';
+
 app.use(
   cors({
     origin(origin, callback) {
       // Permite requests sem Origin (curl, health checks locais)
       if (!origin) return callback(null, true);
+      if (corsAllowAll) return callback(null, true);
       const allowed = allowedOriginPatterns.some((pattern) => pattern.test(origin));
       if (allowed) return callback(null, true);
+      console.error('CORS bloqueado para origem:', origin);
       return callback(new Error('Origem não permitida pelo CORS'));
     },
     optionsSuccessStatus: 200,
