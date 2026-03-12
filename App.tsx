@@ -154,7 +154,7 @@ const App: React.FC = () => {
   const [simulationState, setSimulationState] = useState<SimulationState>(loadSimulationFromStorage);
   const [selectedDateKeys, setSelectedDateKeys] = useState<Set<string>>(() => {
     const initialColumns = getDateColumns(60).filter((c) => !c.isAtrasados);
-    return new Set(initialColumns.slice(0, 18).map((c) => c.key));
+    return new Set(initialColumns.map((c) => c.key));
   });
   const ordersSimulation: Order[] = useMemo(() => mapProjecaoImportadaToOrders(simulationState.data), [simulationState.data]);
 
@@ -486,6 +486,15 @@ const App: React.FC = () => {
     () => getExtendedDateColumns(60, [...orders, ...ordersSimulation]),
     [orders, ordersSimulation]
   );
+
+  useEffect(() => {
+    const futureKeys = allDateColumns.filter((c) => !c.isAtrasados).map((c) => c.key);
+    setSelectedDateKeys((prev) => {
+      const missing = futureKeys.filter((k) => !prev.has(k));
+      if (missing.length === 0) return prev;
+      return new Set([...prev, ...missing]);
+    });
+  }, [allDateColumns]);
   const dateColumns = useMemo(() => {
     const atrasados = allDateColumns.find((c) => c.isAtrasados);
     const future = allDateColumns.filter((c) => !c.isAtrasados && selectedDateKeys.has(c.key));

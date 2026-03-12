@@ -459,10 +459,11 @@ interface GeneratePdfV2Options {
   companyLogo: string | null;
   currentUserName: string;
   reportTitle: string;
+  appliedFilters?: string;
 }
 
 export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Promise<void> {
-  const { data, visibleColumns, horizonLabel, companyLogo, currentUserName, reportTitle } = options;
+  const { data, visibleColumns, horizonLabel, companyLogo, currentUserName, reportTitle, appliedFilters } = options;
 
   const doc = new jsPDF({
     orientation: 'p',
@@ -689,6 +690,13 @@ interface GeneratePdfV3Options {
   orientation: 'p' | 'l';
   /** Linha opcional abaixo de Emissão/Usuário/Horizonte evidenciando filtros aplicados */
   appliedFilters?: string;
+  /** Colunas de data para horizonte dinâmico (igual ao modo supervisão). Se informado, usa última data selecionada. */
+  dateColumns?: DateColumn[];
+  todayStart?: Date;
+  /** Data final do horizonte para Só Móveis. Se informada, limita à última coluna de data selecionada. */
+  maxHorizonEndDate?: Date;
+  /** Igual ao PDF principal: filtrar linhas por status da coluna principal (faltantes, estoque, todos). */
+  filtroResultado?: 'faltantes' | 'estoque' | 'todos';
 }
 
 export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Promise<void> {
@@ -701,6 +709,10 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
     reportTitle,
     orientation,
     appliedFilters,
+    dateColumns,
+    todayStart,
+    maxHorizonEndDate,
+    filtroResultado = 'todos',
   } = options;
 
   const doc = new jsPDF({
@@ -763,7 +775,10 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
 
   addHeader();
 
-  const specialHorizon = buildSpecialHorizonContext(data);
+  const specialHorizon =
+    dateColumns && dateColumns.length > 0
+      ? buildSpecialHorizonContextFromDateColumns(dateColumns, data, todayStart, maxHorizonEndDate)
+      : buildSpecialHorizonContext(data);
   const getCellForColumn = (item: ProductConsolidated | ComponentData, colKey: string) => {
     if (isSpecialHorizonColumn(colKey)) {
       return getSupervisaoCellForItem(item, colKey, {
@@ -775,19 +790,9 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
     return { pedido: rd.pedido ?? 0, falta: rd.falta ?? 0 };
   };
 
-  const selectedKeys = new Set(visibleColumns.map((c) => c.key));
-  const dataFiltered = data.filter((item) => {
-    const itemHasPedido = Array.from(selectedKeys).some((key) => getCellForColumn(item, key).pedido > 0);
-    if (itemHasPedido) return true;
-    if (item.isShelf && item.components) {
-      return item.components.some((comp) => Array.from(selectedKeys).some((key) => getCellForColumn(comp, key).pedido > 0));
-    }
-    return false;
-  });
-
   const flattenRows = (): Array<ProductConsolidated | ComponentData> => {
     const rows: Array<ProductConsolidated | ComponentData> = [];
-    for (const item of dataFiltered) {
+    for (const item of data) {
       rows.push(item);
       if (item.isShelf && item.components) {
         for (const comp of item.components) rows.push(comp);
@@ -798,44 +803,88 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
 
   const allRows = flattenRows().sort(compareByDescricaoAsc);
 
-  const isLandscape = orientation === 'l';
-  const dateColsPerPage = Math.max(1, isLandscape ? visibleColumns.length : Math.min(visibleColumns.length, 10));
+  /** Igual ao PDF principal (supervisão): página 1 = 1ª coluna, página 2 = 1ª+2ª, página 3 = 1ª+2ª+3ª, etc. */
   const colChunks: ColOption[][] = [];
-  for (let i = 0; i < visibleColumns.length; i += dateColsPerPage) {
-    colChunks.push(visibleColumns.slice(i, i + dateColsPerPage));
+  for (let i = 0; i < visibleColumns.length; i++) {
+    colChunks.push(visibleColumns.slice(0, i + 1));
   }
 
+  const getCellMetrics = (cell: { pedido: number; falta: number }) => {
+    const pedido = Math.max(0, Math.round(cell.pedido || 0));
+    const falta = Math.min(0, Math.round(cell.falta || 0));
+    const faltante = Math.max(0, -falta);
+    const atendido = Math.max(0, pedido - faltante);
+    return { pedido, falta, faltante, atendido };
+  };
+
+  const getStatusFromMetrics = (m: { faltante: number; atendido: number }) => {
+    if (m.faltante > 0 && m.atendido > 0) return 'Parcial';
+    if (m.faltante > 0) return 'Faltando';
+    return 'Em Estoque';
+  };
+
+  const matchesResultadoFilter = (m: { faltante: number; atendido: number }) => {
+    const status = getStatusFromMetrics(m);
+    if (filtroResultado === 'faltantes') return status === 'Faltando' || status === 'Parcial';
+    if (filtroResultado === 'estoque') return m.atendido > 0;
+    return true;
+  };
+
+  const hasPedidoInChunkColumns = (item: ProductConsolidated | ComponentData, keys: Set<string>) => {
+    if (Array.from(keys).some((key) => getCellForColumn(item, key).pedido > 0)) return true;
+    const shelf = item as ProductConsolidated;
+    if (shelf.isShelf && shelf.components) {
+      return shelf.components.some((comp) =>
+        Array.from(keys).some((key) => getCellForColumn(comp, key).pedido > 0)
+      );
+    }
+    return false;
+  };
+
   for (let chunkIdx = 0; chunkIdx < colChunks.length; chunkIdx++) {
-    const cols = colChunks[chunkIdx];
+    const chunkCols = colChunks[chunkIdx];
+    const principalCol = chunkCols[chunkCols.length - 1]!;
+    const colsBeforePrincipal = chunkCols.slice(0, -1);
+    const pageSelectedKeys = new Set(chunkCols.map((c) => c.key));
+    const dataFiltered = allRows
+      .filter((item) => {
+        if (!hasPedidoInChunkColumns(item, pageSelectedKeys)) return false;
+        const principal = getCellMetrics(getCellForColumn(item, principalCol.key));
+        return matchesResultadoFilter(principal);
+      })
+      .sort(compareByDescricaoAsc);
+
     if (chunkIdx > 0) {
       doc.addPage(orientation === 'l' ? 'a4' : 'a4', orientation);
       addHeader(`Continuação ${chunkIdx + 1}/${colChunks.length}`);
     }
 
-    const head: (string | { content: string; colSpan: number })[][] = [
-      [
-        'Código',
-        'Descrição',
-        'Estoque',
-        'Pedido',
-        'Falta',
-        ...cols.map((c) => ({
-          content: isSpecialHorizonColumn(c.key) ? `${c.label}\n${specialHorizon.label}` : c.label,
-          colSpan: 2,
-        })),
-      ],
-      [
-        '',
-        '',
-        '',
-        '',
-        '',
-        ...cols.flatMap(() => ['P', 'F']),
-      ],
+    const headRow1: (string | { content: string; colSpan: number })[] = [
+      'Código',
+      'Descrição',
+      'Estoque',
+      'Pedido',
+      'Falta',
+      ...colsBeforePrincipal.map((c) => ({
+        content: isSpecialHorizonColumn(c.key) ? `${c.label}\n${specialHorizon.label}` : c.label,
+        colSpan: 2,
+      })),
     ];
+    const headRow2: string[] = ['', '', '', '', '', ...colsBeforePrincipal.flatMap(() => ['P', 'F'])];
+    headRow1.push(
+      {
+        content: isSpecialHorizonColumn(principalCol.key)
+          ? `${principalCol.label}\n${specialHorizon.label}`
+          : principalCol.label,
+        colSpan: 2,
+      },
+      'Status'
+    );
+    headRow2.push('P', 'F', '');
+    const head: (string | { content: string; colSpan: number })[][] = [headRow1, headRow2];
 
     const body: string[][] = [];
-    for (const item of allRows) {
+    for (const item of dataFiltered) {
       const isComponent = 'falta' in item && !('isShelf' in item);
       const codigo = isComponent ? `  └ ${item.codigo}` : item.codigo;
       const isShelf = 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
@@ -849,31 +898,44 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
             : (item as ComponentData).falta;
       const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
 
+      const cellPrincipal = getCellForColumn(item, principalCol.key);
+      const principalMetrics = getCellMetrics(cellPrincipal);
+      const status = getStatusFromMetrics(principalMetrics);
+
       const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
-      for (const col of cols) {
-        const rd = getCellForColumn(item, col.key);
-        row.push(formatCellNum(rd.pedido), formatCellNum(rd.falta));
+      for (const col of colsBeforePrincipal) {
+        const cell = getCellForColumn(item, col.key);
+        row.push(...formatSupervisaoPF(cell.pedido, cell.falta));
       }
-      body.push(row);
+      row.push(...formatSupervisaoPF(cellPrincipal.pedido, cellPrincipal.falta), status);
+      const normalizedRow = [...row];
+      let pfIdx = 5;
+      for (let i = 0; i < colsBeforePrincipal.length; i++) {
+        if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
+        pfIdx += 2;
+      }
+      if (normalizedRow[pfIdx] === '-') normalizedRow[pfIdx + 1] = '-';
+      body.push(normalizedRow);
     }
 
     const tableMargin = margin;
     const usableWidth = pageWidth - tableMargin * 2;
-    const pairCount = Math.max(1, cols.length);
+    const pairCount = Math.max(1, chunkCols.length);
 
-    const codeWidth = usableWidth * 0.1;
-    const estoqueWidth = usableWidth * 0.07;
-    const pedidoWidth = usableWidth * 0.07;
-    const faltaWidth = usableWidth * 0.07;
-    const baseRemaining = usableWidth - (codeWidth + estoqueWidth + pedidoWidth + faltaWidth);
+    const codeWidth = usableWidth * 0.08;
+    const estoqueWidth = usableWidth * 0.055;
+    const pedidoWidth = usableWidth * 0.055;
+    const faltaWidth = usableWidth * 0.055;
+    const statusWidth = usableWidth * 0.09;
+    const baseRemaining = usableWidth - (codeWidth + estoqueWidth + pedidoWidth + faltaWidth + statusWidth);
 
     const descBias =
-      pairCount <= 3 ? 0.62 :
-      pairCount <= 7 ? 0.52 :
-      0.42;
+      pairCount <= 3 ? 0.5 :
+      pairCount <= 7 ? 0.42 :
+      0.35;
 
-    const minDescWidth = usableWidth * 0.2;
-    const minSubColWidth = usableWidth * 0.026;
+    const minDescWidth = usableWidth * 0.16;
+    const minSubColWidth = usableWidth * 0.03;
 
     let descWidth = baseRemaining * descBias;
     let subColWidth = (baseRemaining - descWidth) / (pairCount * 2);
@@ -919,6 +981,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
         for (let i = 5; i < 5 + pairCount * 2; i++) {
           s[String(i)] = { cellWidth: subColWidth, halign: 'center' };
         }
+        s[String(5 + pairCount * 2)] = { cellWidth: statusWidth, halign: 'center' };
         return s;
       })(),
       didParseCell: ((cellData: { column: { index: number }; row: { index: number }; section: string; cell: { styles: Record<string, unknown> } }) => {
@@ -926,7 +989,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
         if (colIndex >= 5) cellData.cell.styles.halign = 'center';
         if (cellData.section === 'body') {
           const rowIdx = cellData.row.index;
-          const item = allRows[rowIdx];
+          const item = dataFiltered[rowIdx];
           const isShelf = item && 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
           if (item && !isShelf && colIndex === 2 && item.estoqueAtual < 0) {
             cellData.cell.styles.textColor = [220, 38, 38];
@@ -938,9 +1001,9 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
                 : (item as ComponentData).falta;
             if (pend < 0) cellData.cell.styles.textColor = FONT_AMARELO;
           }
-          if (colIndex >= 5) {
+          if (colIndex >= 5 && colIndex < 5 + pairCount * 2) {
             const routeIdx = Math.floor((colIndex - 5) / 2);
-            const colKey = cols[routeIdx]?.key;
+            const colKey = chunkCols[routeIdx]?.key;
             if (colKey && item) {
               const rd = getCellForColumn(item, colKey);
               const pedidoVal = rd.pedido ?? 0;
@@ -1117,7 +1180,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
 
   for (let chunkIdx = 0; chunkIdx < colChunks.length; chunkIdx++) {
     const chunkCols = colChunks[chunkIdx];
-    const principalCol = chunkCols[chunkCols.length - 1];
+    const principalCol = chunkCols[chunkCols.length - 1]!;
     const colsBeforePrincipal = chunkCols.slice(0, -1);
     const pageSelectedKeys = new Set(chunkCols.map((c) => c.key));
     const dataFiltered = allRows
