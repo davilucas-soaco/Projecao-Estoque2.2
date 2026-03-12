@@ -106,18 +106,27 @@ function buildSpecialHorizonContext(data: ProductConsolidated[]): SpecialHorizon
   };
 }
 
-/** Constrói allowedDateKeys para supervisão com base no horizonte ativo do relatório. */
+/** Constrói allowedDateKeys para supervisão com base no horizonte ativo do relatório.
+ * Quando maxHorizonEndDate é informado, usa-o como limite superior (última data das rotas/colunas selecionadas).
+ * Caso contrário, usa hoje+13 como fallback. */
 function buildSpecialHorizonContextFromDateColumns(
   dateColumns: DateColumn[],
   data: ProductConsolidated[],
-  todayStartOverride?: Date
+  todayStartOverride?: Date,
+  maxHorizonEndDate?: Date
 ): SpecialHorizonContext {
-  // Regra da supervisão (V.2 Gestor): retroativos + hoje até hoje+13 (dinâmico).
   const start = todayStartOverride ? new Date(todayStartOverride) : new Date();
   start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(start.getDate() + SPECIAL_HORIZON_DAYS);
-  end.setHours(0, 0, 0, 0);
+  const fallbackEnd = new Date(start);
+  fallbackEnd.setDate(start.getDate() + SPECIAL_HORIZON_DAYS);
+  fallbackEnd.setHours(0, 0, 0, 0);
+  const end = maxHorizonEndDate
+    ? (() => {
+        const d = new Date(maxHorizonEndDate);
+        d.setHours(0, 0, 0, 0);
+        return d;
+      })()
+    : fallbackEnd;
   const allowedDateKeys = new Set<string>(['ATRASADOS']);
 
   for (const col of dateColumns) {
@@ -497,6 +506,9 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
       textStartX,
       logoTop + 22
     );
+    if (appliedFilters && appliedFilters.trim()) {
+      doc.text(appliedFilters.trim(), textStartX, logoTop + 34);
+    }
 
     startY = headerHeight + 12;
   };
@@ -675,6 +687,8 @@ interface GeneratePdfV3Options {
   currentUserName: string;
   reportTitle: string;
   orientation: 'p' | 'l';
+  /** Linha opcional abaixo de Emissão/Usuário/Horizonte evidenciando filtros aplicados */
+  appliedFilters?: string;
 }
 
 export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Promise<void> {
@@ -686,6 +700,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
     currentUserName,
     reportTitle,
     orientation,
+    appliedFilters,
   } = options;
 
   const doc = new jsPDF({
@@ -697,7 +712,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 25;
-  const headerHeight = 80;
+  const headerHeight = 92;
   let startY = margin;
 
   const addHeader = (continuationLabel?: string) => {
@@ -706,7 +721,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
 
     const logoWidth = 50;
     const logoHeight = 28;
-    const logoTop = (headerHeight - logoHeight) / 2;
+    const logoTop = (headerHeight - logoHeight) / 2 - 6;
     const logoTextGap = 24;
     const textStartX = companyLogo ? margin + logoWidth + logoTextGap : margin;
 
@@ -730,6 +745,18 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
       textStartX,
       logoTop + 22
     );
+    doc.setFontSize(7);
+    const configText = (appliedFilters ?? '').trim();
+    if (configText) {
+      const configLines = configText.split('\n');
+      let configY = logoTop + 34;
+      for (const line of configLines) {
+        doc.text(line, textStartX, configY);
+        configY += 9;
+      }
+    } else {
+      doc.text('Configurações do PDF: Nenhum', textStartX, logoTop + 34);
+    }
 
     startY = headerHeight + 12;
   };
@@ -956,6 +983,10 @@ interface GeneratePdfV3SupervisaoOptions {
   orientation: 'p' | 'l';
   dateColumns?: DateColumn[];
   todayStart?: Date;
+  /** Linha opcional abaixo de Emissão/Usuário/Horizonte evidenciando filtros aplicados */
+  appliedFilters?: string;
+  /** Data final do horizonte de consumo para categorias especiais (Só Móveis, Entrega GT, Retirada). Se informada, limita o consumo à última data das rotas/colunas selecionadas. */
+  maxHorizonEndDate?: Date;
 }
 
 export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3SupervisaoOptions): Promise<void> {
@@ -970,6 +1001,8 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
     orientation,
     dateColumns,
     todayStart,
+    appliedFilters,
+    maxHorizonEndDate,
   } = options;
 
   const doc = new jsPDF({
@@ -981,7 +1014,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 25;
-  const headerHeight = 80;
+  const headerHeight = 92;
   let startY = margin;
 
   const addHeader = (continuationLabel?: string) => {
@@ -990,7 +1023,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
 
     const logoWidth = 50;
     const logoHeight = 28;
-    const logoTop = (headerHeight - logoHeight) / 2;
+    const logoTop = (headerHeight - logoHeight) / 2 - 6;
     const logoTextGap = 24;
     const textStartX = companyLogo ? margin + logoWidth + logoTextGap : margin;
 
@@ -1014,6 +1047,13 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       textStartX,
       logoTop + 22
     );
+    doc.setFontSize(7);
+    const configText = (appliedFilters ?? '').trim() || 'Configurações do PDF: Nenhum';
+    const configLines = configText.split('\n');
+    const lineHeight = 9;
+    configLines.forEach((line, i) => {
+      doc.text(line.trim(), textStartX, logoTop + 34 + i * lineHeight);
+    });
 
     startY = headerHeight + 12;
   };
@@ -1022,7 +1062,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
 
   const specialHorizon =
     dateColumns && dateColumns.length > 0
-      ? buildSpecialHorizonContextFromDateColumns(dateColumns, data, todayStart)
+      ? buildSpecialHorizonContextFromDateColumns(dateColumns, data, todayStart, maxHorizonEndDate)
       : buildSpecialHorizonContext(data);
   const getSupervisaoCell = (item: ProductConsolidated | ComponentData, colKey: string) =>
     getSupervisaoCellForItem(item, colKey, {

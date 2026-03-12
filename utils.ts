@@ -155,6 +155,44 @@ export const getDateColumns = (daysAhead: number = 60): { key: string; label: st
   return cols;
 };
 
+/** Estende as colunas de data para incluir datas presentes nos pedidos da projeção.
+ * Garante que pedidos com previsão além dos 60 dias apareçam na tabela ao filtrar por rota. */
+export const getExtendedDateColumns = (
+  daysAhead: number,
+  orders: { dataEntrega: string }[]
+): { key: string; label: string; date: Date | null; isAtrasados: boolean }[] => {
+  const base = getDateColumns(daysAhead);
+  const keysSet = new Set(base.filter((c) => c.key !== 'ATRASADOS').map((c) => c.key));
+  const today = getTodayStart();
+  today.setHours(0, 0, 0, 0);
+
+  for (const ord of orders) {
+    const d = parseOrderDate(ord.dataEntrega);
+    if (!d) continue;
+    d.setHours(0, 0, 0, 0);
+    if (d <= today) continue;
+    const key = d.toISOString().slice(0, 10);
+    if (!keysSet.has(key)) {
+      keysSet.add(key);
+    }
+  }
+
+  const atrasados = base.find((c) => c.isAtrasados);
+  const futureKeys = Array.from(keysSet).sort();
+  const futureCols = futureKeys.map((key) => {
+    const [y, m, d] = key.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    return {
+      key,
+      label: date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }),
+      date,
+      isAtrasados: false as const,
+    };
+  });
+
+  return [...(atrasados ? [atrasados] : []), ...futureCols];
+};
+
 /** Normaliza data para chave YYYY-MM-DD */
 export const dateToKey = (d: Date): string => d.toISOString().slice(0, 10);
 

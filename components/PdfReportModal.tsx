@@ -8,7 +8,7 @@ import {
   SUPERVISAO_RETIRADA,
   extractRotasFromProjection,
 } from '../utils';
-import { generateProjectionPdfV2, generateProjectionPdfV3, generateProjectionPdfV2Supervisao } from '../utils/pdfReport';
+import { generateProjectionPdfV3, generateProjectionPdfV2Supervisao } from '../utils/pdfReport';
 
 interface DateColumn {
   key: string;
@@ -38,6 +38,8 @@ interface Props {
   currentUserName: string;
   reportTitle?: string;
   projection?: ProjecaoImportada[];
+  /** Linha de texto para o cabeçalho do PDF evidenciando filtros aplicados */
+  appliedFilters?: string;
 }
 
 const PdfReportModal: React.FC<Props> = ({
@@ -50,8 +52,8 @@ const PdfReportModal: React.FC<Props> = ({
   currentUserName,
   reportTitle = 'Relatório de Projeção de Estoque',
   projection = [],
+  appliedFilters,
 }) => {
-  const [pdfVersion, setPdfVersion] = useState<'v1' | 'v2'>('v1');
   const [considerarRequisicoes, setConsiderarRequisicoes] = useState<boolean | null>(null);
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<Set<string>>(new Set());
   const [showColumnFilter, setShowColumnFilter] = useState(false);
@@ -94,6 +96,19 @@ const PdfReportModal: React.FC<Props> = ({
     [allSupervisaoColumns, selectedSupervisaoKeys]
   );
 
+  /** Última data entre as rotas selecionadas no filtro. Usada como horizonte máximo de consumo para Só Móveis, Entrega GT e Retirada. */
+  const maxHorizonEndDate = useMemo(() => {
+    const rotaKeys = new Set(visibleSupervisaoColumns.map((c) => c.key).filter((k) => k.startsWith('rota|')));
+    if (rotaKeys.size === 0) return undefined;
+    let maxDate: Date | null = null;
+    for (const r of rotasSupervisao) {
+      if (rotaKeys.has(r.key) && r.previsaoDate) {
+        if (!maxDate || r.previsaoDate > maxDate) maxDate = r.previsaoDate;
+      }
+    }
+    return maxDate ?? undefined;
+  }, [visibleSupervisaoColumns, rotasSupervisao]);
+
   const allColumnsSelected =
     selectedColumnKeys.size === allColumns.length && allColumns.length > 0;
   const selectedCountLabel = allColumnsSelected
@@ -102,7 +117,7 @@ const PdfReportModal: React.FC<Props> = ({
   const allSupervisaoColumnsSelected =
     selectedSupervisaoKeys.size === allSupervisaoColumns.length && allSupervisaoColumns.length > 0;
 
-  const isV2Supervisao = pdfVersion === 'v2' && relatorioSupervisao === true;
+  const isV2Supervisao = relatorioSupervisao === true;
 
   useEffect(() => {
     if (considerarRequisicoes !== null && !isV2Supervisao) {
@@ -116,10 +131,6 @@ const PdfReportModal: React.FC<Props> = ({
       setSelectedSupervisaoKeys(new Set(allSupervisaoColumns.map((c) => c.key)));
     }
   }, [relatorioSupervisao, allSupervisaoColumns]);
-
-  useEffect(() => {
-    if (pdfVersion !== 'v2') setRelatorioSupervisao(null);
-  }, [pdfVersion]);
 
   const handleGenerate = async () => {
     if (isV2Supervisao) {
@@ -142,6 +153,13 @@ const PdfReportModal: React.FC<Props> = ({
     setErrorMsg('');
     try {
       const data = getDataForPdf(considerarRequisicoes ?? true);
+      const colCount = isV2Supervisao ? visibleSupervisaoColumns.length : visibleColumns.length;
+      const pdfConfigText = [
+        'Configurações do PDF',
+        `Gerar relatório de supervisão? ${isV2Supervisao ? 'sim' : 'não'}`,
+        `Considerar Requisições na projeção? ${(considerarRequisicoes ?? true) ? 'sim' : 'não'}`,
+        `Colunas a incluir: ${colCount}`,
+      ].join('\n');
       if (isV2Supervisao) {
         const colOpts = visibleSupervisaoColumns.map((c) => ({ key: c.key, label: c.label }));
         await generateProjectionPdfV2Supervisao({
@@ -155,29 +173,21 @@ const PdfReportModal: React.FC<Props> = ({
           reportTitle,
           orientation: 'l',
           dateColumns,
+          appliedFilters: pdfConfigText,
+          maxHorizonEndDate,
         });
       } else {
         const colOpts = visibleColumns.map((c) => ({ key: c.key, label: c.label, isSoMoveis: c.isSoMoveis }));
-        if (pdfVersion === 'v1') {
-          await generateProjectionPdfV2({
-            data,
-            visibleColumns: colOpts,
-            horizonLabel,
-            companyLogo,
-            currentUserName,
-            reportTitle,
-          });
-        } else {
-          await generateProjectionPdfV3({
-            data,
-            visibleColumns: colOpts,
-            horizonLabel,
-            companyLogo,
-            currentUserName,
-            reportTitle,
-            orientation: 'l',
-          });
-        }
+        await generateProjectionPdfV3({
+          data,
+          visibleColumns: colOpts,
+          horizonLabel,
+          companyLogo,
+          currentUserName,
+          reportTitle,
+          orientation: 'l',
+          appliedFilters: pdfConfigText,
+        });
       }
       onClose();
     } catch (err) {
@@ -205,33 +215,6 @@ const PdfReportModal: React.FC<Props> = ({
 
         <div className="px-6 py-4 overflow-auto flex-1 space-y-5">
           <div>
-            <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">
-              Versão do PDF
-            </p>
-            <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="pdfVersion"
-                  checked={pdfVersion === 'v1'}
-                  onChange={() => setPdfVersion('v1')}
-                />
-                <span className="text-sm">V.1 — Formato vertical agrupado por nome de coluna</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="pdfVersion"
-                  checked={pdfVersion === 'v2'}
-                  onChange={() => setPdfVersion('v2')}
-                />
-                <span className="text-sm">V.2 — Formato Horizontal + Visão Gestor</span>
-              </label>
-            </div>
-          </div>
-
-          {pdfVersion === 'v2' && (
-            <div>
               <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">
                 Gerar relatório de supervisão?
               </p>
@@ -256,7 +239,6 @@ const PdfReportModal: React.FC<Props> = ({
                 </label>
               </div>
             </div>
-          )}
 
           {isV2Supervisao ? (
             <>
@@ -476,7 +458,7 @@ const PdfReportModal: React.FC<Props> = ({
             onClick={handleGenerate}
             disabled={
               generating ||
-              (pdfVersion === 'v2' && relatorioSupervisao === null) ||
+              relatorioSupervisao === null ||
               (isV2Supervisao
                 ? visibleSupervisaoColumns.length === 0
                 : considerarRequisicoes === null || visibleColumns.length === 0)

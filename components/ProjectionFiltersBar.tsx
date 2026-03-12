@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, FileDown, CalendarDays, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import type { ProjecaoImportada } from '../types';
-import { extractRotasFromProjection } from '../utils';
-import MultiSelectWithSearch from './MultiSelectWithSearch';
+import {
+  extractRotasFromProjection,
+  CATEGORY_REQUISICAO,
+  CATEGORY_ENTREGA_GT,
+  CATEGORY_RETIRADA,
+  CATEGORY_INSERIR_ROMANEIO,
+} from '../utils';
+import MultiSelectWithSearch, { MultiSelectOption } from './MultiSelectWithSearch';
 
 interface DateOption {
   key: string;
@@ -17,11 +23,11 @@ interface ProjectionFiltersBarProps {
   onSelectedRotasChange: (v: Set<string>) => void;
   selectedSetores: Set<string>;
   onSelectedSetoresChange: (v: Set<string>) => void;
-  selectedCategorias: Set<string>;
-  onSelectedCategoriasChange: (v: Set<string>) => void;
   dateOptions: DateOption[];
   selectedDateKeys: Set<string>;
   onSelectedDateKeysChange: (v: Set<string>) => void;
+  ignorePreviousConsumptions: boolean;
+  onIgnorePreviousConsumptionsChange: (value: boolean) => void;
   onGeneratePdf: () => void;
 }
 
@@ -33,11 +39,11 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
   onSelectedRotasChange,
   selectedSetores,
   onSelectedSetoresChange,
-  selectedCategorias,
-  onSelectedCategoriasChange,
   dateOptions,
   selectedDateKeys,
   onSelectedDateKeysChange,
+  ignorePreviousConsumptions,
+  onIgnorePreviousConsumptionsChange,
   onGeneratePdf,
 }) => {
   const [localDescCod, setLocalDescCod] = useState(filterDescCod);
@@ -65,10 +71,20 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showDateSelector]);
 
-  const rotasDisponiveis = React.useMemo(
-    () => extractRotasFromProjection(projectionSource).map((r) => r.routeName),
-    [projectionSource]
-  );
+  const rotasDisponiveis = React.useMemo<MultiSelectOption[]>(() => {
+    const fixed: MultiSelectOption[] = [
+      { value: 'Retirada na So Aço', label: '1-Retirada na So Aço' },
+      { value: 'Retirada na So Moveis', label: '2-Retirada na So Moveis' },
+      { value: CATEGORY_ENTREGA_GT, label: '3-Entrega em Grande Teresina' },
+      { value: CATEGORY_INSERIR_ROMANEIO, label: '4-Inserir em Romaneio' },
+      { value: CATEGORY_REQUISICAO, label: '5-Requisicao' },
+    ];
+    const dynamic = extractRotasFromProjection(projectionSource)
+      .map((r) => r.routeName)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }))
+      .map((name) => ({ value: name, label: name }));
+    return [...fixed, ...dynamic];
+  }, [projectionSource]);
 
   const setoresDisponiveis = React.useMemo(() => {
     const set = new Set<string>();
@@ -77,15 +93,6 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
       if (s) set.add(s);
     });
     return Array.from(set).sort();
-  }, [projectionSource]);
-
-  const categoriasDisponiveis = React.useMemo(() => {
-    const set = new Set<string>();
-    projectionSource.forEach((r) => {
-      const cat = (r.tipoF ?? '').trim();
-      if (cat) set.add(cat);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
   }, [projectionSource]);
 
   const filteredDateOptions = useMemo(() => {
@@ -137,6 +144,33 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
             onSelectionChange={onSelectedRotasChange}
             placeholder="Buscar rota..."
             emptyMessage="Nenhuma rota encontrada"
+            topContent={
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral mb-1.5">
+                  Desconsiderar consumos de datas anteriores
+                </p>
+                <div className="flex items-center gap-4">
+                  <label className="inline-flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-200 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="ignore-previous-consumptions"
+                      checked={!ignorePreviousConsumptions}
+                      onChange={() => onIgnorePreviousConsumptionsChange(false)}
+                    />
+                    <span>Não</span>
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-200 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="ignore-previous-consumptions"
+                      checked={ignorePreviousConsumptions}
+                      onChange={() => onIgnorePreviousConsumptionsChange(true)}
+                    />
+                    <span>Sim</span>
+                  </label>
+                </div>
+              </div>
+            }
           />
         )}
         {setoresDisponiveis.length > 0 && (
@@ -147,16 +181,6 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
             onSelectionChange={onSelectedSetoresChange}
             placeholder="Buscar setor..."
             emptyMessage="Nenhum setor encontrado"
-          />
-        )}
-        {categoriasDisponiveis.length > 0 && (
-          <MultiSelectWithSearch
-            label="Categorias"
-            options={categoriasDisponiveis}
-            selected={selectedCategorias}
-            onSelectionChange={onSelectedCategoriasChange}
-            placeholder="Buscar categoria..."
-            emptyMessage="Nenhuma categoria encontrada"
           />
         )}
           </div>

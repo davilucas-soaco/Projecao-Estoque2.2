@@ -4,12 +4,14 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ROUTE_SO_MOVEIS,
   CATEGORY_ENTREGA_GT,
+  CATEGORY_INSERIR_ROMANEIO,
   CATEGORY_RETIRADA,
   CATEGORY_REQUISICAO,
   extractRotasFromProjection,
   dateToKey,
   normalizeText,
   getCategoriaFromObservacoes,
+  parseOrderDate,
 } from '../utils';
 import {
   AlertTriangle,
@@ -23,6 +25,8 @@ import {
   X,
   Download,
   Filter,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 
 interface SortCriterion {
@@ -50,7 +54,9 @@ interface Props {
   projectionSource?: ProjecaoImportada[];
   selectedRotas?: Set<string>;
   selectedSetores?: Set<string>;
-  selectedCategorias?: Set<string>;
+  ignorePreviousConsumptions?: boolean;
+  /** Ref do container para fullscreen (inclui filtros + tabela). Se não informado, usa o wrapper interno. */
+  fullscreenContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 type RouteValueField = 'pedido' | 'falta';
@@ -74,6 +80,12 @@ interface FlatRow {
   falta: number | string;
   routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number; numeroPedido?: string }[] }>;
   rowBgClass: string;
+}
+
+interface TooltipPedidoGroup {
+  destino: string;
+  total: number;
+  pedidos: Array<{ numeroPedido: string; qty: number }>;
 }
 
 const formatCellNum = (v: unknown): string | number => {
@@ -110,6 +122,13 @@ const DESTINO_CATEGORIAS_ESPECIAIS = new Set<string>([
   normalizeText(CATEGORY_RETIRADA),
 ]);
 
+const ROTA_FILTRO_CATEGORIAS_ESPECIAIS = new Set<string>([
+  normalizeText(CATEGORY_REQUISICAO),
+  normalizeText(CATEGORY_ENTREGA_GT),
+  normalizeText(CATEGORY_RETIRADA),
+  normalizeText(CATEGORY_INSERIR_ROMANEIO),
+]);
+
 const normalizeCategoria = (value: string): string => {
   const categoria = getCategoriaFromObservacoes(value) || value;
   return normalizeText(categoria);
@@ -126,8 +145,10 @@ const ProjectionTable: React.FC<Props> = ({
   projectionSource = [],
   selectedRotas = new Set(),
   selectedSetores = new Set(),
-  selectedCategorias = new Set(),
+  ignorePreviousConsumptions = false,
+  fullscreenContainerRef,
 }) => {
+  const selectedCategorias = new Set<string>();
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
   const [descriptionWidth, setDescriptionWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
@@ -137,6 +158,8 @@ const ProjectionTable: React.FC<Props> = ({
   const [routeValueFilterSearch, setRouteValueFilterSearch] = useState('');
   const [routeValueFilters, setRouteValueFilters] = useState<Record<string, Set<string>>>({});
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const tableWrapperRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [tooltip, setTooltip] = useState<{
     codigo: string;
     colKey: string;
@@ -155,6 +178,25 @@ const ProjectionTable: React.FC<Props> = ({
     offsetX: 0,
     offsetY: 0,
   });
+
+  const tooltipPedidoGroups = useMemo<TooltipPedidoGroup[]>(() => {
+    if (!tooltip || tooltip.type !== 'P') return [];
+    const byDestino = new Map<string, { total: number; byPedido: Map<string, number> }>();
+    for (const b of tooltip.breakdown) {
+      const destino = (b.destino || 'Sem destino').trim();
+      if (!byDestino.has(destino)) byDestino.set(destino, { total: 0, byPedido: new Map() });
+      const agg = byDestino.get(destino)!;
+      const qty = Math.max(0, Number(b.qty) || 0);
+      agg.total += qty;
+      const pedidoKey = (b.numeroPedido || '').trim() || 'Sem pedido';
+      agg.byPedido.set(pedidoKey, (agg.byPedido.get(pedidoKey) || 0) + qty);
+    }
+    return Array.from(byDestino.entries()).map(([destino, agg]) => ({
+      destino,
+      total: agg.total,
+      pedidos: Array.from(agg.byPedido.entries()).map(([numeroPedido, qty]) => ({ numeroPedido, qty })),
+    }));
+  }, [tooltip]);
 
   const toggleShelf = (codigo: string) => {
     setExpandedShelves(prev => {
@@ -258,13 +300,30 @@ const ProjectionTable: React.FC<Props> = ({
     field: RouteValueField
   ): string => {
     const rd = item.routeData[colKey] || { pedido: 0, falta: 0 };
-    const raw = field === 'pedido' ? rd.pedido : rd.falta;
+    let raw = Number(rd.pedido ?? 0);
+    if (field === 'falta') {
+      if (ignorePreviousConsumptions) {
+        const estoqueAtual = Math.max(0, Number((item as { estoqueAtual?: number }).estoqueAtual ?? 0));
+        const pedidoAtual = Math.max(0, Number(rd.pedido ?? 0));
+        raw = pedidoAtual > estoqueAtual ? -(pedidoAtual - estoqueAtual) : 0;
+      } else {
+        raw = Number(rd.falta ?? 0);
+      }
+    }
     return String(formatCellNum(raw));
   };
 
   const getRouteFilterKey = (colKey: string, field: RouteValueField) => `${colKey}|${field}`;
 
   const rotasCompletas = useMemo(() => extractRotasFromProjection(projectionSource), [projectionSource]);
+  const allRouteNames = useMemo(() => new Set(rotasCompletas.map((r) => r.routeName)), [rotasCompletas]);
+  const selectedRotaNames = useMemo(() => {
+    const set = new Set<string>();
+    selectedRotas.forEach((r) => {
+      if (allRouteNames.has(r)) set.add(r);
+    });
+    return set;
+  }, [selectedRotas, allRouteNames]);
 
   const todayStart = useMemo(() => {
     const d = new Date();
@@ -272,13 +331,41 @@ const ProjectionTable: React.FC<Props> = ({
     return d;
   }, []);
 
+  /** Coleta TODAS as datas de previsão das linhas da projeção que pertencem às rotas selecionadas.
+   * Uma rota pode ter pedidos em várias datas; antes usávamos só a primeira data (de rotasCompletas). */
   const dateKeysForSelectedRotas = useMemo(() => {
-    if (selectedRotas.size === 0) return null;
+    if (selectedRotaNames.size === 0) return null;
     const keys = new Set<string>();
     const overdueDates = new Set<string>();
-    for (const r of rotasCompletas) {
-      if (!selectedRotas.has(r.routeName) || !r.previsaoDate) continue;
-      const d = new Date(r.previsaoDate);
+    const rotaBaseMatches = (base: string): boolean => {
+      if (selectedRotaNames.has(base)) return true;
+      const baseNorm = normalizeText(base);
+      for (const sel of selectedRotaNames) {
+        const selNorm = normalizeText(sel);
+        if (baseNorm === selNorm) return true;
+        if (base.toUpperCase().startsWith('ROTA') && sel.toUpperCase().startsWith('ROTA')) {
+          const core = (s: string) =>
+            s
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/\s*-\s*[A-Za-zÀ-ÿ\s]+$/, '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .toLowerCase();
+          if (core(base) === core(sel)) return true;
+        }
+      }
+      return false;
+    };
+    projectionSource.forEach((row) => {
+      const obs = (row.observacoes ?? '').toString().trim();
+      const prefixMatch = obs.match(/^\d+\s*[-–]\s*(.*)$/);
+      const base = (prefixMatch ? prefixMatch[1] : obs).trim();
+      if (!base || !rotaBaseMatches(base)) return;
+      const previsao = (row.previsaoAtual ?? '').toString().trim();
+      if (!previsao) return;
+      const d = parseOrderDate(previsao);
+      if (!d) return;
       d.setHours(0, 0, 0, 0);
       if (d <= todayStart) {
         overdueDates.add(
@@ -287,9 +374,9 @@ const ProjectionTable: React.FC<Props> = ({
       } else {
         keys.add(dateToKey(d));
       }
-    }
+    });
     return { keys, overdueDates };
-  }, [rotasCompletas, selectedRotas, todayStart]);
+  }, [projectionSource, selectedRotaNames, todayStart]);
 
   const codigoToRotas = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -331,29 +418,79 @@ const ProjectionTable: React.FC<Props> = ({
     return map;
   }, [projectionSource]);
 
+  const codigoToCategoriasNorm = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    codigoToCategorias.forEach((cats, codigo) => {
+      map.set(codigo, new Set(Array.from(cats).map((c) => normalizeCategoria(c))));
+    });
+    return map;
+  }, [codigoToCategorias]);
+
+  const rotaCoreNorm = (s: string) =>
+    s
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s*-\s*[A-Za-zÀ-ÿ\s]+$/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
   const productHasRota = (codigo: string, rotas: Set<string>): boolean => {
     if (rotas.size === 0) return true;
     const prodRotas = codigoToRotas.get(codigo.trim().toUpperCase());
     if (!prodRotas) return false;
-    for (const r of rotas) {
-      if (prodRotas.has(r)) return true;
+    for (const prodRota of prodRotas) {
+      if (rotas.has(prodRota)) return true;
+      if (prodRota.toUpperCase().startsWith('ROTA') && selectedRotaCoresNorm.size > 0 && selectedRotaCoresNorm.has(rotaCoreNorm(prodRota)))
+        return true;
     }
     return false;
   };
 
   const selectedRotasNorm = useMemo(() => {
     const set = new Set<string>();
-    selectedRotas.forEach((r) => set.add(normalizeText(r)));
+    selectedRotaNames.forEach((r) => set.add(normalizeText(r)));
+    return set;
+  }, [selectedRotaNames]);
+
+  /** Core da rota (sem sufixo " - LIBERADA", " - CONSTRUÇÃO", etc.) para match de variantes */
+  const selectedRotaCoresNorm = useMemo(() => {
+    const set = new Set<string>();
+    const core = (s: string) =>
+      s
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s*-\s*[A-Za-zÀ-ÿ\s]+$/, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    selectedRotaNames.forEach((r) => {
+      if (r.toUpperCase().startsWith('ROTA')) set.add(core(r));
+    });
+    return set;
+  }, [selectedRotaNames]);
+
+  const selectedRotaCategoriasNorm = useMemo(() => {
+    const set = new Set<string>();
+    selectedRotas.forEach((r) => {
+      const norm = normalizeCategoria(r);
+      if (ROTA_FILTRO_CATEGORIAS_ESPECIAIS.has(norm)) set.add(norm);
+    });
     return set;
   }, [selectedRotas]);
 
-  const productHasSelectedRotaInBreakdown = (item: ProductConsolidated | ComponentData): boolean => {
-    if (selectedRotasNorm.size === 0) return true;
+  const productHasSelectedRotaInBreakdown = (
+    item: ProductConsolidated | ComponentData,
+    rotasNorm: Set<string>
+  ): boolean => {
+    if (rotasNorm.size === 0 && selectedRotaCoresNorm.size === 0) return false;
     for (const rd of Object.values(item.routeData ?? {})) {
       const breakdown = rd?.breakdown ?? [];
       for (const b of breakdown) {
-        const destinoNorm = normalizeText(b?.destino ?? '');
-        if (destinoNorm && selectedRotasNorm.has(destinoNorm)) return true;
+        const destino = b?.destino ?? '';
+        const destinoNorm = normalizeText(destino);
+        if (destinoNorm && rotasNorm.has(destinoNorm)) return true;
+        if (destino.toUpperCase().startsWith('ROTA') && selectedRotaCoresNorm.size > 0 && selectedRotaCoresNorm.has(rotaCoreNorm(destino))) return true;
       }
     }
     return false;
@@ -374,6 +511,16 @@ const ProjectionTable: React.FC<Props> = ({
     const prodCategorias = codigoToCategorias.get(codigo.trim().toUpperCase());
     if (!prodCategorias) return false;
     for (const c of categorias) {
+      if (prodCategorias.has(c)) return true;
+    }
+    return false;
+  };
+
+  const productHasCategoriaNormalized = (codigo: string, categoriasNorm: Set<string>): boolean => {
+    if (categoriasNorm.size === 0) return false;
+    const prodCategorias = codigoToCategoriasNorm.get(codigo.trim().toUpperCase());
+    if (!prodCategorias) return false;
+    for (const c of categoriasNorm) {
       if (prodCategorias.has(c)) return true;
     }
     return false;
@@ -516,11 +663,44 @@ const ProjectionTable: React.FC<Props> = ({
     setRouteValueFilterSearch('');
   }, [routeValueFilterMenu?.colKey, routeValueFilterMenu?.field]);
 
+  const toggleFullscreen = async () => {
+    const el = (fullscreenContainerRef?.current ?? tableWrapperRef.current);
+    if (!el) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      } else {
+        await el.requestFullscreen();
+        setIsFullscreen(true);
+      }
+    } catch {
+      setIsFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && document.fullscreenElement) {
+        document.exitFullscreen();
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   const allColumns = [
     ...(considerarRequisicoes ? [{ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true as const }] : []),
     ...dateColumns.map(c => ({ key: c.key, label: c.label, isSoMoveis: false as const })),
   ];
-  const rotaFilterActive = selectedRotas.size > 0;
+  const rotaFilterActive = selectedRotaNames.size > 0;
 
   const rotaScopedColumns = useMemo(() => {
     if (!rotaFilterActive) return null;
@@ -560,10 +740,26 @@ const ProjectionTable: React.FC<Props> = ({
     let result = data;
     if (selectedRotas.size > 0) {
       result = result.filter((item) => {
-        if (productHasRota(item.codigo, selectedRotas) || productHasSelectedRotaInBreakdown(item)) return true;
+        const routeMatch =
+          (selectedRotaNames.size > 0 &&
+            (productHasRota(item.codigo, selectedRotaNames) ||
+              productHasSelectedRotaInBreakdown(item, selectedRotasNorm))) ||
+          false;
+        const categoriaMatch =
+          (selectedRotaCategoriasNorm.size > 0 &&
+            (productHasCategoriaNormalized(item.codigo, selectedRotaCategoriasNorm) ||
+              rowHasSelectedCategoriaInRouteData(item, selectedRotaCategoriasNorm))) ||
+          false;
+        if (routeMatch || categoriaMatch) return true;
         if (item.isShelf && item.components?.length) {
           return item.components.some(
-            (comp) => productHasRota(comp.codigo, selectedRotas) || productHasSelectedRotaInBreakdown(comp)
+            (comp) =>
+              (selectedRotaNames.size > 0 &&
+                (productHasRota(comp.codigo, selectedRotaNames) ||
+                  productHasSelectedRotaInBreakdown(comp, selectedRotasNorm))) ||
+              (selectedRotaCategoriasNorm.size > 0 &&
+                (productHasCategoriaNormalized(comp.codigo, selectedRotaCategoriasNorm) ||
+                  rowHasSelectedCategoriaInRouteData(comp, selectedRotaCategoriasNorm)))
           );
         }
         return false;
@@ -598,10 +794,14 @@ const ProjectionTable: React.FC<Props> = ({
     selectedRotas,
     selectedSetores,
     selectedCategorias,
+    selectedRotaNames,
+    selectedRotaCategoriasNorm,
+    selectedRotasNorm,
     selectedDestinoCategoriasNorm,
     codigoToSetores,
     codigoToRotas,
     codigoToCategorias,
+    codigoToCategoriasNorm,
   ]);
 
   const activeRouteValueFilterKeys = useMemo(
@@ -647,8 +847,12 @@ const ProjectionTable: React.FC<Props> = ({
       const hasMatchingComponent = item.components.some((comp) => {
         const okRota =
           selectedRotas.size === 0 ||
-          productHasRota(comp.codigo, selectedRotas) ||
-          productHasSelectedRotaInBreakdown(comp);
+          (selectedRotaNames.size > 0 &&
+            (productHasRota(comp.codigo, selectedRotaNames) ||
+              productHasSelectedRotaInBreakdown(comp, selectedRotasNorm))) ||
+          (selectedRotaCategoriasNorm.size > 0 &&
+            (productHasCategoriaNormalized(comp.codigo, selectedRotaCategoriasNorm) ||
+              rowHasSelectedCategoriaInRouteData(comp, selectedRotaCategoriasNorm)));
         const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
         const okCategoria =
           selectedCategorias.size === 0 ||
@@ -659,7 +863,7 @@ const ProjectionTable: React.FC<Props> = ({
       if (hasMatchingComponent) set.add(item.codigo);
     }
     return set;
-  }, [dataFilteredByValues, selectedRotas, selectedSetores, selectedCategorias, activeRouteValueFilterKeys, routeValueFilters]);
+  }, [dataFilteredByValues, selectedRotas, selectedRotaNames, selectedRotaCategoriasNorm, selectedRotasNorm, selectedSetores, selectedCategorias, activeRouteValueFilterKeys, routeValueFilters]);
 
   const sortedData = useMemo(() => {
     if (sortCriteria.length === 0) return dataFilteredByValues;
@@ -701,8 +905,12 @@ const ProjectionTable: React.FC<Props> = ({
       const filtered = item.components.filter((comp) => {
         const okRota =
           selectedRotas.size === 0 ||
-          productHasRota(comp.codigo, selectedRotas) ||
-          productHasSelectedRotaInBreakdown(comp);
+          (selectedRotaNames.size > 0 &&
+            (productHasRota(comp.codigo, selectedRotaNames) ||
+              productHasSelectedRotaInBreakdown(comp, selectedRotasNorm))) ||
+          (selectedRotaCategoriasNorm.size > 0 &&
+            (productHasCategoriaNormalized(comp.codigo, selectedRotaCategoriasNorm) ||
+              rowHasSelectedCategoriaInRouteData(comp, selectedRotaCategoriasNorm)));
         const okSetor = selectedSetores.size === 0 || productHasSetor(comp.codigo, selectedSetores);
         const okCategoria =
           selectedCategorias.size === 0 ||
@@ -713,7 +921,7 @@ const ProjectionTable: React.FC<Props> = ({
       map.set(item.codigo, filtered);
     }
     return map;
-  }, [sortedData, selectedRotas, selectedSetores, selectedCategorias, activeRouteValueFilterKeys, routeValueFilters, dateKeysForSelectedRotas]);
+  }, [sortedData, selectedRotas, selectedRotaNames, selectedRotaCategoriasNorm, selectedRotasNorm, selectedSetores, selectedCategorias, activeRouteValueFilterKeys, routeValueFilters, dateKeysForSelectedRotas]);
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
@@ -885,13 +1093,19 @@ const ProjectionTable: React.FC<Props> = ({
 
         const routeCells = visibleColumns.flatMap((col) => {
           const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
+          const pedidoDisplay = Math.max(0, Number(rd.pedido ?? 0));
+          const faltaDisplay = ignorePreviousConsumptions
+            ? (pedidoDisplay > Math.max(0, Number(item.estoqueAtual ?? 0))
+                ? -(pedidoDisplay - Math.max(0, Number(item.estoqueAtual ?? 0)))
+                : 0)
+            : Number(rd.falta ?? 0);
           return [
             `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;color:#0a58ca;font-weight:700;">${escapeHtml(
-              formatCellNum(rd.pedido)
+              formatCellNum(pedidoDisplay)
             )}</td>`,
             `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;color:${
-              rd.falta < 0 ? '#b06a00' : '#8d99ae'
-            };font-weight:700;">${escapeHtml(item.isShelf ? '-' : formatCellNum(rd.falta))}</td>`,
+              faltaDisplay < 0 ? '#b06a00' : '#8d99ae'
+            };font-weight:700;">${escapeHtml(item.isShelf ? '-' : formatCellNum(faltaDisplay))}</td>`,
           ];
         });
 
@@ -930,8 +1144,23 @@ const ProjectionTable: React.FC<Props> = ({
 
   return (
     <div className="space-y-4 h-full flex flex-col">
-      <div className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0">
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-end">
+      <div
+        ref={tableWrapperRef}
+        className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0 transition-all duration-300"
+      >
+        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Sair da tela cheia' : 'Expandir tabela'}
+            className="inline-flex items-center justify-center p-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-3.5 h-3.5" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5" />
+            )}
+          </button>
           <button
             type="button"
             onClick={exportProjectionExcel}
@@ -941,7 +1170,10 @@ const ProjectionTable: React.FC<Props> = ({
             Exportar Excel
           </button>
         </div>
-        <div ref={tableContainerRef} className="overflow-auto flex-1 relative scroll-smooth max-h-[calc(100vh-215px)]">
+        <div
+          ref={tableContainerRef}
+          className={`overflow-auto flex-1 relative scroll-smooth min-h-0 ${isFullscreen ? '' : 'max-h-[calc(100vh-215px)]'}`}
+        >
           <table className="w-full text-left text-sm border-separate border-spacing-0 min-w-max">
             <thead className="sticky top-0 z-[70]">
               <tr className="bg-primary text-white">
@@ -1132,6 +1364,11 @@ const ProjectionTable: React.FC<Props> = ({
                     {virtualColumns.map((vCol) => {
                       const col = visibleColumns[vCol.index];
                       const rd = row.routeData[col.key] || { pedido: 0, falta: 0 };
+                      const pedidoCell = Math.max(0, Number(rd.pedido ?? 0));
+                      const estoqueCell = Math.max(0, Number((row as { estoqueAtual?: number }).estoqueAtual ?? 0));
+                      const faltaCell = ignorePreviousConsumptions
+                        ? (pedidoCell > estoqueCell ? -(pedidoCell - estoqueCell) : 0)
+                        : Number(rd.falta ?? 0);
                       return (
                         <React.Fragment key={`${row.key}-${col.key}`}>
                           <td
@@ -1148,27 +1385,17 @@ const ProjectionTable: React.FC<Props> = ({
                             className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
                             style={{ width: `${Math.max(40, vCol.size / 2)}px` }}
                           >
-                            {formatCellNum(rd.pedido)}
+                            {formatCellNum(pedidoCell)}
                           </td>
                           <td
                             data-tooltip-cell
-                            onClick={rd.falta < 0 && row.kind === 'item' && !row.isShelf
-                              ? (e) =>
-                                  handleFClick(
-                                    e,
-                                    row as unknown as ProductConsolidated,
-                                    col.key,
-                                    col.label,
-                                    row.kind === 'item' ? row.key : (row.parentCodigo ?? row.key)
-                                  )
-                              : undefined
-                            }
+                            onClick={undefined}
                             className={`px-2 py-1.5 text-center font-bold text-[11px] ${
-                              rd.falta < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'
-                            } ${rd.falta < 0 && row.kind === 'item' && !row.isShelf ? 'cursor-pointer hover:bg-orange-100/50 dark:hover:bg-orange-900/20 transition-colors' : ''}`}
+                              faltaCell < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'
+                            }`}
                             style={{ width: `${Math.max(40, vCol.size / 2)}px` }}
                           >
-                            {row.kind === 'item' && row.isShelf ? '-' : formatCellNum(rd.falta)}
+                            {row.kind === 'item' && row.isShelf ? '-' : formatCellNum(faltaCell)}
                           </td>
                         </React.Fragment>
                       );
@@ -1348,17 +1575,33 @@ const ProjectionTable: React.FC<Props> = ({
               {tooltip.type === 'P' ? 'Destinos:' : 'Destinos não atendidos:'}
             </p>
             <ul className="space-y-2 max-h-56 overflow-auto pr-1">
-              {tooltip.breakdown.map((b, i) => (
-                <li key={i} className="text-[11px]">
-                  <div className="flex justify-between gap-4 items-baseline">
-                    <span className="text-gray-800 dark:text-gray-100">{b.destino}</span>
-                    <span className="font-bold text-gray-800 dark:text-gray-100">{b.qty}</span>
-                  </div>
-                  {b.numeroPedido && (
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 pl-0">Pedido: {b.numeroPedido}</p>
-                  )}
-                </li>
-              ))}
+              {tooltip.type === 'P' ? (
+                tooltipPedidoGroups.map((g, i) => (
+                  <li key={`${g.destino}-${i}`} className="text-[11px]">
+                    <div className="flex justify-between gap-4 items-baseline">
+                      <span className="text-gray-800 dark:text-gray-100 font-semibold">{g.destino}</span>
+                      <span className="font-bold text-gray-800 dark:text-gray-100">{g.total}</span>
+                    </div>
+                    <ul className="mt-1 space-y-1">
+                      {g.pedidos.map((p, j) => (
+                        <li key={`${p.numeroPedido}-${j}`} className="text-[10px] text-gray-500 dark:text-gray-400 flex justify-between gap-3 pl-2">
+                          <span>Pedido {p.numeroPedido}</span>
+                          <span className="font-semibold">{p.qty}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))
+              ) : (
+                tooltip.breakdown.map((b, i) => (
+                  <li key={i} className="text-[11px]">
+                    <div className="flex justify-between gap-4 items-baseline">
+                      <span className="text-gray-800 dark:text-gray-100">{b.destino}</span>
+                      <span className="font-bold text-gray-800 dark:text-gray-100">{b.qty}</span>
+                    </div>
+                  </li>
+                ))
+              )}
             </ul>
           </div>
         </div>

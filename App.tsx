@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, startTransition } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, startTransition, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart3,
@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
-import { getDateColumns, getTodayStart, getSoMoveisHorizonInfo } from './utils';
+import { getDateColumns, getExtendedDateColumns, getTodayStart, getSoMoveisHorizonInfo } from './utils';
 import { fetchStock } from './api';
 import {
   supabase,
@@ -97,7 +97,7 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [projectionFilterRotas, setProjectionFilterRotas] = useState<Set<string>>(new Set());
   const [projectionFilterSetores, setProjectionFilterSetores] = useState<Set<string>>(new Set());
-  const [projectionFilterCategorias, setProjectionFilterCategorias] = useState<Set<string>>(new Set());
+  const [ignorePreviousConsumptions, setIgnorePreviousConsumptions] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
   const [showErpPanel, setShowErpPanel] = useState(false);
@@ -157,6 +157,9 @@ const App: React.FC = () => {
     return new Set(initialColumns.slice(0, 18).map((c) => c.key));
   });
   const ordersSimulation: Order[] = useMemo(() => mapProjecaoImportadaToOrders(simulationState.data), [simulationState.data]);
+
+  const projectionFullscreenRefPadrao = useRef<HTMLDivElement>(null);
+  const projectionFullscreenRefSimulado = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (simulationState.data.length > 0 || simulationState.considerarRequisicoes !== true) {
@@ -479,7 +482,10 @@ const App: React.FC = () => {
     alert('Sistema restaurado com sucesso!');
   };
 
-  const allDateColumns = useMemo(() => getDateColumns(60), []);
+  const allDateColumns = useMemo(
+    () => getExtendedDateColumns(60, [...orders, ...ordersSimulation]),
+    [orders, ordersSimulation]
+  );
   const dateColumns = useMemo(() => {
     const atrasados = allDateColumns.find((c) => c.isAtrasados);
     const future = allDateColumns.filter((c) => !c.isAtrasados && selectedDateKeys.has(c.key));
@@ -496,6 +502,31 @@ const App: React.FC = () => {
     const last = future[future.length - 1];
     return { label: `Horizonte: ${first.label} até ${last.label}` };
   }, [dateColumns]);
+
+  const appliedFiltersLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (projectionFilterRotas.size > 0) {
+      const rotaLabels: Record<string, string> = {
+        'Retirada na So Aço': '1-Retirada na So Aço',
+        'Retirada na So Moveis': '2-Retirada na So Moveis',
+        'Entrega em Grande Teresina': '3-Entrega em Grande Teresina',
+        'inserir em Romaneio': '4-Inserir em Romaneio',
+        'Requisição': '5-Requisicao',
+      };
+      const labels = Array.from(projectionFilterRotas).map((r) => rotaLabels[r] ?? r);
+      parts.push(`Rotas: ${labels.join(', ')}`);
+    }
+    if (projectionFilterSetores.size > 0) {
+      parts.push(`Setores: ${Array.from(projectionFilterSetores).join(', ')}`);
+    }
+    if (ignorePreviousConsumptions) {
+      parts.push('Desconsiderar consumos anteriores: Sim');
+    }
+    if (searchTerm.trim()) {
+      parts.push(`Busca: "${searchTerm.trim()}"`);
+    }
+    return parts.length > 0 ? parts.join(' | ') : '';
+  }, [projectionFilterRotas, projectionFilterSetores, ignorePreviousConsumptions, searchTerm]);
   const soMoveisHorizonInfo = useMemo(() => getSoMoveisHorizonInfo(), []);
   const todayStart = useMemo(() => getTodayStart(), []);
   const deferredSearchTerm = useDeferredValue(searchTerm);
@@ -506,10 +537,6 @@ const App: React.FC = () => {
 
   const handleProjectionSetoresChange = useCallback((next: Set<string>) => {
     startTransition(() => setProjectionFilterSetores(next));
-  }, []);
-
-  const handleProjectionCategoriasChange = useCallback((next: Set<string>) => {
-    startTransition(() => setProjectionFilterCategorias(next));
   }, []);
 
   const handleProjectionDatesChange = useCallback((next: Set<string>) => {
@@ -664,34 +691,42 @@ const App: React.FC = () => {
       <main className="flex-1 p-6 overflow-auto">
         <div className={activeTab === 'PROJECAO' && projectionSubMode === 'PADRAO' ? '' : 'hidden'}>
           <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
-            <ProjectionFiltersBar
-              projectionSource={projection}
-              filterDescCod={searchTerm}
-              onFilterDescCodChange={setSearchTerm}
-              selectedRotas={projectionFilterRotas}
-              onSelectedRotasChange={handleProjectionRotasChange}
-              selectedSetores={projectionFilterSetores}
-              onSelectedSetoresChange={handleProjectionSetoresChange}
-              selectedCategorias={projectionFilterCategorias}
-              onSelectedCategoriasChange={handleProjectionCategoriasChange}
-              dateOptions={selectableDateOptions}
-              selectedDateKeys={selectedDateKeys}
-              onSelectedDateKeysChange={handleProjectionDatesChange}
-              onGeneratePdf={() => setIsPdfModalOpen(true)}
-            />
-            <ProjectionTable
-              data={consolidatedData}
-              orders={orders}
-              horizonLabel={horizonInfo.label}
-              soMoveisHorizonLabel={soMoveisHorizonInfo.label}
-              dateColumns={dateColumns}
-              considerarRequisicoes={true}
-              onVisibleProductsCountChange={setVisibleProductsPadrao}
-              projectionSource={projection}
-              selectedRotas={projectionFilterRotas}
-              selectedSetores={projectionFilterSetores}
-              selectedCategorias={projectionFilterCategorias}
-            />
+            <div
+              ref={projectionFullscreenRefPadrao}
+              className="flex flex-col flex-1 min-h-0 gap-4"
+            >
+              <ProjectionFiltersBar
+                projectionSource={projection}
+                filterDescCod={searchTerm}
+                onFilterDescCodChange={setSearchTerm}
+                selectedRotas={projectionFilterRotas}
+                onSelectedRotasChange={handleProjectionRotasChange}
+                selectedSetores={projectionFilterSetores}
+                onSelectedSetoresChange={handleProjectionSetoresChange}
+                dateOptions={selectableDateOptions}
+                selectedDateKeys={selectedDateKeys}
+                onSelectedDateKeysChange={handleProjectionDatesChange}
+                ignorePreviousConsumptions={ignorePreviousConsumptions}
+                onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
+                onGeneratePdf={() => setIsPdfModalOpen(true)}
+              />
+              <div className="flex-1 min-h-0">
+                <ProjectionTable
+                  fullscreenContainerRef={projectionFullscreenRefPadrao}
+                  data={consolidatedData}
+                  orders={orders}
+                  horizonLabel={horizonInfo.label}
+                  soMoveisHorizonLabel={soMoveisHorizonInfo.label}
+                  dateColumns={dateColumns}
+                  considerarRequisicoes={true}
+                  onVisibleProductsCountChange={setVisibleProductsPadrao}
+                  projectionSource={projection}
+                  selectedRotas={projectionFilterRotas}
+                  selectedSetores={projectionFilterSetores}
+                  ignorePreviousConsumptions={ignorePreviousConsumptions}
+                />
+              </div>
+            </div>
           </div>
         </div>
         <div className={activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' ? '' : 'hidden'}>
@@ -734,7 +769,10 @@ const App: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <>
+              <div
+                ref={projectionFullscreenRefSimulado}
+                className="flex flex-col flex-1 min-h-0 gap-4"
+              >
                 <ProjectionFiltersBar
                   projectionSource={simulationState.data}
                   filterDescCod={searchTerm}
@@ -743,27 +781,30 @@ const App: React.FC = () => {
                   onSelectedRotasChange={handleProjectionRotasChange}
                   selectedSetores={projectionFilterSetores}
                   onSelectedSetoresChange={handleProjectionSetoresChange}
-                  selectedCategorias={projectionFilterCategorias}
-                  onSelectedCategoriasChange={handleProjectionCategoriasChange}
                   dateOptions={selectableDateOptions}
                   selectedDateKeys={selectedDateKeys}
                   onSelectedDateKeysChange={handleProjectionDatesChange}
+                  ignorePreviousConsumptions={ignorePreviousConsumptions}
+                  onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
                   onGeneratePdf={() => setIsPdfModalOpen(true)}
                 />
-                <ProjectionTable
-                  data={consolidatedDataSimulation}
-                  orders={ordersSimulation}
-                  horizonLabel={horizonInfo.label}
-                  soMoveisHorizonLabel={soMoveisHorizonInfo.label}
-                  dateColumns={dateColumns}
-                  considerarRequisicoes={simulationState.considerarRequisicoes}
-                  onVisibleProductsCountChange={setVisibleProductsSimulacao}
-                  projectionSource={simulationState.data}
-                  selectedRotas={projectionFilterRotas}
-                  selectedSetores={projectionFilterSetores}
-                  selectedCategorias={projectionFilterCategorias}
-                />
-              </>
+                <div className="flex-1 min-h-0">
+                  <ProjectionTable
+                    fullscreenContainerRef={projectionFullscreenRefSimulado}
+                    data={consolidatedDataSimulation}
+                    orders={ordersSimulation}
+                    horizonLabel={horizonInfo.label}
+                    soMoveisHorizonLabel={soMoveisHorizonInfo.label}
+                    dateColumns={dateColumns}
+                    considerarRequisicoes={simulationState.considerarRequisicoes}
+                    onVisibleProductsCountChange={setVisibleProductsSimulacao}
+                    projectionSource={simulationState.data}
+                    selectedRotas={projectionFilterRotas}
+                    selectedSetores={projectionFilterSetores}
+                    ignorePreviousConsumptions={ignorePreviousConsumptions}
+                  />
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -828,6 +869,7 @@ const App: React.FC = () => {
               : 'Relatório de Projeção de Estoque'
           }
           projection={projectionSubMode === 'SIMULADO' ? simulationState.data : projection}
+          appliedFilters={appliedFiltersLabel}
         />
       )}
 
