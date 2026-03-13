@@ -189,7 +189,7 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
             <button
               type="button"
               onClick={() => setCollapsed(false)}
-              className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-[10px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
+              className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-[10px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
             >
               <ChevronsUpDown className="w-3 h-3" />
               Mostrar filtros

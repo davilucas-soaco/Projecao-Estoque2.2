@@ -1002,6 +1002,27 @@ const ProjectionTable: React.FC<Props> = ({
     });
   }, [dataFilteredByColumns, activeRouteValueFilterKeys, routeValueFilters]);
 
+  /**
+   * Oculta colunas de data (YYYY-MM-DD) sem nenhuma unidade pedida no conjunto atualmente exibido.
+   * Colunas especiais (ex.: Só Móveis / Atrasados) permanecem visíveis.
+   */
+  const columnsToRender = useMemo(() => {
+    const isDateKey = (key: string) => /^\d{4}-\d{2}-\d{2}$/.test(key);
+    const hasPedidoInCol = (item: ProductConsolidated | ComponentData, colKey: string) =>
+      (item.routeData?.[colKey]?.pedido ?? 0) > 0;
+
+    return visibleColumns.filter((col) => {
+      if (!isDateKey(col.key)) return true;
+      return dataFilteredByValues.some((item) => {
+        if (hasPedidoInCol(item, col.key)) return true;
+        if (item.isShelf && item.components?.length) {
+          return item.components.some((comp) => hasPedidoInCol(comp, col.key));
+        }
+        return false;
+      });
+    });
+  }, [visibleColumns, dataFilteredByValues]);
+
   const autoExpandedShelves = useMemo(() => {
     const hasFilter =
       selectedRotas.size > 0 ||
@@ -1143,7 +1164,7 @@ const ProjectionTable: React.FC<Props> = ({
   });
 
   const columnVirtualizer = useVirtualizer({
-    count: visibleColumns.length,
+    count: columnsToRender.length,
     horizontal: true,
     getScrollElement: () => tableContainerRef.current,
     estimateSize: () => 96,
@@ -1177,7 +1198,7 @@ const ProjectionTable: React.FC<Props> = ({
     );
   };
 
-  const totalColSpan = 5 + visibleColumns.length * 2;
+  const totalColSpan = 5 + columnsToRender.length * 2;
   const activeMenuKey = routeValueFilterMenu
     ? getRouteFilterKey(routeValueFilterMenu.colKey, routeValueFilterMenu.field)
     : null;
@@ -1245,7 +1266,7 @@ const ProjectionTable: React.FC<Props> = ({
       `<col style="width:100px">`,
       `<col style="width:100px">`,
       `<col style="width:100px">`,
-      ...visibleColumns.flatMap(() => [`<col style="width:68px">`, `<col style="width:68px">`]),
+      ...columnsToRender.flatMap(() => [`<col style="width:68px">`, `<col style="width:68px">`]),
     ].join('');
 
     const topHeader = [
@@ -1254,7 +1275,7 @@ const ProjectionTable: React.FC<Props> = ({
       `<th style="background:#062c61;border:1px solid #203f77;padding:12px 12px;height:34px;"></th>`,
       `<th style="background:#062c61;border:1px solid #203f77;padding:12px 12px;height:34px;"></th>`,
       `<th style="background:#062c61;border:1px solid #203f77;padding:12px 12px;height:34px;"></th>`,
-      ...visibleColumns.map(
+      ...columnsToRender.map(
         (col) =>
           `<th colspan="2" style="background:#1E22AA;color:#fff;border:1px solid #203f77;padding:10px 10px;height:34px;text-align:center;">${escapeHtml(
             col.label
@@ -1268,7 +1289,7 @@ const ProjectionTable: React.FC<Props> = ({
       `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">ESTOQUE</th>`,
       `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">PEDIDO</th>`,
       `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">FALTA</th>`,
-      ...visibleColumns.flatMap(() => [
+      ...columnsToRender.flatMap(() => [
         `<th style="background:#1d6f2f;color:#fff;border:1px solid #203f77;padding:8px 8px;height:32px;">P</th>`,
         `<th style="background:#9b0f0f;color:#fff;border:1px solid #203f77;padding:8px 8px;height:32px;">F</th>`,
       ]),
@@ -1291,7 +1312,7 @@ const ProjectionTable: React.FC<Props> = ({
           )}</td>`,
         ];
 
-        const routeCells = visibleColumns.flatMap((col) => {
+        const routeCells = columnsToRender.flatMap((col) => {
           const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
           const pedidoDisplay = Math.max(0, Number(rd.pedido ?? 0));
           const faltaDisplay = ignorePreviousConsumptions
@@ -1472,7 +1493,7 @@ const ProjectionTable: React.FC<Props> = ({
                 </th>
                 {leftColPadding > 0 && <th colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
                 {virtualColumns.map((vCol) => {
-                  const col = visibleColumns[vCol.index];
+                  const col = columnsToRender[vCol.index];
                   return (
                   <th
                     key={col.key}
@@ -1607,7 +1628,7 @@ const ProjectionTable: React.FC<Props> = ({
                     </td>
                     {leftColPadding > 0 && <td colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
                     {virtualColumns.map((vCol) => {
-                      const col = visibleColumns[vCol.index];
+                      const col = columnsToRender[vCol.index];
                       const rd = row.routeData[col.key] || { pedido: 0, falta: 0 };
                       const pedidoCell = Math.max(0, Number(rd.pedido ?? 0));
                       const estoqueCell = Math.max(0, Number((row as { estoqueAtual?: number }).estoqueAtual ?? 0));
