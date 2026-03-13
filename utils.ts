@@ -134,14 +134,14 @@ export const getTodayStart = (): Date => {
   return d;
 };
 
-/** Gera colunas de data para projeção: Atrasados + N dias futuros */
+/** Gera colunas de data para projeção: Atrasados + hoje + N dias futuros */
 export const getDateColumns = (daysAhead: number = 60): { key: string; label: string; date: Date | null; isAtrasados: boolean }[] => {
   const today = getTodayStart();
   const cols: { key: string; label: string; date: Date | null; isAtrasados: boolean }[] = [
-    { key: 'ATRASADOS', label: 'Atrasados até hoje', date: null, isAtrasados: true }
+    { key: 'ATRASADOS', label: 'Atrasados', date: null, isAtrasados: true }
   ];
   const safeDaysAhead = Math.max(1, daysAhead);
-  for (let i = 1; i <= safeDaysAhead; i++) {
+  for (let i = 0; i <= safeDaysAhead; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     const key = d.toISOString().slice(0, 10);
@@ -170,7 +170,7 @@ export const getExtendedDateColumns = (
     const d = parseOrderDate(ord.dataEntrega);
     if (!d) continue;
     d.setHours(0, 0, 0, 0);
-    if (d <= today) continue;
+    if (d < today) continue;
     const key = d.toISOString().slice(0, 10);
     if (!keysSet.has(key)) {
       keysSet.add(key);

@@ -514,7 +514,7 @@ const App: React.FC = () => {
   const selectableDateOptions = useMemo(
     () => [
       { key: ROUTE_SO_MOVEIS, label: 'Só Móveis' },
-      { key: 'ATRASADOS', label: 'Atrasados até hoje' },
+      { key: 'ATRASADOS', label: 'Atrasados' },
       ...allDateColumns.filter((c) => !c.isAtrasados).map((c) => ({ key: c.key, label: c.label })),
     ],
     [allDateColumns]

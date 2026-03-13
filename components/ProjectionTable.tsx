@@ -407,7 +407,7 @@ const ProjectionTable: React.FC<Props> = ({
       const d = parseOrderDate(previsao);
       if (!d) return;
       d.setHours(0, 0, 0, 0);
-      if (d <= todayStart) {
+      if (d < todayStart) {
         overdueDates.add(
           d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
         );

@@ -46,6 +46,8 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
   portalContainerRef,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const [showIgnorePrompt, setShowIgnorePrompt] = useState(false);
+  const [pendingIgnoreChoice, setPendingIgnoreChoice] = useState(false);
 
   // Draft state – só aplica ao clicar em "Aplicar Filtro" (código/descrição vem da tabela)
   const [draftRotas, setDraftRotas] = useState<Set<string>>(new Set(selectedRotas));
@@ -66,6 +68,20 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
     onSelectedSetoresChange(new Set(draftSetores));
     onSelectedDateKeysChange(new Set(draftDateKeys));
     onIgnorePreviousConsumptionsChange(draftIgnore);
+  };
+
+  const openApplyPrompt = () => {
+    setPendingIgnoreChoice(draftIgnore);
+    setShowIgnorePrompt(true);
+  };
+
+  const confirmApplyFilters = () => {
+    setDraftIgnore(pendingIgnoreChoice);
+    onSelectedRotasChange(new Set(draftRotas));
+    onSelectedSetoresChange(new Set(draftSetores));
+    onSelectedDateKeysChange(new Set(draftDateKeys));
+    onIgnorePreviousConsumptionsChange(pendingIgnoreChoice);
+    setShowIgnorePrompt(false);
   };
 
   const clearFilters = () => {
@@ -149,20 +165,6 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
                   />
                 </div>
               )}
-              <div className="shrink-0 min-w-[110px]">
-                <label className="text-[9px] font-bold uppercase tracking-wider text-neutral block mb-0.5">
-                  Desconsiderar consumos ant.
-                </label>
-                <select
-                  value={draftIgnore ? 'sim' : 'nao'}
-                  onChange={(e) => setDraftIgnore(e.target.value === 'sim')}
-                  className="w-full min-w-[90px] pl-2 pr-7 py-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f] text-xs font-medium text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-secondary appearance-none cursor-pointer"
-                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.4rem center', backgroundSize: '0.875rem' }}
-                >
-                  <option value="nao">Não</option>
-                  <option value="sim">Sim</option>
-                </select>
-              </div>
               {dateOptionsForMultiSelect.length > 0 && (
                 <div className="shrink-0 min-w-[120px] max-w-[180px] flex-1">
                   <MultiSelectWithSearch
@@ -202,7 +204,7 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={applyFilters}
+          onClick={openApplyPrompt}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm bg-secondary hover:bg-blue-700 text-white transition-all active:scale-95 shadow-md"
         >
           <Filter className="w-4 h-4" />
@@ -224,6 +226,52 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
           Gerar PDF
         </button>
       </div>
+
+      {showIgnorePrompt && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#252525] shadow-2xl p-4">
+            <p className="text-sm font-bold text-gray-800 dark:text-gray-100 mb-3">
+              Deseja Desconsiderar consumos anteriores ?
+            </p>
+            <div className="flex gap-4 mb-4">
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input
+                  type="radio"
+                  name="ignore-consumos"
+                  checked={pendingIgnoreChoice === true}
+                  onChange={() => setPendingIgnoreChoice(true)}
+                />
+                <span>Sim</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input
+                  type="radio"
+                  name="ignore-consumos"
+                  checked={pendingIgnoreChoice === false}
+                  onChange={() => setPendingIgnoreChoice(false)}
+                />
+                <span>Não</span>
+              </label>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowIgnorePrompt(false)}
+                className="px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmApplyFilters}
+                className="px-3 py-1.5 rounded-md bg-secondary hover:bg-blue-700 text-white text-sm font-semibold"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -206,10 +206,10 @@ export function buildConsolidatedData(
         if (banEx) banEx.qty += qtyBan;
         else ban.routeData[routeName].breakdown!.push({ destino: 'Requisição', qty: qtyBan, numeroPedido: order.numeroPedido });
       }
-      if (dEntrega <= todayStart && categoria !== CATEGORY_REQUISICAO) {
+      if (dEntrega < todayStart && categoria !== CATEGORY_REQUISICAO) {
         addToDateColumn(col, 'ATRASADOS', qtyCol, destDisplay, order.numeroPedido);
         addToDateColumn(ban, 'ATRASADOS', qtyBan, destDisplay, order.numeroPedido);
-      } else if (dEntrega > todayStart) {
+      } else {
         const key = dateToKey(dEntrega);
         if (dateKeysSet.has(key)) {
           addToDateColumn(col, key, qtyCol, destDisplay, order.numeroPedido);
@@ -252,14 +252,14 @@ export function buildConsolidatedData(
       }
     }
 
-    if (dEntrega <= todayStart && categoria !== CATEGORY_REQUISICAO) {
+    if (dEntrega < todayStart && categoria !== CATEGORY_REQUISICAO) {
       addToDateColumn(prod, 'ATRASADOS', orderQty, destDisplay, order.numeroPedido);
       if (!flattenShelfProducts && prod.isShelf && prod.components) {
         const fic = shelfFichaMap.get(prod.codigo.trim().toUpperCase())!;
         addToDateColumn(prod.components[0], 'ATRASADOS', orderQty * fic.qtdColuna, destDisplay, order.numeroPedido);
         addToDateColumn(prod.components[1], 'ATRASADOS', orderQty * fic.qtdBandeja, destDisplay, order.numeroPedido);
       }
-    } else if (dEntrega > todayStart) {
+    } else {
       const key = dateToKey(dEntrega);
       if (dateKeysSet.has(key)) {
         addToDateColumn(prod, key, orderQty, destDisplay, order.numeroPedido);
