@@ -381,3 +381,147 @@ export function buildConsolidatedData(
   }
   return result;
 }
+
+/** Recalcula o consumo de estoque considerando apenas as colunas visíveis/selecionadas.
+ * Colunas ocultas têm sua quantidade pedida ignorada — não consomem estoque.
+ * Usado para PDFs onde apenas colunas selecionadas devem consumir o estoque. */
+export function recalculateConsumptionForVisibleColumns(
+  data: ProductConsolidated[],
+  visibleColumnKeys: string[],
+  considerarRequisicoes: boolean,
+  dateColumns: DateColumn[]
+): ProductConsolidated[] {
+  // Ordem de consumo: Requisição, ATRASADOS, datas cronologicamente.
+  // Usa visibleColumnKeys diretamente para incluir datas de rotas que podem não estar em dateColumns.
+  const buildConsumptionOrder = (keys: string[]) => {
+    const order: string[] = [];
+    if (considerarRequisicoes && keys.includes(CATEGORY_REQUISICAO)) order.push(CATEGORY_REQUISICAO);
+    if (keys.includes('ATRASADOS')) order.push('ATRASADOS');
+    const rest = keys.filter((k) => k !== CATEGORY_REQUISICAO && k !== 'ATRASADOS').sort((a, b) => a.localeCompare(b));
+    order.push(...rest);
+    return order;
+  };
+  const consumptionOrder = buildConsumptionOrder(visibleColumnKeys);
+
+  function buildBreakdownFalta(
+    breakdown: { destino: string; qty: number; numeroPedido?: string }[] | undefined,
+    balanceAtStart: number,
+    missing: number
+  ): { destino: string; qty: number; numeroPedido?: string }[] {
+    if (missing <= 0 || !breakdown?.length) return [];
+    const result: { destino: string; qty: number; numeroPedido?: string }[] = [];
+    let remaining = missing;
+    let balance = balanceAtStart;
+    for (const b of breakdown) {
+      if (remaining <= 0) break;
+      const qty = b.qty;
+      if (balance >= qty) {
+        balance -= qty;
+        continue;
+      }
+      const unfulfilled = balance > 0 ? qty - balance : qty;
+      balance = 0;
+      const take = Math.min(unfulfilled, remaining);
+      if (take > 0) {
+        result.push({ destino: b.destino, qty: take, ...(b.numeroPedido ? { numeroPedido: b.numeroPedido } : {}) });
+        remaining -= take;
+      }
+    }
+    return result;
+  }
+
+  const clone = (p: ProductConsolidated): ProductConsolidated => {
+    const routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number; numeroPedido?: string }[]; breakdownFalta?: { destino: string; qty: number; numeroPedido?: string }[] }> = {};
+    for (const k of Object.keys(p.routeData || {})) {
+      const rd = p.routeData![k];
+      if (!rd) continue;
+      routeData[k] = {
+        pedido: rd.pedido ?? 0,
+        falta: rd.falta ?? 0,
+        breakdown: rd.breakdown?.map((b) => ({ ...b })),
+        breakdownFalta: rd.breakdownFalta?.map((b) => ({ ...b })),
+      };
+    }
+    const out: ProductConsolidated = {
+      ...p,
+      routeData,
+      components: p.components?.map((c) => {
+        const crd: typeof routeData = {};
+        for (const k of Object.keys(c.routeData || {})) {
+          const rd = c.routeData![k];
+          if (!rd) continue;
+          crd[k] = {
+            pedido: rd.pedido ?? 0,
+            falta: rd.falta ?? 0,
+            breakdown: rd.breakdown?.map((b) => ({ ...b })),
+            breakdownFalta: rd.breakdownFalta?.map((b) => ({ ...b })),
+          };
+        }
+        return { ...c, routeData: crd };
+      }),
+    };
+    return out;
+  };
+
+  const result = data.map(clone);
+
+  for (const prod of result) {
+    if (!prod.isShelf) {
+      let runningBalance = Math.max(0, prod.estoqueAtual);
+      let totalFalta = 0;
+
+      for (const colKey of consumptionOrder) {
+        const rd = prod.routeData[colKey];
+        if (!rd) continue;
+        const needed = rd.pedido;
+        const balanceAtStart = runningBalance;
+        if (runningBalance >= needed) {
+          rd.falta = 0;
+          rd.breakdownFalta = undefined;
+          runningBalance -= needed;
+        } else {
+          const missing = needed - runningBalance;
+          rd.falta = -missing;
+          totalFalta += rd.falta;
+          rd.breakdownFalta = buildBreakdownFalta(rd.breakdown, balanceAtStart, missing);
+          runningBalance = 0;
+        }
+      }
+      prod.pendenteProducao = totalFalta;
+    } else if (prod.components) {
+      let shelfTotalFalta = Infinity;
+
+      for (const comp of prod.components) {
+        let runningBalance = Math.max(0, comp.estoqueAtual);
+        let compTotalFalta = 0;
+
+        for (const colKey of consumptionOrder) {
+          const rd = comp.routeData[colKey];
+          if (!rd) continue;
+          const needed = rd.pedido;
+          const balanceAtStart = runningBalance;
+          if (runningBalance >= needed) {
+            rd.falta = 0;
+            rd.breakdownFalta = undefined;
+            runningBalance -= needed;
+          } else {
+            const missing = needed - runningBalance;
+            rd.falta = -missing;
+            compTotalFalta += rd.falta;
+            rd.breakdownFalta = buildBreakdownFalta(rd.breakdown, balanceAtStart, missing);
+            runningBalance = 0;
+          }
+          if (!prod.routeData[colKey]) prod.routeData[colKey] = { pedido: 0, falta: 0 };
+          prod.routeData[colKey].falta = Math.min(prod.routeData[colKey].falta ?? 0, rd.falta);
+        }
+
+        comp.falta = compTotalFalta;
+        shelfTotalFalta = Math.min(shelfTotalFalta, compTotalFalta);
+      }
+
+      prod.pendenteProducao = shelfTotalFalta;
+    }
+  }
+
+  return result;
+}

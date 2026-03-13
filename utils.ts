@@ -349,6 +349,8 @@ export function getSupervisaoCellForItem(
   options?: {
     allowedDateKeys?: Set<string>;
     limitSpecialToAllowedDates?: boolean;
+    /** Quando informado, restringe consumo e soma apenas às colunas visíveis (ex.: datas das rotas selecionadas no PDF). */
+    visibleColKeysForConsumption?: string[];
   }
 ): { pedido: number; falta: number } {
   const destino = getDestinoFromCategoriaKey(categoriaKey);
@@ -364,10 +366,13 @@ export function getSupervisaoCellForItem(
   }
 
   const fullColKeys = Object.keys(item.routeData);
-  const colKeysForSum = limitByAllowedDates && options?.allowedDateKeys?.size
-    ? fullColKeys.filter((key) => options!.allowedDateKeys!.has(key))
+  const colKeysToUse = options?.visibleColKeysForConsumption?.length
+    ? options.visibleColKeysForConsumption.filter((k) => fullColKeys.includes(k))
     : fullColKeys;
-  const consumptionOrder = getConsumptionOrder(fullColKeys);
+  const colKeysForSum = limitByAllowedDates && options?.allowedDateKeys?.size
+    ? colKeysToUse.filter((key) => options!.allowedDateKeys!.has(key))
+    : colKeysToUse;
+  const consumptionOrder = getConsumptionOrder(colKeysToUse);
   let runningBalance = Math.max(0, item.estoqueAtual ?? 0);
   let pedido = 0;
   let falta = 0;

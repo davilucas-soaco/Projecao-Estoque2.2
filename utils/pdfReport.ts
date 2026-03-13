@@ -758,17 +758,8 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
       logoTop + 22
     );
     doc.setFontSize(7);
-    const configText = (appliedFilters ?? '').trim();
-    if (configText) {
-      const configLines = configText.split('\n');
-      let configY = logoTop + 34;
-      for (const line of configLines) {
-        doc.text(line, textStartX, configY);
-        configY += 9;
-      }
-    } else {
-      doc.text('Configurações do PDF: Nenhum', textStartX, logoTop + 34);
-    }
+    const configText = (appliedFilters ?? '').trim() || 'Configurações do PDF: Nenhum';
+    doc.text(configText, textStartX, logoTop + 34);
 
     startY = headerHeight + 12;
   };
@@ -884,23 +875,24 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
     const head: (string | { content: string; colSpan: number })[][] = [headRow1, headRow2];
 
     const body: string[][] = [];
+    const orderedChunkCols = [...colsBeforePrincipal, principalCol];
     for (const item of dataFiltered) {
       const isComponent = 'falta' in item && !('isShelf' in item);
       const codigo = isComponent ? `  └ ${item.codigo}` : item.codigo;
       const isShelf = 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
       const estoque = isShelf ? '-' : String(item.estoqueAtual);
-      const pedido = item.totalPedido === 0 ? '-' : String(item.totalPedido);
-      const pendente =
-        isShelf
-          ? '-'
-          : 'pendenteProducao' in item
-            ? (item as ProductConsolidated).pendenteProducao
-            : (item as ComponentData).falta;
-      const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
+      let pedidoChunk = 0;
+      let faltaChunk = 0;
+      for (const col of orderedChunkCols) {
+        const cell = getCellForColumn(item, col.key);
+        pedidoChunk += cell.pedido ?? 0;
+        faltaChunk += cell.falta ?? 0;
+      }
+      const pedido = pedidoChunk === 0 ? '-' : String(pedidoChunk);
+      const falta = faltaChunk >= 0 ? '-' : String(faltaChunk);
 
       const cellPrincipal = getCellForColumn(item, principalCol.key);
-      const principalMetrics = getCellMetrics(cellPrincipal);
-      const status = getStatusFromMetrics(principalMetrics);
+      const status = getStatusFromMetrics(getCellMetrics(cellPrincipal));
 
       const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
       for (const col of colsBeforePrincipal) {
@@ -995,11 +987,12 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
             cellData.cell.styles.textColor = [220, 38, 38];
           }
           if (item && !isShelf && colIndex === 4) {
-            const pend =
-              'pendenteProducao' in item
-                ? (item as ProductConsolidated).pendenteProducao
-                : (item as ComponentData).falta;
-            if (pend < 0) cellData.cell.styles.textColor = FONT_AMARELO;
+            let faltaChunk = 0;
+            for (const col of orderedChunkCols) {
+              const c = getCellForColumn(item, col.key);
+              faltaChunk += c.falta ?? 0;
+            }
+            if (faltaChunk < 0) cellData.cell.styles.textColor = FONT_AMARELO;
           }
           if (colIndex >= 5 && colIndex < 5 + pairCount * 2) {
             const routeIdx = Math.floor((colIndex - 5) / 2);
@@ -1050,6 +1043,8 @@ interface GeneratePdfV3SupervisaoOptions {
   appliedFilters?: string;
   /** Data final do horizonte de consumo para categorias especiais (Só Móveis, Entrega GT, Retirada). Se informada, limita o consumo à última data das rotas/colunas selecionadas. */
   maxHorizonEndDate?: Date;
+  /** Datas (YYYY-MM-DD) das rotas visíveis para incluir no consumo. Garante que estoque seja consumido pelas rotas selecionadas. */
+  visibleRouteDateKeys?: string[];
 }
 
 export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3SupervisaoOptions): Promise<void> {
@@ -1066,6 +1061,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
     todayStart,
     appliedFilters,
     maxHorizonEndDate,
+    visibleRouteDateKeys,
   } = options;
 
   const doc = new jsPDF({
@@ -1112,11 +1108,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
     );
     doc.setFontSize(7);
     const configText = (appliedFilters ?? '').trim() || 'Configurações do PDF: Nenhum';
-    const configLines = configText.split('\n');
-    const lineHeight = 9;
-    configLines.forEach((line, i) => {
-      doc.text(line.trim(), textStartX, logoTop + 34 + i * lineHeight);
-    });
+    doc.text(configText, textStartX, logoTop + 34);
 
     startY = headerHeight + 12;
   };
@@ -1127,10 +1119,17 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
     dateColumns && dateColumns.length > 0
       ? buildSpecialHorizonContextFromDateColumns(dateColumns, data, todayStart, maxHorizonEndDate)
       : buildSpecialHorizonContext(data);
+  const visibleColKeysForConsumption = [
+    'ATRASADOS',
+    ...Array.from(specialHorizon.allowedDateKeys),
+    ...(visibleRouteDateKeys ?? []),
+  ];
+  const visibleColKeysSet = new Set(visibleColKeysForConsumption);
   const getSupervisaoCell = (item: ProductConsolidated | ComponentData, colKey: string) =>
     getSupervisaoCellForItem(item, colKey, {
       allowedDateKeys: specialHorizon.allowedDateKeys,
       limitSpecialToAllowedDates: isSpecialHorizonColumn(colKey),
+      visibleColKeysForConsumption: Array.from(visibleColKeysSet),
     });
 
   const getCellMetrics = (cell: { pedido: number; falta: number }) => {
@@ -1230,24 +1229,25 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
     const head: (string | { content: string; colSpan: number })[][] = [headRow1, headRow2];
 
     const body: string[][] = [];
+    const orderedChunkCols = [...colsBeforePrincipal, principalCol];
     for (const item of dataFiltered) {
       const isComponent = 'falta' in item && !('isShelf' in item);
       const codigo = isComponent ? `  └ ${item.codigo}` : item.codigo;
       const isShelf = 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
       const estoque = isShelf ? '-' : String(item.estoqueAtual);
-      const pedido = item.totalPedido === 0 ? '-' : String(item.totalPedido);
-      const pendente =
-        isShelf
-          ? '-'
-          : 'pendenteProducao' in item
-            ? (item as ProductConsolidated).pendenteProducao
-            : (item as ComponentData).falta;
-      const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
+      let pedidoChunk = 0;
+      let faltaChunk = 0;
+      for (const col of orderedChunkCols) {
+        const cell = getDisplayedCell(getSupervisaoCell(item, col.key));
+        pedidoChunk += cell.pedido ?? 0;
+        faltaChunk += cell.falta ?? 0;
+      }
+      const pedido = pedidoChunk === 0 ? '-' : String(pedidoChunk);
+      const falta = faltaChunk >= 0 ? '-' : String(faltaChunk);
 
       const cellPrincipal = getSupervisaoCell(item, principalCol.key);
       const principalCellDisplayed = getDisplayedCell(cellPrincipal);
-      const principalMetricsDisplayed = getCellMetrics(principalCellDisplayed);
-      const status = getStatusFromMetrics(principalMetricsDisplayed);
+      const status = getStatusFromMetrics(getCellMetrics(principalCellDisplayed));
 
       const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
 
@@ -1371,19 +1371,21 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
             cellData.cell.styles.textColor = [220, 38, 38];
           }
           if (item && colIndex === statusIndex) {
-            const principal = getCellMetrics(getDisplayedCell(getSupervisaoCell(item, principalCol.key)));
-            if (principal.faltante > 0) {
+            const principalCell = getDisplayedCell(getSupervisaoCell(item, principalCol.key));
+            const principalMetrics = getCellMetrics(principalCell);
+            if (principalMetrics.faltante > 0) {
               cellData.cell.styles.textColor = [220, 38, 38];
             } else {
               cellData.cell.styles.textColor = [34, 197, 94];
             }
           }
           if (item && !isShelf && colIndex === 4) {
-            const pend =
-              'pendenteProducao' in item
-                ? (item as ProductConsolidated).pendenteProducao
-                : (item as ComponentData).falta;
-            if (typeof pend === 'number' && pend < 0) cellData.cell.styles.textColor = FONT_AMARELO;
+            let faltaChunk = 0;
+            for (const col of orderedChunkCols) {
+              const c = getDisplayedCell(getSupervisaoCell(item, col.key));
+              faltaChunk += c.falta ?? 0;
+            }
+            if (faltaChunk < 0) cellData.cell.styles.textColor = FONT_AMARELO;
           }
           if (colIndex >= routeStartIndex && item) {
             const colKey = colIndexToKey[colIndex];

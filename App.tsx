@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
-import { getDateColumns, getExtendedDateColumns, getTodayStart, getSoMoveisHorizonInfo } from './utils';
+import { getDateColumns, getExtendedDateColumns, getTodayStart, getSoMoveisHorizonInfo, ROUTE_SO_MOVEIS } from './utils';
 import { fetchStock } from './api';
 import {
   supabase,
@@ -94,7 +94,6 @@ const App: React.FC = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isImportSimulationModalOpen, setIsImportSimulationModalOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
   const [projectionFilterRotas, setProjectionFilterRotas] = useState<Set<string>>(new Set());
   const [projectionFilterSetores, setProjectionFilterSetores] = useState<Set<string>>(new Set());
   const [ignorePreviousConsumptions, setIgnorePreviousConsumptions] = useState(false);
@@ -154,7 +153,10 @@ const App: React.FC = () => {
   const [simulationState, setSimulationState] = useState<SimulationState>(loadSimulationFromStorage);
   const [selectedDateKeys, setSelectedDateKeys] = useState<Set<string>>(() => {
     const initialColumns = getDateColumns(60).filter((c) => !c.isAtrasados);
-    return new Set(initialColumns.map((c) => c.key));
+    const keys = new Set(initialColumns.map((c) => c.key));
+    keys.add(ROUTE_SO_MOVEIS);
+    keys.add('ATRASADOS');
+    return keys;
   });
   const ordersSimulation: Order[] = useMemo(() => mapProjecaoImportadaToOrders(simulationState.data), [simulationState.data]);
 
@@ -496,12 +498,24 @@ const App: React.FC = () => {
     });
   }, [allDateColumns]);
   const dateColumns = useMemo(() => {
+    const result: { key: string; label: string; date: Date | null; isAtrasados: boolean }[] = [];
+    if (selectedDateKeys.has(ROUTE_SO_MOVEIS)) {
+      result.push({ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', date: null, isAtrasados: false });
+    }
     const atrasados = allDateColumns.find((c) => c.isAtrasados);
+    if (atrasados && selectedDateKeys.has('ATRASADOS')) {
+      result.push(atrasados);
+    }
     const future = allDateColumns.filter((c) => !c.isAtrasados && selectedDateKeys.has(c.key));
-    return [...(atrasados ? [atrasados] : []), ...future];
+    result.push(...future);
+    return result;
   }, [allDateColumns, selectedDateKeys]);
   const selectableDateOptions = useMemo(
-    () => allDateColumns.filter((c) => !c.isAtrasados).map((c) => ({ key: c.key, label: c.label })),
+    () => [
+      { key: ROUTE_SO_MOVEIS, label: 'Só Móveis' },
+      { key: 'ATRASADOS', label: 'Atrasados até hoje' },
+      ...allDateColumns.filter((c) => !c.isAtrasados).map((c) => ({ key: c.key, label: c.label })),
+    ],
     [allDateColumns]
   );
   const horizonInfo = useMemo(() => {
@@ -519,7 +533,6 @@ const App: React.FC = () => {
         'Retirada na So Aço': '1-Retirada na So Aço',
         'Retirada na So Moveis': '2-Retirada na So Moveis',
         'Entrega em Grande Teresina': '3-Entrega em Grande Teresina',
-        'inserir em Romaneio': '4-Inserir em Romaneio',
         'Requisição': '5-Requisicao',
       };
       const labels = Array.from(projectionFilterRotas).map((r) => rotaLabels[r] ?? r);
@@ -531,14 +544,10 @@ const App: React.FC = () => {
     if (ignorePreviousConsumptions) {
       parts.push('Desconsiderar consumos anteriores: Sim');
     }
-    if (searchTerm.trim()) {
-      parts.push(`Busca: "${searchTerm.trim()}"`);
-    }
     return parts.length > 0 ? parts.join(' | ') : '';
-  }, [projectionFilterRotas, projectionFilterSetores, ignorePreviousConsumptions, searchTerm]);
+  }, [projectionFilterRotas, projectionFilterSetores, ignorePreviousConsumptions]);
   const soMoveisHorizonInfo = useMemo(() => getSoMoveisHorizonInfo(), []);
   const todayStart = useMemo(() => getTodayStart(), []);
-  const deferredSearchTerm = useDeferredValue(searchTerm);
 
   const handleProjectionRotasChange = useCallback((next: Set<string>) => {
     startTransition(() => setProjectionFilterRotas(next));
@@ -554,23 +563,59 @@ const App: React.FC = () => {
 
   const consolidatedData = useMemo(
     () =>
-      buildConsolidatedData(orders, stock, shelfFicha, deferredSearchTerm, allDateColumns, todayStart, {
+      buildConsolidatedData(orders, stock, shelfFicha, '', allDateColumns, todayStart, {
         considerarRequisicoes: true,
         flattenShelfProducts: true,
         soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       }),
-    [orders, stock, shelfFicha, deferredSearchTerm, allDateColumns, todayStart, soMoveisHorizonInfo.endDate]
+    [orders, stock, shelfFicha, allDateColumns, todayStart, soMoveisHorizonInfo.endDate]
   );
+
+  /** Filtra itens que não têm pedido em nenhuma coluna visível.
+   * Se houver colunas de data (YYYY-MM-DD) visíveis, exige pedido em pelo menos uma delas — não considera Só Móveis/Atrasados. */
+  const consolidatedDataFilteredByVisibleColumns = useMemo(() => {
+    const visibleKeys = new Set(dateColumns.map((c) => c.key));
+    if (visibleKeys.size === 0) return consolidatedData;
+    const dateOnlyKeys = Array.from(visibleKeys).filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k));
+    const keysToCheck = dateOnlyKeys.length > 0 ? dateOnlyKeys : Array.from(visibleKeys);
+    const hasPedidoInKeys = (item: ProductConsolidated | { routeData: Record<string, { pedido?: number }> }) =>
+      keysToCheck.some((key) => (item.routeData?.[key]?.pedido ?? 0) > 0);
+    return consolidatedData.filter((item) => {
+      if (hasPedidoInKeys(item)) return true;
+      if (item.isShelf && item.components?.length) {
+        return item.components.some((comp) => hasPedidoInKeys(comp));
+      }
+      return false;
+    });
+  }, [consolidatedData, dateColumns]);
 
   const consolidatedDataSimulation = useMemo(
     () =>
-      buildConsolidatedData(ordersSimulation, stock, shelfFicha, deferredSearchTerm, allDateColumns, todayStart, {
+      buildConsolidatedData(ordersSimulation, stock, shelfFicha, '', allDateColumns, todayStart, {
         considerarRequisicoes: simulationState.considerarRequisicoes,
         flattenShelfProducts: true,
         soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       }),
-    [ordersSimulation, stock, shelfFicha, deferredSearchTerm, allDateColumns, todayStart, simulationState.considerarRequisicoes, soMoveisHorizonInfo.endDate]
+    [ordersSimulation, stock, shelfFicha, allDateColumns, todayStart, simulationState.considerarRequisicoes, soMoveisHorizonInfo.endDate]
   );
+
+  /** Filtra itens de simulação: se houver colunas de data visíveis, exige pedido em pelo menos uma. */
+  const consolidatedDataSimulationFilteredByVisibleColumns = useMemo(() => {
+    const visibleKeys = new Set(dateColumns.map((c) => c.key));
+    if (visibleKeys.size === 0) return consolidatedDataSimulation;
+    const dateOnlyKeys = Array.from(visibleKeys).filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k));
+    const keysToCheck = dateOnlyKeys.length > 0 ? dateOnlyKeys : Array.from(visibleKeys);
+    const hasPedidoInKeys = (item: ProductConsolidated | { routeData: Record<string, { pedido?: number }> }) =>
+      keysToCheck.some((key) => (item.routeData?.[key]?.pedido ?? 0) > 0);
+    return consolidatedDataSimulation.filter((item) => {
+      if (hasPedidoInKeys(item)) return true;
+      if (item.isShelf && item.components?.length) {
+        return item.components.some((comp) => hasPedidoInKeys(comp));
+      }
+      return false;
+    });
+  }, [consolidatedDataSimulation, dateColumns]);
+
   const simulationEligibleRowsCount = useMemo(
     () =>
       countEligibleProjectionRows(ordersSimulation, dateColumns, {
@@ -594,13 +639,13 @@ const App: React.FC = () => {
   const getDataForPdf = useCallback(
     (considerarRequisicoes: boolean) => {
       const ords = projectionSubMode === 'SIMULADO' ? ordersSimulation : orders;
-      return buildConsolidatedData(ords, stock, shelfFicha, searchTerm, allDateColumns, todayStart, {
+      return buildConsolidatedData(ords, stock, shelfFicha, '', allDateColumns, todayStart, {
         considerarRequisicoes,
         flattenShelfProducts: true,
         soMoveisHorizonEndDate: soMoveisHorizonInfo.endDate,
       });
     },
-    [projectionSubMode, orders, ordersSimulation, stock, shelfFicha, searchTerm, allDateColumns, todayStart, soMoveisHorizonInfo.endDate]
+    [projectionSubMode, orders, ordersSimulation, stock, shelfFicha, allDateColumns, todayStart, soMoveisHorizonInfo.endDate]
   );
 
   if (!currentUser) return <Login onLogin={handleLogin} users={effectiveUsers} companyLogo={effectiveLogo} />;
@@ -698,16 +743,14 @@ const App: React.FC = () => {
       )}
 
       <main className="flex-1 p-6 overflow-auto">
-        <div className={activeTab === 'PROJECAO' && projectionSubMode === 'PADRAO' ? '' : 'hidden'}>
-          <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
+        <div className={activeTab === 'PROJECAO' && projectionSubMode === 'PADRAO' ? 'w-full' : 'hidden'}>
+          <div className="w-full rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
             <div
               ref={projectionFullscreenRefPadrao}
-              className="flex flex-col flex-1 min-h-0 gap-4"
+              className="projection-fullscreen-container flex w-full flex-col flex-1 min-h-0 min-w-0 gap-4 bg-[#f7f9fd] dark:bg-[#1a1a1a] p-4"
             >
               <ProjectionFiltersBar
                 projectionSource={projection}
-                filterDescCod={searchTerm}
-                onFilterDescCodChange={setSearchTerm}
                 selectedRotas={projectionFilterRotas}
                 onSelectedRotasChange={handleProjectionRotasChange}
                 selectedSetores={projectionFilterSetores}
@@ -718,11 +761,12 @@ const App: React.FC = () => {
                 ignorePreviousConsumptions={ignorePreviousConsumptions}
                 onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
                 onGeneratePdf={() => setIsPdfModalOpen(true)}
+                portalContainerRef={projectionFullscreenRefPadrao}
               />
               <div className="flex-1 min-h-0">
                 <ProjectionTable
                   fullscreenContainerRef={projectionFullscreenRefPadrao}
-                  data={consolidatedData}
+                  data={consolidatedDataFilteredByVisibleColumns}
                   orders={orders}
                   horizonLabel={horizonInfo.label}
                   soMoveisHorizonLabel={soMoveisHorizonInfo.label}
@@ -738,8 +782,8 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
-        <div className={activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' ? '' : 'hidden'}>
-          <div className="rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
+        <div className={activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' ? 'w-full' : 'hidden'}>
+          <div className="w-full rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
             <div className="flex flex-wrap gap-2 mb-4">
               <button
                 onClick={() => setIsImportSimulationModalOpen(true)}
@@ -780,12 +824,10 @@ const App: React.FC = () => {
             ) : (
               <div
                 ref={projectionFullscreenRefSimulado}
-                className="flex flex-col flex-1 min-h-0 gap-4"
+                className="projection-fullscreen-container flex w-full flex-col flex-1 min-h-0 min-w-0 gap-4 bg-[#f7f9fd] dark:bg-[#1a1a1a] p-4"
               >
                 <ProjectionFiltersBar
                   projectionSource={simulationState.data}
-                  filterDescCod={searchTerm}
-                  onFilterDescCodChange={setSearchTerm}
                   selectedRotas={projectionFilterRotas}
                   onSelectedRotasChange={handleProjectionRotasChange}
                   selectedSetores={projectionFilterSetores}
@@ -796,11 +838,12 @@ const App: React.FC = () => {
                   ignorePreviousConsumptions={ignorePreviousConsumptions}
                   onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
                   onGeneratePdf={() => setIsPdfModalOpen(true)}
+                  portalContainerRef={projectionFullscreenRefSimulado}
                 />
                 <div className="flex-1 min-h-0">
                   <ProjectionTable
                     fullscreenContainerRef={projectionFullscreenRefSimulado}
-                    data={consolidatedDataSimulation}
+                    data={consolidatedDataSimulationFilteredByVisibleColumns}
                     orders={ordersSimulation}
                     horizonLabel={horizonInfo.label}
                     soMoveisHorizonLabel={soMoveisHorizonInfo.label}
@@ -834,8 +877,8 @@ const App: React.FC = () => {
             Produtos:{' '}
             <b>
               {activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO'
-                ? (visibleProductsSimulacao ?? consolidatedDataSimulation.length)
-                : (visibleProductsPadrao ?? consolidatedData.length)}
+                ? (visibleProductsSimulacao ?? consolidatedDataSimulationFilteredByVisibleColumns.length)
+                : (visibleProductsPadrao ?? consolidatedDataFilteredByVisibleColumns.length)}
             </b>
           </span>
           {activeTab === 'PROJECAO' && projectionSubMode === 'SIMULADO' && simulationState.data.length > 0 && (

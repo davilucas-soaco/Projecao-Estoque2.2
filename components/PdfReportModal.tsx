@@ -7,8 +7,10 @@ import {
   SUPERVISAO_ENTREGA_GT,
   SUPERVISAO_RETIRADA,
   extractRotasFromProjection,
+  dateToKey,
 } from '../utils';
 import { generateProjectionPdfV3, generateProjectionPdfV2Supervisao } from '../utils/pdfReport';
+import { recalculateConsumptionForVisibleColumns } from '../consolidation';
 
 interface DateColumn {
   key: string;
@@ -54,7 +56,6 @@ const PdfReportModal: React.FC<Props> = ({
   projection = [],
   appliedFilters,
 }) => {
-  const [considerarRequisicoes, setConsiderarRequisicoes] = useState<boolean | null>(null);
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<Set<string>>(new Set());
   const [showColumnFilter, setShowColumnFilter] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -62,8 +63,7 @@ const PdfReportModal: React.FC<Props> = ({
 
   const [relatorioSupervisao, setRelatorioSupervisao] = useState<boolean | null>(null);
   const [selectedSupervisaoKeys, setSelectedSupervisaoKeys] = useState<Set<string>>(new Set());
-  const [filtroResultadoSupervisao, setFiltroResultadoSupervisao] = useState<'faltantes' | 'estoque' | 'todos'>('todos');
-  const [filtroResultadoNormal, setFiltroResultadoNormal] = useState<'faltantes' | 'estoque' | 'todos'>('todos');
+  const [filtroResultado, setFiltroResultado] = useState<'faltantes' | 'estoque' | 'todos'>('todos');
 
   const rotasSupervisao = useMemo(() => extractRotasFromProjection(projection), [projection]);
 
@@ -78,14 +78,12 @@ const PdfReportModal: React.FC<Props> = ({
   }, [rotasSupervisao]);
 
   const allColumns = useMemo((): ColOption[] => {
-    const base = considerarRequisicoes
-      ? [{ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true }]
-      : [];
-    return [
-      ...base,
-      ...dateColumns.map((c) => ({ key: c.key, label: c.label, isSoMoveis: false })),
-    ];
-  }, [considerarRequisicoes, dateColumns]);
+    const base = [{ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true }];
+    const rest = dateColumns
+      .filter((c) => c.key !== ROUTE_SO_MOVEIS)
+      .map((c) => ({ key: c.key, label: c.label, isSoMoveis: false }));
+    return [...base, ...rest];
+  }, [dateColumns]);
 
   const visibleColumns = useMemo(
     () => allColumns.filter((c) => selectedColumnKeys.has(c.key)),
@@ -121,24 +119,24 @@ const PdfReportModal: React.FC<Props> = ({
   }, [visibleColumns, dateColumns]);
 
   const allColumnsSelected =
-    selectedColumnKeys.size === allColumns.length && allColumns.length > 0;
+    allColumns.length > 0 && allColumns.every((c) => selectedColumnKeys.has(c.key));
   const selectedCountLabel = allColumnsSelected
     ? 'Todas as colunas selecionadas'
     : `${selectedColumnKeys.size} colunas selecionadas`;
   const allSupervisaoColumnsSelected =
-    selectedSupervisaoKeys.size === allSupervisaoColumns.length && allSupervisaoColumns.length > 0;
+    allSupervisaoColumns.length > 0 &&
+    allSupervisaoColumns.every((c) => selectedSupervisaoKeys.has(c.key));
 
   const isV2Supervisao = relatorioSupervisao === true;
 
   useEffect(() => {
-    if (considerarRequisicoes !== null && !isV2Supervisao) {
+    if (!isV2Supervisao) {
       setSelectedColumnKeys(new Set(allColumns.map((c) => c.key)));
     }
-  }, [considerarRequisicoes, allColumns, isV2Supervisao]);
+  }, [allColumns, isV2Supervisao]);
 
   useEffect(() => {
     if (relatorioSupervisao === true) {
-      setConsiderarRequisicoes(true);
       setSelectedSupervisaoKeys(new Set(allSupervisaoColumns.map((c) => c.key)));
     }
   }, [relatorioSupervisao, allSupervisaoColumns]);
@@ -150,10 +148,6 @@ const PdfReportModal: React.FC<Props> = ({
         return;
       }
     } else {
-      if (considerarRequisicoes === null) {
-        setErrorMsg('Selecione se deseja considerar requisições na projeção.');
-        return;
-      }
       if (visibleColumns.length === 0) {
         setErrorMsg('Selecione pelo menos uma coluna para incluir no relatório.');
         return;
@@ -163,27 +157,52 @@ const PdfReportModal: React.FC<Props> = ({
     setGenerating(true);
     setErrorMsg('');
     try {
-      const data = getDataForPdf(considerarRequisicoes ?? true);
+      let data = getDataForPdf(true);
+      if (isV2Supervisao) {
+        const visKeys = visibleSupervisaoColumns.map((c) => c.key);
+        const routeDataKeysSet = new Set<string>();
+        if (visKeys.includes(SUPERVISAO_SO_MOVEIS)) routeDataKeysSet.add(ROUTE_SO_MOVEIS);
+        if (visKeys.some((k) => k === SUPERVISAO_ENTREGA_GT || k === SUPERVISAO_RETIRADA || k.startsWith('rota|'))) {
+          routeDataKeysSet.add('ATRASADOS');
+          dateColumns.filter((c) => !c.isAtrasados).forEach((c) => routeDataKeysSet.add(c.key));
+          // Incluir datas das rotas visíveis (dados de rota ficam sob a chave da data de previsão)
+          for (const r of rotasSupervisao) {
+            if (visKeys.includes(r.key) && r.previsaoDate) {
+              routeDataKeysSet.add(dateToKey(r.previsaoDate));
+            }
+          }
+        }
+        const routeDataKeys = Array.from(routeDataKeysSet);
+        if (routeDataKeys.length > 0) {
+          data = recalculateConsumptionForVisibleColumns(data, routeDataKeys, true, dateColumns);
+        }
+      } else {
+        data = recalculateConsumptionForVisibleColumns(
+          data,
+          visibleColumns.map((c) => c.key),
+          true,
+          dateColumns
+        );
+      }
       const colCount = isV2Supervisao ? visibleSupervisaoColumns.length : visibleColumns.length;
       const filtroLabel =
-        (isV2Supervisao ? filtroResultadoSupervisao : filtroResultadoNormal) === 'faltantes'
+        filtroResultado === 'faltantes'
           ? 'apenas faltantes'
-          : (isV2Supervisao ? filtroResultadoSupervisao : filtroResultadoNormal) === 'estoque'
+          : filtroResultado === 'estoque'
             ? 'apenas em estoque'
             : 'todos';
-      const pdfConfigText = [
-        'Configurações do PDF',
-        `Gerar relatório de supervisão? ${isV2Supervisao ? 'sim' : 'não'}`,
-        `Considerar Requisições na projeção? ${(considerarRequisicoes ?? true) ? 'sim' : 'não'}`,
-        `Colunas a incluir: ${colCount}`,
-        `Tipo de resultado: ${filtroLabel}`,
-      ].join('\n');
+      const pdfConfigText = `Configurações do PDF: Gerar relatório de supervisão? -${isV2Supervisao ? 'sim' : 'não'}; Colunas a incluir -${colCount}; Tipo de resultado: -${filtroLabel} .`;
       if (isV2Supervisao) {
         const colOpts = visibleSupervisaoColumns.map((c) => ({ key: c.key, label: c.label }));
+        const visibleRouteDateKeys = visibleSupervisaoColumns
+          .filter((c) => c.key.startsWith('rota|'))
+          .map((c) => rotasSupervisao.find((r) => r.key === c.key)?.previsaoDate)
+          .filter((d): d is Date => !!d)
+          .map((d) => dateToKey(d));
         await generateProjectionPdfV2Supervisao({
           data,
           visibleColumns: colOpts,
-          filtroResultado: filtroResultadoSupervisao,
+          filtroResultado,
           horizonLabel,
           todayStart,
           companyLogo,
@@ -193,6 +212,7 @@ const PdfReportModal: React.FC<Props> = ({
           dateColumns,
           appliedFilters: pdfConfigText,
           maxHorizonEndDate,
+          visibleRouteDateKeys: [...new Set(visibleRouteDateKeys)],
         });
       } else {
         const colOpts = visibleColumns.map((c) => ({ key: c.key, label: c.label, isSoMoveis: c.isSoMoveis }));
@@ -208,7 +228,7 @@ const PdfReportModal: React.FC<Props> = ({
           dateColumns,
           todayStart,
           maxHorizonEndDate: maxHorizonEndDateForNormal,
-          filtroResultado: filtroResultadoNormal,
+          filtroResultado,
         });
       }
       onClose();
@@ -325,81 +345,10 @@ const PdfReportModal: React.FC<Props> = ({
                 )}
               </div>
 
-              {visibleSupervisaoColumns.length > 0 && (
-                <>
-                  <div>
-                    <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
-                      Tipo de resultado a imprimir
-                    </p>
-                    <div className="flex flex-col gap-2">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="filtroResultado"
-                          checked={filtroResultadoSupervisao === 'faltantes'}
-                          onChange={() => setFiltroResultadoSupervisao('faltantes')}
-                        />
-                        <span className="text-sm">Apenas os faltantes</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="filtroResultado"
-                          checked={filtroResultadoSupervisao === 'estoque'}
-                          onChange={() => setFiltroResultadoSupervisao('estoque')}
-                        />
-                        <span className="text-sm">Apenas os em estoque</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="filtroResultado"
-                          checked={filtroResultadoSupervisao === 'todos'}
-                          onChange={() => setFiltroResultadoSupervisao('todos')}
-                        />
-                        <span className="text-sm">Todos os resultados</span>
-                      </label>
-                    </div>
-                  </div>
-                </>
-              )}
             </>
           ) : (
             <>
-              <div>
-                <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">
-                  Considerar Requisições na projeção?
-                </p>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="requisicoes"
-                      checked={considerarRequisicoes === true}
-                      onChange={() => setConsiderarRequisicoes(true)}
-                    />
-                    <span className="text-sm">Sim</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="requisicoes"
-                      checked={considerarRequisicoes === false}
-                      onChange={() => setConsiderarRequisicoes(false)}
-                    />
-                    <span className="text-sm">Não</span>
-                  </label>
-                </div>
-                {considerarRequisicoes === false && (
-                  <p className="text-[11px] text-neutral mt-1">
-                    A coluna &quot;Só Móveis&quot; não será exibida no relatório.
-                  </p>
-                )}
-              </div>
-
-              {considerarRequisicoes !== null && (
-                <>
-                  <div className="relative">
+              <div className="relative">
                     <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
                       Colunas a incluir
                     </p>
@@ -458,45 +407,45 @@ const PdfReportModal: React.FC<Props> = ({
                     )}
                   </div>
 
-                  {visibleColumns.length > 0 && (
-                    <div>
-                      <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
-                        Tipo de resultado a imprimir
-                      </p>
-                      <div className="flex flex-col gap-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="filtroResultadoNormal"
-                            checked={filtroResultadoNormal === 'faltantes'}
-                            onChange={() => setFiltroResultadoNormal('faltantes')}
-                          />
-                          <span className="text-sm">Apenas os faltantes</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="filtroResultadoNormal"
-                            checked={filtroResultadoNormal === 'estoque'}
-                            onChange={() => setFiltroResultadoNormal('estoque')}
-                          />
-                          <span className="text-sm">Apenas os em estoque</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="filtroResultadoNormal"
-                            checked={filtroResultadoNormal === 'todos'}
-                            onChange={() => setFiltroResultadoNormal('todos')}
-                          />
-                          <span className="text-sm">Todos os resultados</span>
-                        </label>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
             </>
+          )}
+
+          {((isV2Supervisao && visibleSupervisaoColumns.length > 0) ||
+            (!isV2Supervisao && visibleColumns.length > 0)) && (
+            <div>
+              <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">
+                Tipo de resultado a imprimir
+              </p>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="filtroResultado"
+                    checked={filtroResultado === 'faltantes'}
+                    onChange={() => setFiltroResultado('faltantes')}
+                  />
+                  <span className="text-sm">Apenas os faltantes</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="filtroResultado"
+                    checked={filtroResultado === 'estoque'}
+                    onChange={() => setFiltroResultado('estoque')}
+                  />
+                  <span className="text-sm">Apenas os em estoque</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="filtroResultado"
+                    checked={filtroResultado === 'todos'}
+                    onChange={() => setFiltroResultado('todos')}
+                  />
+                  <span className="text-sm">Todos os resultados</span>
+                </label>
+              </div>
+            </div>
           )}
 
           {errorMsg && (
@@ -520,7 +469,7 @@ const PdfReportModal: React.FC<Props> = ({
               relatorioSupervisao === null ||
               (isV2Supervisao
                 ? visibleSupervisaoColumns.length === 0
-                : considerarRequisicoes === null || visibleColumns.length === 0)
+                : visibleColumns.length === 0)
             }
             className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm bg-secondary hover:bg-blue-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -533,3 +482,4 @@ const PdfReportModal: React.FC<Props> = ({
 };
 
 export default PdfReportModal;
+

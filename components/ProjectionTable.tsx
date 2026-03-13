@@ -95,12 +95,14 @@ const formatCellNum = (v: unknown): string | number => {
   return Math.round(n);
 };
 
+const HEADER_SAFE_TOP = 140;
+
 const getTooltipInitialPosition = (anchorRect: DOMRect) => {
   const maxX = Math.max(16, window.innerWidth - 340);
   const maxY = Math.max(16, window.innerHeight - 320);
   return {
     left: Math.min(Math.max(8, anchorRect.right), maxX),
-    top: Math.min(Math.max(8, anchorRect.bottom + 8), maxY),
+    top: Math.min(Math.max(HEADER_SAFE_TOP, anchorRect.bottom + 8), maxY),
   };
 };
 
@@ -157,6 +159,12 @@ const ProjectionTable: React.FC<Props> = ({
   const [routeValueFilterMenu, setRouteValueFilterMenu] = useState<RouteValueFilterMenu | null>(null);
   const [routeValueFilterSearch, setRouteValueFilterSearch] = useState('');
   const [routeValueFilters, setRouteValueFilters] = useState<Record<string, Set<string>>>({});
+  const [codigoColumnFilter, setCodigoColumnFilter] = useState<Set<string>>(new Set());
+  const [descricaoColumnFilter, setDescricaoColumnFilter] = useState<Set<string>>(new Set());
+  const [codigoFilterMenu, setCodigoFilterMenu] = useState<{ anchorRect: DOMRect } | null>(null);
+  const [descricaoFilterMenu, setDescricaoFilterMenu] = useState<{ anchorRect: DOMRect } | null>(null);
+  const [codigoFilterSearch, setCodigoFilterSearch] = useState('');
+  const [descricaoFilterSearch, setDescricaoFilterSearch] = useState('');
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const tableWrapperRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -173,11 +181,25 @@ const ProjectionTable: React.FC<Props> = ({
   const didResizeRef = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const valueFilterMenuRef = useRef<HTMLDivElement>(null);
+  const codigoFilterMenuRef = useRef<HTMLDivElement>(null);
+  const descricaoFilterMenuRef = useRef<HTMLDivElement>(null);
   const tooltipDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({
     dragging: false,
     offsetX: 0,
     offsetY: 0,
   });
+  const codigoFilterAnchorRef = useRef<HTMLElement | null>(null);
+  const descricaoFilterAnchorRef = useRef<HTMLElement | null>(null);
+  const valueFilterAnchorRef = useRef<HTMLElement | null>(null);
+  const [codigoFilterPosition, setCodigoFilterPosition] = useState<{ left: number; top: number } | null>(null);
+  const [descricaoFilterPosition, setDescricaoFilterPosition] = useState<{ left: number; top: number } | null>(null);
+  const [valueFilterPosition, setValueFilterPosition] = useState<{ left: number; top: number } | null>(null);
+  const codigoFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
+  const descricaoFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
+  const valueFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
+  const codigoFilterDraggedRef = useRef(false);
+  const descricaoFilterDraggedRef = useRef(false);
+  const valueFilterDraggedRef = useRef(false);
 
   const tooltipPedidoGroups = useMemo<TooltipPedidoGroup[]>(() => {
     if (!tooltip || tooltip.type !== 'P') return [];
@@ -605,12 +627,24 @@ const ProjectionTable: React.FC<Props> = ({
           setRouteValueFilterMenu(null);
         }
       }
+      if (codigoFilterMenu && codigoFilterMenuRef.current && !codigoFilterMenuRef.current.contains(e.target as Node)) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('th[data-codigo-filter-head]')) {
+          setCodigoFilterMenu(null);
+        }
+      }
+      if (descricaoFilterMenu && descricaoFilterMenuRef.current && !descricaoFilterMenuRef.current.contains(e.target as Node)) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('th[data-descricao-filter-head]')) {
+          setDescricaoFilterMenu(null);
+        }
+      }
     };
     document.addEventListener('pointerdown', handleClickOutside, true);
     return () => {
       document.removeEventListener('pointerdown', handleClickOutside, true);
     };
-  }, [tooltip, selectedRowCodigo, routeValueFilterMenu]);
+  }, [tooltip, selectedRowCodigo, routeValueFilterMenu, codigoFilterMenu, descricaoFilterMenu]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -663,6 +697,86 @@ const ProjectionTable: React.FC<Props> = ({
     setRouteValueFilterSearch('');
   }, [routeValueFilterMenu?.colKey, routeValueFilterMenu?.field]);
 
+  useEffect(() => {
+    const anyOpen = codigoFilterMenu || descricaoFilterMenu || routeValueFilterMenu;
+    if (!anyOpen) return;
+    const updateFilterPositions = () => {
+      if (codigoFilterMenu && codigoFilterAnchorRef.current && !codigoFilterDragRef.current.dragging && !codigoFilterDraggedRef.current) {
+        const rect = codigoFilterAnchorRef.current.getBoundingClientRect();
+        setCodigoFilterPosition(getTooltipInitialPosition(rect));
+      }
+      if (descricaoFilterMenu && descricaoFilterAnchorRef.current && !descricaoFilterDragRef.current.dragging && !descricaoFilterDraggedRef.current) {
+        const rect = descricaoFilterAnchorRef.current.getBoundingClientRect();
+        setDescricaoFilterPosition(getTooltipInitialPosition(rect));
+      }
+      if (routeValueFilterMenu && valueFilterAnchorRef.current && !valueFilterDragRef.current.dragging && !valueFilterDraggedRef.current) {
+        const rect = valueFilterAnchorRef.current.getBoundingClientRect();
+        setValueFilterPosition(getTooltipInitialPosition(rect));
+      }
+    };
+    const interval = setInterval(updateFilterPositions, 150);
+    const onScroll = () => updateFilterPositions();
+    window.addEventListener('scroll', onScroll, true);
+    const tableEl = tableContainerRef.current;
+    tableEl?.addEventListener('scroll', onScroll);
+    window.addEventListener('resize', updateFilterPositions);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('scroll', onScroll, true);
+      tableEl?.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', updateFilterPositions);
+    };
+  }, [codigoFilterMenu, descricaoFilterMenu, routeValueFilterMenu]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const dragHandlers = [
+        { ref: codigoFilterDragRef, elRef: codigoFilterMenuRef },
+        { ref: descricaoFilterDragRef, elRef: descricaoFilterMenuRef },
+        { ref: valueFilterDragRef, elRef: valueFilterMenuRef },
+      ];
+      for (const { ref: dragRef, elRef } of dragHandlers) {
+        if (dragRef.current.dragging && elRef.current) {
+          const nextX = e.clientX - dragRef.current.offsetX;
+          const nextY = e.clientY - dragRef.current.offsetY;
+          const maxX = Math.max(8, window.innerWidth - 340);
+          const maxY = Math.max(8, window.innerHeight - 320);
+          const x = Math.min(Math.max(8, nextX), maxX);
+          const y = Math.min(Math.max(HEADER_SAFE_TOP, nextY), maxY);
+          elRef.current.style.left = `${x}px`;
+          elRef.current.style.top = `${y}px`;
+          return;
+        }
+      }
+    };
+    const handleMouseUp = () => {
+      if (codigoFilterDragRef.current.dragging && codigoFilterMenuRef.current) {
+        codigoFilterDragRef.current.dragging = false;
+        const s = codigoFilterMenuRef.current.style;
+        setCodigoFilterPosition({ left: parseFloat(s.left) || 0, top: parseFloat(s.top) || 0 });
+        codigoFilterDraggedRef.current = true;
+      } else if (descricaoFilterDragRef.current.dragging && descricaoFilterMenuRef.current) {
+        descricaoFilterDragRef.current.dragging = false;
+        const s = descricaoFilterMenuRef.current.style;
+        setDescricaoFilterPosition({ left: parseFloat(s.left) || 0, top: parseFloat(s.top) || 0 });
+        descricaoFilterDraggedRef.current = true;
+      } else if (valueFilterDragRef.current.dragging && valueFilterMenuRef.current) {
+        valueFilterDragRef.current.dragging = false;
+        const s = valueFilterMenuRef.current.style;
+        setValueFilterPosition({ left: parseFloat(s.left) || 0, top: parseFloat(s.top) || 0 });
+        valueFilterDraggedRef.current = true;
+      }
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
   const toggleFullscreen = async () => {
     const el = (fullscreenContainerRef?.current ?? tableWrapperRef.current);
     if (!el) return;
@@ -696,10 +810,12 @@ const ProjectionTable: React.FC<Props> = ({
     };
   }, []);
 
-  const allColumns = [
-    ...(considerarRequisicoes ? [{ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true as const }] : []),
-    ...dateColumns.map(c => ({ key: c.key, label: c.label, isSoMoveis: false as const })),
-  ];
+  /** Colunas vêm do filtro Colunas visíveis (Só Móveis e Atrasados são opções, não fixos). */
+  const allColumns = dateColumns.map((c) => ({
+    key: c.key,
+    label: c.label,
+    isSoMoveis: c.key === ROUTE_SO_MOVEIS,
+  }));
   const rotaFilterActive = selectedRotaNames.size > 0;
 
   const rotaScopedColumns = useMemo(() => {
@@ -736,8 +852,43 @@ const ProjectionTable: React.FC<Props> = ({
     return filtered.length > 0 ? filtered : baseColumns;
   }, [rotaScopedColumns, allColumns, dateKeysForSelectedCategorias]);
 
+  /** Quando há colunas de data visíveis (YYYY-MM-DD), exibe apenas itens com pedido em pelo menos uma delas. */
+  const dataFilteredByVisibleDateColumns = useMemo(() => {
+    const visibleKeys = dateColumns.map((c) => c.key);
+    if (visibleKeys.length === 0) return data;
+    const dateOnlyKeys = visibleKeys.filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k));
+    const keysToCheck = dateOnlyKeys.length > 0 ? dateOnlyKeys : visibleKeys;
+    const hasPedidoInKeys = (item: ProductConsolidated | ComponentData) =>
+      keysToCheck.some((key) => (item.routeData?.[key]?.pedido ?? 0) > 0);
+    return data.filter((item) => {
+      if (hasPedidoInKeys(item)) return true;
+      if (item.isShelf && item.components?.length) {
+        return item.components.some((comp) => hasPedidoInKeys(comp));
+      }
+      return false;
+    });
+  }, [data, dateColumns]);
+
+  const dataFilteredByCodigoDescricao = useMemo(() => {
+    const base = dataFilteredByVisibleDateColumns;
+    if (codigoColumnFilter.size === 0 && descricaoColumnFilter.size === 0) return base;
+    return base.filter((item) => {
+      const codigoOk = codigoColumnFilter.size === 0 || codigoColumnFilter.has(item.codigo);
+      const descricaoOk = descricaoColumnFilter.size === 0 || descricaoColumnFilter.has(item.descricao);
+      if (codigoOk && descricaoOk) return true;
+      if (item.isShelf && item.components?.length) {
+        return item.components.some((comp) => {
+          const cOk = codigoColumnFilter.size === 0 || codigoColumnFilter.has(comp.codigo);
+          const dOk = descricaoColumnFilter.size === 0 || descricaoColumnFilter.has(comp.descricao);
+          return cOk && dOk;
+        });
+      }
+      return false;
+    });
+  }, [dataFilteredByVisibleDateColumns, codigoColumnFilter, descricaoColumnFilter]);
+
   const dataFilteredByColumns = useMemo(() => {
-    let result = data;
+    let result = dataFilteredByCodigoDescricao;
     if (selectedRotas.size > 0) {
       result = result.filter((item) => {
         const routeMatch =
@@ -790,7 +941,7 @@ const ProjectionTable: React.FC<Props> = ({
     }
     return result;
   }, [
-    data,
+    dataFilteredByCodigoDescricao,
     selectedRotas,
     selectedSetores,
     selectedCategorias,
@@ -1038,6 +1189,37 @@ const ProjectionTable: React.FC<Props> = ({
   const activeSelectedValues = activeMenuKey ? (routeValueFilters[activeMenuKey] ?? new Set<string>()) : new Set<string>();
   const activeAllSelected = activeMenuValues.length > 0 && activeSelectedValues.size === activeMenuValues.length;
 
+  const uniqueCodigos = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of data) {
+      set.add(item.codigo);
+      if (item.isShelf && item.components?.length) {
+        for (const comp of item.components) set.add(comp.codigo);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  }, [data]);
+  const uniqueDescricoes = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of data) {
+      set.add(item.descricao);
+      if (item.isShelf && item.components?.length) {
+        for (const comp of item.components) set.add(comp.descricao);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  }, [data]);
+  const filteredCodigoValues = useMemo(() => {
+    const term = codigoFilterSearch.trim().toLowerCase();
+    if (!term) return uniqueCodigos;
+    return uniqueCodigos.filter((v) => v.toLowerCase().includes(term));
+  }, [uniqueCodigos, codigoFilterSearch]);
+  const filteredDescricaoValues = useMemo(() => {
+    const term = descricaoFilterSearch.trim().toLowerCase();
+    if (!term) return uniqueDescricoes;
+    return uniqueDescricoes.filter((v) => v.toLowerCase().includes(term));
+  }, [uniqueDescricoes, descricaoFilterSearch]);
+
   const exportProjectionExcel = () => {
     const colGroup = [
       `<col style="width:140px">`,
@@ -1178,23 +1360,59 @@ const ProjectionTable: React.FC<Props> = ({
             <thead className="sticky top-0 z-[70]">
               <tr className="bg-primary text-white">
                 <th
+                  data-codigo-filter-head
                   onClick={(e) => handleSort('codigo', e.ctrlKey)}
-                  className="px-3 py-2 sticky left-0 top-0 z-[80] bg-primary border-b border-white/10 w-[110px] shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors"
+                  className="px-2 py-1 sticky left-0 top-0 z-[80] bg-primary border-b border-white/10 w-[110px] shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors"
                   style={{ width: `${CODE_COL_W}px`, minWidth: `${CODE_COL_W}px` }}
                 >
-                  <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold">
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold mb-0.5">
                     <span>Código</span>
                     {renderSortIndicator('codigo')}
                   </div>
+                  <div
+                    ref={(el) => { if (codigoFilterMenu) codigoFilterAnchorRef.current = el; }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const willOpen = !codigoFilterMenu;
+                      codigoFilterAnchorRef.current = willOpen ? (e.currentTarget as HTMLElement) : null;
+                      if (willOpen) codigoFilterDraggedRef.current = false;
+                      setCodigoFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
+                      setCodigoFilterMenu((prev) => (prev ? null : { anchorRect: rect }));
+                      setDescricaoFilterMenu(null);
+                    }}
+                    className="flex items-center justify-end gap-0.5 border-t border-white/20 pt-1 pr-1 text-[8px] font-bold cursor-pointer hover:bg-white/10 rounded"
+                  >
+                    <Filter className="w-2.5 h-2.5 opacity-80" />
+                    {codigoColumnFilter.size > 0 ? ' ●' : ''}
+                  </div>
                 </th>
                 <th
+                  data-descricao-filter-head
                   onClick={(e) => handleSort('descricao', e.ctrlKey)}
                   style={{ width: `${descriptionWidth}px`, minWidth: `${descriptionWidth}px` }}
-                  className="px-3 py-2 sticky left-[110px] top-0 z-[80] bg-primary border-b border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors relative"
+                  className="px-2 py-1 sticky left-[110px] top-0 z-[80] bg-primary border-b border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors relative"
                 >
-                  <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold pr-2">
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold pr-2 mb-0.5">
                     <span className="truncate">Descrição</span>
                     {renderSortIndicator('descricao')}
+                  </div>
+                  <div
+                    ref={(el) => { if (descricaoFilterMenu) descricaoFilterAnchorRef.current = el; }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const willOpen = !descricaoFilterMenu;
+                      descricaoFilterAnchorRef.current = willOpen ? (e.currentTarget as HTMLElement) : null;
+                      if (willOpen) descricaoFilterDraggedRef.current = false;
+                      setDescricaoFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
+                      setDescricaoFilterMenu((prev) => (prev ? null : { anchorRect: rect }));
+                      setCodigoFilterMenu(null);
+                    }}
+                    className="flex items-center justify-end gap-0.5 border-t border-white/20 pt-1 pr-1 text-[8px] font-bold cursor-pointer hover:bg-white/10 rounded"
+                  >
+                    <Filter className="w-2.5 h-2.5 opacity-80" />
+                    {descricaoColumnFilter.size > 0 ? ' ●' : ''}
                   </div>
                   <div
                     onMouseDown={startResizing}
@@ -1234,7 +1452,6 @@ const ProjectionTable: React.FC<Props> = ({
                     {renderSortIndicator('pendenteProducao')}
                   </div>
                 </th>
-
                 {leftColPadding > 0 && <th colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
                 {virtualColumns.map((vCol) => {
                   const col = visibleColumns[vCol.index];
@@ -1254,9 +1471,14 @@ const ProjectionTable: React.FC<Props> = ({
                     </div>
                     <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
                       <div
+                        ref={(el) => { if (routeValueFilterMenu?.field === 'pedido') valueFilterAnchorRef.current = el; }}
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          const willOpen = !(routeValueFilterMenu?.colKey === col.key && routeValueFilterMenu?.field === 'pedido');
+                          valueFilterAnchorRef.current = willOpen ? (e.currentTarget as HTMLElement) : null;
+                          if (willOpen) valueFilterDraggedRef.current = false;
+                          setValueFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
                           setRouteValueFilterMenu((prev) => {
                             if (prev?.colKey === col.key && prev.field === 'pedido') return null;
                             return { colKey: col.key, field: 'pedido', anchorRect: rect };
@@ -1268,9 +1490,14 @@ const ProjectionTable: React.FC<Props> = ({
                         P {(routeValueFilters[getRouteFilterKey(col.key, 'pedido')]?.size ?? 0) > 0 ? '●' : ''}
                       </div>
                       <div
+                        ref={(el) => { if (routeValueFilterMenu?.field === 'falta') valueFilterAnchorRef.current = el; }}
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          const willOpen = !(routeValueFilterMenu?.colKey === col.key && routeValueFilterMenu?.field === 'falta');
+                          valueFilterAnchorRef.current = willOpen ? (e.currentTarget as HTMLElement) : null;
+                          if (willOpen) valueFilterDraggedRef.current = false;
+                          setValueFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
                           setRouteValueFilterMenu((prev) => {
                             if (prev?.colKey === col.key && prev.field === 'falta') return null;
                             return { colKey: col.key, field: 'falta', anchorRect: rect };
@@ -1424,16 +1651,614 @@ const ProjectionTable: React.FC<Props> = ({
         </div>
       </div>
 
+      {codigoFilterMenu && (
+        <div
+          ref={codigoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={codigoFilterPosition ?? getTooltipInitialPosition(codigoFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!codigoFilterMenuRef.current) return;
+              const rect = codigoFilterMenuRef.current.getBoundingClientRect();
+              codigoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Código</p>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={codigoFilterSearch}
+              onChange={(e) => setCodigoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredCodigoValues.length > 0 && codigoColumnFilter.size === filteredCodigoValues.length) {
+                    setCodigoColumnFilter(new Set());
+                  } else {
+                    setCodigoColumnFilter(new Set(filteredCodigoValues));
+                  }
+                }}
+              >
+                {filteredCodigoValues.length > 0 && codigoColumnFilter.size === filteredCodigoValues.length ? 'Desmarcar todos' : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setCodigoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredCodigoValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={codigoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setCodigoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-words whitespace-normal flex-1 min-w-0">{value}</span>
+                </label>
+              ))}
+              {filteredCodigoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {descricaoFilterMenu && (
+        <div
+          ref={descricaoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={descricaoFilterPosition ?? getTooltipInitialPosition(descricaoFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!descricaoFilterMenuRef.current) return;
+              const rect = descricaoFilterMenuRef.current.getBoundingClientRect();
+              descricaoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Descrição</p>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={descricaoFilterSearch}
+              onChange={(e) => setDescricaoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredDescricaoValues.length > 0 && descricaoColumnFilter.size === filteredDescricaoValues.length) {
+                    setDescricaoColumnFilter(new Set());
+                  } else {
+                    setDescricaoColumnFilter(new Set(filteredDescricaoValues));
+                  }
+                }}
+              >
+                {filteredDescricaoValues.length > 0 && descricaoColumnFilter.size === filteredDescricaoValues.length ? 'Desmarcar todos' : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setDescricaoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredDescricaoValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={descricaoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setDescricaoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-words whitespace-normal flex-1 min-w-0">{value}</span>
+                </label>
+              ))}
+              {filteredDescricaoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {codigoFilterMenu && (
+        <div
+          ref={codigoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={codigoFilterPosition ?? getTooltipInitialPosition(codigoFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!codigoFilterMenuRef.current) return;
+              const rect = codigoFilterMenuRef.current.getBoundingClientRect();
+              codigoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Código</p>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={codigoFilterSearch}
+              onChange={(e) => setCodigoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredCodigoValues.length === uniqueCodigos.length) {
+                    setCodigoColumnFilter(new Set());
+                  } else {
+                    setCodigoColumnFilter(new Set(uniqueCodigos));
+                  }
+                }}
+              >
+                {codigoColumnFilter.size === uniqueCodigos.length ? 'Desmarcar todos' : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setCodigoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredCodigoValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={codigoColumnFilter.size === 0 || codigoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setCodigoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) {
+                          next.add(value);
+                        } else {
+                          next.delete(value);
+                        }
+                        return next;
+                      });
+                    }}
+                  />
+                  <span>{value}</span>
+                </label>
+              ))}
+              {filteredCodigoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {descricaoFilterMenu && (
+        <div
+          ref={descricaoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={descricaoFilterPosition ?? getTooltipInitialPosition(descricaoFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!descricaoFilterMenuRef.current) return;
+              const rect = descricaoFilterMenuRef.current.getBoundingClientRect();
+              descricaoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Descrição</p>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={descricaoFilterSearch}
+              onChange={(e) => setDescricaoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredDescricaoValues.length === uniqueDescricoes.length) {
+                    setDescricaoColumnFilter(new Set());
+                  } else {
+                    setDescricaoColumnFilter(new Set(uniqueDescricoes));
+                  }
+                }}
+              >
+                {descricaoColumnFilter.size === uniqueDescricoes.length ? 'Desmarcar todos' : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setDescricaoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredDescricaoValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={descricaoColumnFilter.size === 0 || descricaoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setDescricaoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) {
+                          next.add(value);
+                        } else {
+                          next.delete(value);
+                        }
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="truncate block max-w-[260px]" title={value}>{value}</span>
+                </label>
+              ))}
+              {filteredDescricaoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {codigoFilterMenu && (
+        <div
+          ref={codigoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={codigoFilterPosition ?? getTooltipInitialPosition(codigoFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!codigoFilterMenuRef.current) return;
+              const rect = codigoFilterMenuRef.current.getBoundingClientRect();
+              codigoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Código</p>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={codigoFilterSearch}
+              onChange={(e) => setCodigoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredCodigoValues.length === 0) return;
+                  const allSelected = filteredCodigoValues.every((v) => codigoColumnFilter.has(v));
+                  setCodigoColumnFilter(allSelected ? new Set() : new Set(filteredCodigoValues));
+                }}
+              >
+                {filteredCodigoValues.every((v) => codigoColumnFilter.has(v)) && filteredCodigoValues.length > 0 ? 'Desmarcar todos' : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setCodigoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredCodigoValues.map((value) => (
+                <label key={value} className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={codigoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setCodigoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-words whitespace-normal flex-1 min-w-0">{value}</span>
+                </label>
+              ))}
+              {filteredCodigoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {descricaoFilterMenu && (
+        <div
+          ref={descricaoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={descricaoFilterPosition ?? getTooltipInitialPosition(descricaoFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!descricaoFilterMenuRef.current) return;
+              const rect = descricaoFilterMenuRef.current.getBoundingClientRect();
+              descricaoFilterDragRef.current = {
+                dragging: true,
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+              };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move flex items-center justify-between"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Descrição</p>
+            <button
+              onClick={() => {
+                setDescricaoFilterMenu(null);
+                setDescricaoFilterPosition(null);
+                descricaoFilterAnchorRef.current = null;
+              }}
+              className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={descricaoFilterSearch}
+              onChange={(e) => setDescricaoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredDescricaoValues.length === 0) return;
+                  const allSelected = filteredDescricaoValues.every((v) => descricaoColumnFilter.has(v));
+                  setDescricaoColumnFilter(allSelected ? new Set() : new Set(filteredDescricaoValues));
+                }}
+              >
+                {filteredDescricaoValues.every((v) => descricaoColumnFilter.has(v)) && filteredDescricaoValues.length > 0 ? 'Desmarcar todos' : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setDescricaoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredDescricaoValues.map((value) => (
+                <label key={value} className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={descricaoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setDescricaoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-words whitespace-normal">{value}</span>
+                </label>
+              ))}
+              {filteredDescricaoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {routeValueFilterMenu && (
         <div
           ref={valueFilterMenuRef}
-          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden w-[280px]"
-          style={getTooltipInitialPosition(routeValueFilterMenu.anchorRect)}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={valueFilterPosition ?? getTooltipInitialPosition(routeValueFilterMenu.anchorRect)}
         >
-          <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933]">
+          <div
+            onMouseDown={(e) => {
+              if (!valueFilterMenuRef.current) return;
+              const rect = valueFilterMenuRef.current.getBoundingClientRect();
+              valueFilterDragRef.current = {
+                dragging: true,
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+              };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move flex items-center justify-between"
+            title="Arraste para mover"
+          >
             <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">
               Filtro {routeValueFilterMenu.field === 'pedido' ? 'P' : 'F'} ({routeValueFilterMenu.colKey})
             </p>
+            <button
+              onClick={() => {
+                setRouteValueFilterMenu(null);
+                setValueFilterPosition(null);
+                valueFilterAnchorRef.current = null;
+              }}
+              className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
           <div className="p-3 space-y-2">
             <input
@@ -1521,10 +2346,206 @@ const ProjectionTable: React.FC<Props> = ({
                       });
                     }}
                   />
-                  <span>{value}</span>
+                  <span className="break-words whitespace-normal">{value}</span>
                 </label>
               ))}
               {filteredActiveMenuValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {codigoFilterMenu && (
+        <div
+          ref={codigoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={codigoFilterPosition ?? getTooltipInitialPosition(codigoFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!codigoFilterMenuRef.current) return;
+              const rect = codigoFilterMenuRef.current.getBoundingClientRect();
+              codigoFilterDragRef.current = {
+                dragging: true,
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+              };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move flex items-center justify-between"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro CÓDIGO</p>
+            <button
+              onClick={() => {
+                setCodigoFilterMenu(null);
+                setCodigoFilterPosition(null);
+                codigoFilterAnchorRef.current = null;
+              }}
+              className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={codigoFilterSearch}
+              onChange={(e) => setCodigoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  setCodigoColumnFilter(
+                    filteredCodigoValues.length > 0 && codigoColumnFilter.size === filteredCodigoValues.length
+                      ? new Set()
+                      : new Set(filteredCodigoValues)
+                  );
+                }}
+              >
+                {filteredCodigoValues.length > 0 && codigoColumnFilter.size === filteredCodigoValues.length
+                  ? 'Desmarcar todos'
+                  : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setCodigoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredCodigoValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={codigoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setCodigoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span>{value}</span>
+                </label>
+              ))}
+              {filteredCodigoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {descricaoFilterMenu && (
+        <div
+          ref={descricaoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden w-[320px] max-w-[90vw]"
+          style={getTooltipInitialPosition(descricaoFilterMenu.anchorRect)}
+        >
+          <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933]">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro DESCRIÇÃO</p>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={descricaoFilterSearch}
+              onChange={(e) => setDescricaoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  setDescricaoColumnFilter(
+                    filteredDescricaoValues.length > 0 && descricaoColumnFilter.size === filteredDescricaoValues.length
+                      ? new Set()
+                      : new Set(filteredDescricaoValues)
+                  );
+                }}
+              >
+                {filteredDescricaoValues.length > 0 && descricaoColumnFilter.size === filteredDescricaoValues.length
+                  ? 'Desmarcar todos'
+                  : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setDescricaoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredDescricaoValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer truncate"
+                >
+                  <input
+                    type="checkbox"
+                    checked={descricaoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setDescricaoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="truncate" title={value}>{value}</span>
+                </label>
+              ))}
+              {filteredDescricaoValues.length === 0 && (
                 <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
               )}
             </div>

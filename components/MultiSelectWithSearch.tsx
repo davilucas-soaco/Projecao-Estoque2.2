@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { Search, ChevronDown } from 'lucide-react';
 
 export interface MultiSelectOption {
@@ -15,6 +16,8 @@ interface MultiSelectWithSearchProps {
   emptyMessage?: string;
   topContent?: React.ReactNode;
   footerContent?: React.ReactNode;
+  /** Container para o portal do dropdown. Se informado (e com current), renderiza dentro dele — essencial em fullscreen. */
+  portalContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 const MultiSelectWithSearch: React.FC<MultiSelectWithSearchProps> = ({
@@ -26,10 +29,45 @@ const MultiSelectWithSearch: React.FC<MultiSelectWithSearchProps> = ({
   emptyMessage = 'Nenhuma opção',
   topContent,
   footerContent,
+  portalContainerRef,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [dropdownRect, setDropdownRect] = useState({ top: 0, left: 0 });
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  const HEADER_SAFE_TOP = 140;
+
+  const updatePosition = useMemo(
+    () => () => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const top = Math.max(HEADER_SAFE_TOP, rect.bottom + 4);
+      setDropdownRect({
+        top,
+        left: rect.left,
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (isOpen) updatePosition();
+  }, [isOpen, updatePosition]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const interval = setInterval(updatePosition, 150);
+    const onScroll = () => updatePosition();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [isOpen, updatePosition]);
 
   const normalizedOptions = useMemo<MultiSelectOption[]>(
     () =>
@@ -49,9 +87,10 @@ const MultiSelectWithSearch: React.FC<MultiSelectWithSearchProps> = ({
 
   React.useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = e.target as Node;
+      const inContainer = containerRef.current?.contains(target);
+      const inDropdown = dropdownRef.current?.contains(target);
+      if (!inContainer && !inDropdown) setIsOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -89,8 +128,13 @@ const MultiSelectWithSearch: React.FC<MultiSelectWithSearchProps> = ({
         <span className="truncate flex-1 text-left">{badgeLabel}</span>
         <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
-      {isOpen && (
-        <div className="absolute left-0 mt-1 z-[95] w-64 max-h-[28rem] flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#252525] shadow-xl overflow-hidden">
+      {isOpen &&
+        ReactDOM.createPortal(
+          <div
+            ref={dropdownRef}
+            className="fixed z-[9999] min-w-64 max-w-md max-h-[28rem] flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#252525] shadow-xl overflow-hidden"
+            style={{ top: dropdownRect.top, left: dropdownRect.left }}
+          >
           <div className="p-2 border-b border-gray-200 dark:border-gray-700">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -132,7 +176,7 @@ const MultiSelectWithSearch: React.FC<MultiSelectWithSearchProps> = ({
                     onChange={() => toggle(opt.value)}
                     className="rounded"
                   />
-                  <span className="truncate">{opt.label}</span>
+                  <span className="break-words whitespace-normal text-inherit">{opt.label}</span>
                 </label>
               ))
             )}
@@ -142,8 +186,9 @@ const MultiSelectWithSearch: React.FC<MultiSelectWithSearchProps> = ({
               {footerContent}
             </div>
           )}
-        </div>
-      )}
+        </div>,
+          portalContainerRef?.current ?? document.body
+        )}
     </div>
   );
 };

@@ -65,6 +65,27 @@
           animation: flutuar 5s ease-in-out infinite;
         }
 
+        /* Fullscreen: evita área preta e preenche toda a tela */
+        .projection-fullscreen-container:fullscreen,
+        .projection-fullscreen-container:-webkit-full-screen,
+        .projection-fullscreen-container:-moz-full-screen {
+          background-color: #f7f9fd !important;
+          width: 100vw !important;
+          height: 100vh !important;
+          min-height: 100vh !important;
+          max-height: 100vh !important;
+          box-sizing: border-box;
+          overflow: auto;
+          position: fixed;
+          top: 0;
+          left: 0;
+        }
+        .dark .projection-fullscreen-container:fullscreen,
+        .dark .projection-fullscreen-container:-webkit-full-screen,
+        .dark .projection-fullscreen-container:-moz-full-screen {
+          background-color: #1a1a1a !important;
+        }
+
         /* Prevenindo seleção de texto em botões e headers */
         th, button { user-select: none; }
 
