@@ -199,6 +199,46 @@ const wrapDescription = (text: string, maxChars = 35): string[] => {
   return lines;
 };
 
+interface AdaptiveTableSizingOptions {
+  usableWidth: number;
+  columnWidths: number[];
+  baseFontSize: number;
+  baseHeadFontSize: number;
+  baseCellPadding: number;
+}
+
+interface AdaptiveTableSizingResult {
+  widths: number[];
+  fontSize: number;
+  headFontSize: number;
+  cellPadding: number;
+  adjusted: boolean;
+}
+
+function getAdaptiveTableSizing(options: AdaptiveTableSizingOptions): AdaptiveTableSizingResult {
+  const { usableWidth, columnWidths, baseFontSize, baseHeadFontSize, baseCellPadding } = options;
+  const totalWidth = columnWidths.reduce((acc, w) => acc + w, 0);
+  if (totalWidth <= usableWidth) {
+    return {
+      widths: columnWidths,
+      fontSize: baseFontSize,
+      headFontSize: baseHeadFontSize,
+      cellPadding: baseCellPadding,
+      adjusted: false,
+    };
+  }
+
+  const scale = usableWidth / totalWidth;
+  const widths = columnWidths.map((w) => w * scale);
+  return {
+    widths,
+    fontSize: Math.max(5, baseFontSize * scale),
+    headFontSize: Math.max(5, baseHeadFontSize * scale),
+    cellPadding: Math.max(0.8, baseCellPadding * Math.max(0.65, scale)),
+    adjusted: true,
+  };
+}
+
 /** Estima quantas colunas de data cabem por página (cada data = 2 subcolunas P e F) */
 const getDateColsPerPage = (orientation: 'p' | 'l'): number => {
   const isLandscape = orientation === 'l';
@@ -376,29 +416,39 @@ export async function generateProjectionPdf(options: GeneratePdfOptions): Promis
       body.push(row);
     }
 
+    const usableWidth = pageWidth - margin * 2;
+    const baseColWidths = [42, 90, 28, 28, 28, ...Array.from({ length: cols.length * 2 }, () => 22)];
+    const adaptive = getAdaptiveTableSizing({
+      usableWidth,
+      columnWidths: baseColWidths,
+      baseFontSize: 7,
+      baseHeadFontSize: 6,
+      baseCellPadding: 2,
+    });
+
     autoTable(doc, {
       head,
       body,
       startY,
       margin: { left: margin, right: margin },
       theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 2 },
+      styles: { fontSize: adaptive.fontSize, cellPadding: adaptive.cellPadding },
       headStyles: {
         fillColor: PRIMARY,
         textColor: 255,
         fontStyle: 'bold',
-        fontSize: 6,
+        fontSize: adaptive.headFontSize,
       },
       columnStyles: (() => {
         const s: Record<string, object> = {
-          0: { cellWidth: 42, fontStyle: 'bold' },
-          1: { cellWidth: 90 },
-          2: { cellWidth: 28, halign: 'center' },
-          3: { cellWidth: 28, halign: 'center' },
-          4: { cellWidth: 28, halign: 'center' },
+          0: { cellWidth: adaptive.widths[0], fontStyle: 'bold' },
+          1: { cellWidth: adaptive.widths[1] },
+          2: { cellWidth: adaptive.widths[2], halign: 'center' },
+          3: { cellWidth: adaptive.widths[3], halign: 'center' },
+          4: { cellWidth: adaptive.widths[4], halign: 'center' },
         };
         for (let i = 5; i < 5 + cols.length * 2; i++) {
-          s[String(i)] = { cellWidth: 22, halign: 'center' };
+          s[String(i)] = { cellWidth: adaptive.widths[i], halign: 'center' };
         }
         return s;
       })(),
@@ -601,16 +651,16 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
 
     const tableMargin = margin;
     const usableWidth = pageWidth - tableMargin * 2;
-    const colWidths = {
-      0: 48,
-      1: Math.floor(usableWidth * 0.45),
-      2: 36,
-      3: 36,
-      4: 36,
-      5: 58,
-    };
-    const totalColWidth = colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + colWidths[5];
-    colWidths[1] = colWidths[1] + (usableWidth - totalColWidth);
+    const baseColWidths = [48, Math.floor(usableWidth * 0.45), 36, 36, 36, 58];
+    const totalColWidth = baseColWidths.reduce((acc, w) => acc + w, 0);
+    baseColWidths[1] = baseColWidths[1] + (usableWidth - totalColWidth);
+    const adaptive = getAdaptiveTableSizing({
+      usableWidth,
+      columnWidths: baseColWidths,
+      baseFontSize: 8,
+      baseHeadFontSize: 8,
+      baseCellPadding: 2.5,
+    });
 
     autoTable(doc, {
       head,
@@ -618,20 +668,20 @@ export async function generateProjectionPdfV2(options: GeneratePdfV2Options): Pr
       startY,
       margin: { left: tableMargin, right: tableMargin },
       theme: 'grid',
-      styles: { fontSize: 8, cellPadding: 2.5 },
+      styles: { fontSize: adaptive.fontSize, cellPadding: adaptive.cellPadding },
       headStyles: {
         fillColor: PRIMARY,
         textColor: 255,
         fontStyle: 'bold',
-        fontSize: 8,
+        fontSize: adaptive.headFontSize,
       },
       columnStyles: {
-        0: { cellWidth: colWidths[0], fontStyle: 'bold' },
-        1: { cellWidth: colWidths[1] },
-        2: { cellWidth: colWidths[2], halign: 'center' },
-        3: { cellWidth: colWidths[3], halign: 'center' },
-        4: { cellWidth: colWidths[4], halign: 'center' },
-        5: { cellWidth: colWidths[5], halign: 'center' },
+        0: { cellWidth: adaptive.widths[0], fontStyle: 'bold' },
+        1: { cellWidth: adaptive.widths[1] },
+        2: { cellWidth: adaptive.widths[2], halign: 'center' },
+        3: { cellWidth: adaptive.widths[3], halign: 'center' },
+        4: { cellWidth: adaptive.widths[4], halign: 'center' },
+        5: { cellWidth: adaptive.widths[5], halign: 'center' },
       },
       didParseCell: ((cellData: {
         column: { index: number };
@@ -914,11 +964,11 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
     const usableWidth = pageWidth - tableMargin * 2;
     const pairCount = Math.max(1, chunkCols.length);
 
-    const codeWidth = usableWidth * 0.08;
-    const estoqueWidth = usableWidth * 0.055;
-    const pedidoWidth = usableWidth * 0.055;
-    const faltaWidth = usableWidth * 0.055;
-    const statusWidth = usableWidth * 0.09;
+    let codeWidth = usableWidth * 0.08;
+    let estoqueWidth = usableWidth * 0.055;
+    let pedidoWidth = usableWidth * 0.055;
+    let faltaWidth = usableWidth * 0.055;
+    let statusWidth = usableWidth * 0.09;
     const baseRemaining = usableWidth - (codeWidth + estoqueWidth + pedidoWidth + faltaWidth + statusWidth);
 
     const descBias =
@@ -941,7 +991,31 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
       subColWidth = Math.max(minSubColWidth, (baseRemaining - descWidth) / (pairCount * 2));
     }
 
-    const descChars = Math.max(18, Math.floor(descWidth / 5.1));
+    const baseWidths = [
+      codeWidth,
+      descWidth,
+      estoqueWidth,
+      pedidoWidth,
+      faltaWidth,
+      ...Array.from({ length: pairCount * 2 }, () => subColWidth),
+      statusWidth,
+    ];
+    const adaptive = getAdaptiveTableSizing({
+      usableWidth,
+      columnWidths: baseWidths,
+      baseFontSize: 7,
+      baseHeadFontSize: 7,
+      baseCellPadding: 2,
+    });
+    codeWidth = adaptive.widths[0];
+    descWidth = adaptive.widths[1];
+    estoqueWidth = adaptive.widths[2];
+    pedidoWidth = adaptive.widths[3];
+    faltaWidth = adaptive.widths[4];
+    subColWidth = adaptive.widths[5];
+    statusWidth = adaptive.widths[5 + pairCount * 2];
+
+    const descChars = Math.max(adaptive.adjusted ? 12 : 18, Math.floor(descWidth / 5.1));
     const bodyResponsive = body.map((row) => {
       const wrapped = wrapDescription(row[1], descChars).join('\n');
       const next = [...row];
@@ -955,12 +1029,12 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
       startY,
       margin: { left: tableMargin, right: tableMargin },
       theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 2 },
+      styles: { fontSize: adaptive.fontSize, cellPadding: adaptive.cellPadding },
       headStyles: {
         fillColor: PRIMARY,
         textColor: 255,
         fontStyle: 'bold',
-        fontSize: 7,
+        fontSize: adaptive.headFontSize,
       },
       columnStyles: (() => {
         const s: Record<string, object> = {
@@ -1271,11 +1345,11 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
     const usableWidth = pageWidth - tableMargin * 2;
     const pairCount = Math.max(1, chunkCols.length);
 
-    const codeWidth = usableWidth * 0.08;
-    const estoqueWidth = usableWidth * 0.055;
-    const pedidoWidth = usableWidth * 0.055;
-    const faltaWidth = usableWidth * 0.055;
-    const statusWidth = usableWidth * 0.09;
+    let codeWidth = usableWidth * 0.08;
+    let estoqueWidth = usableWidth * 0.055;
+    let pedidoWidth = usableWidth * 0.055;
+    let faltaWidth = usableWidth * 0.055;
+    let statusWidth = usableWidth * 0.09;
     const baseRemaining = usableWidth - (codeWidth + estoqueWidth + pedidoWidth + faltaWidth + statusWidth);
 
     const descBias =
@@ -1298,7 +1372,31 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       subColWidth = Math.max(minSubColWidth, (baseRemaining - descWidth) / (pairCount * 2));
     }
 
-    const descChars = Math.max(18, Math.floor(descWidth / 5.1));
+    const baseWidths = [
+      codeWidth,
+      descWidth,
+      estoqueWidth,
+      pedidoWidth,
+      faltaWidth,
+      ...Array.from({ length: pairCount * 2 }, () => subColWidth),
+      statusWidth,
+    ];
+    const adaptive = getAdaptiveTableSizing({
+      usableWidth,
+      columnWidths: baseWidths,
+      baseFontSize: 7,
+      baseHeadFontSize: 7,
+      baseCellPadding: 2,
+    });
+    codeWidth = adaptive.widths[0];
+    descWidth = adaptive.widths[1];
+    estoqueWidth = adaptive.widths[2];
+    pedidoWidth = adaptive.widths[3];
+    faltaWidth = adaptive.widths[4];
+    subColWidth = adaptive.widths[5];
+    statusWidth = adaptive.widths[5 + pairCount * 2];
+
+    const descChars = Math.max(adaptive.adjusted ? 12 : 18, Math.floor(descWidth / 5.1));
     const bodyResponsive = body.map((row) => {
       const wrapped = wrapDescription(row[1], descChars).join('\n');
       const next = [...row];
@@ -1341,12 +1439,12 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       startY,
       margin: { left: tableMargin, right: tableMargin },
       theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 2 },
+      styles: { fontSize: adaptive.fontSize, cellPadding: adaptive.cellPadding },
       headStyles: {
         fillColor: PRIMARY,
         textColor: 255,
         fontStyle: 'bold',
-        fontSize: 7,
+        fontSize: adaptive.headFontSize,
         halign: 'center',
         lineWidth: 0.5,
         lineColor: [60, 80, 120],

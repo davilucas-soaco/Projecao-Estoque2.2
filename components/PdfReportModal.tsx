@@ -67,6 +67,8 @@ const PdfReportModal: React.FC<Props> = ({
 
   const rotasSupervisao = useMemo(() => extractRotasFromProjection(projection), [projection]);
 
+  const basePdfData = useMemo(() => getDataForPdf(true), [getDataForPdf]);
+
   const allSupervisaoColumns = useMemo((): SupervisaoColOption[] => {
     const base: SupervisaoColOption[] = [
       { key: SUPERVISAO_SO_MOVEIS, label: 'Só Móveis' },
@@ -78,12 +80,27 @@ const PdfReportModal: React.FC<Props> = ({
   }, [rotasSupervisao]);
 
   const allColumns = useMemo((): ColOption[] => {
+    const isDateKey = (key: string) => /^\d{4}-\d{2}-\d{2}$/.test(key);
+    const hasPedidoInKey = (item: ProductConsolidated | ComponentData, key: string) =>
+      (item.routeData?.[key]?.pedido ?? 0) > 0;
+
     const base = [{ key: ROUTE_SO_MOVEIS, label: 'Só Móveis', isSoMoveis: true }];
     const rest = dateColumns
       .filter((c) => c.key !== ROUTE_SO_MOVEIS)
+      .filter((c) => {
+        // Para datas, só mostra no modal se existir pedido em pelo menos uma linha/componente.
+        if (!isDateKey(c.key)) return true;
+        return basePdfData.some((item) => {
+          if (hasPedidoInKey(item, c.key)) return true;
+          if (item.isShelf && item.components?.length) {
+            return item.components.some((comp) => hasPedidoInKey(comp, c.key));
+          }
+          return false;
+        });
+      })
       .map((c) => ({ key: c.key, label: c.label, isSoMoveis: false }));
     return [...base, ...rest];
-  }, [dateColumns]);
+  }, [dateColumns, basePdfData]);
 
   const visibleColumns = useMemo(
     () => allColumns.filter((c) => selectedColumnKeys.has(c.key)),
