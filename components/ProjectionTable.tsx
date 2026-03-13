@@ -55,6 +55,8 @@ interface Props {
   selectedRotas?: Set<string>;
   selectedSetores?: Set<string>;
   ignorePreviousConsumptions?: boolean;
+  /** Token incrementado externamente para resetar filtros locais da tabela. */
+  tableFiltersResetToken?: number;
   /** Ref do container para fullscreen (inclui filtros + tabela). Se não informado, usa o wrapper interno. */
   fullscreenContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
@@ -148,6 +150,7 @@ const ProjectionTable: React.FC<Props> = ({
   selectedRotas = new Set(),
   selectedSetores = new Set(),
   ignorePreviousConsumptions = false,
+  tableFiltersResetToken = 0,
   fullscreenContainerRef,
 }) => {
   const selectedCategorias = new Set<string>();
@@ -200,6 +203,21 @@ const ProjectionTable: React.FC<Props> = ({
   const codigoFilterDraggedRef = useRef(false);
   const descricaoFilterDraggedRef = useRef(false);
   const valueFilterDraggedRef = useRef(false);
+
+  useEffect(() => {
+    setRouteValueFilters({});
+    setCodigoColumnFilter(new Set());
+    setDescricaoColumnFilter(new Set());
+    setRouteValueFilterSearch('');
+    setCodigoFilterSearch('');
+    setDescricaoFilterSearch('');
+    setRouteValueFilterMenu(null);
+    setCodigoFilterMenu(null);
+    setDescricaoFilterMenu(null);
+    setValueFilterPosition(null);
+    setCodigoFilterPosition(null);
+    setDescricaoFilterPosition(null);
+  }, [tableFiltersResetToken]);
 
   const tooltipPedidoGroups = useMemo<TooltipPedidoGroup[]>(() => {
     if (!tooltip || tooltip.type !== 'P') return [];

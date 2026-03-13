@@ -24,6 +24,7 @@ interface ProjectionFiltersBarProps {
   onSelectedDateKeysChange: (v: Set<string>) => void;
   ignorePreviousConsumptions: boolean;
   onIgnorePreviousConsumptionsChange: (value: boolean) => void;
+  onClearTableFilters?: () => void;
   onGeneratePdf: () => void;
   /** Ref do container fullscreen — usado para renderizar dropdowns dentro dele (filtros funcionam em tela cheia) */
   portalContainerRef?: React.RefObject<HTMLDivElement | null>;
@@ -40,6 +41,7 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
   onSelectedDateKeysChange,
   ignorePreviousConsumptions,
   onIgnorePreviousConsumptionsChange,
+  onClearTableFilters,
   onGeneratePdf,
   portalContainerRef,
 }) => {
@@ -75,6 +77,7 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
     onSelectedSetoresChange(new Set());
     onSelectedDateKeysChange(new Set(dateOptions.map((d) => d.key)));
     onIgnorePreviousConsumptionsChange(false);
+    onClearTableFilters?.();
   };
 
   const rotasDisponiveis = React.useMemo<MultiSelectOption[]>(() => {

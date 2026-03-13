@@ -104,6 +104,7 @@ const App: React.FC = () => {
   const [logoLoadError, setLogoLoadError] = useState(false);
   const [visibleProductsPadrao, setVisibleProductsPadrao] = useState<number | null>(null);
   const [visibleProductsSimulacao, setVisibleProductsSimulacao] = useState<number | null>(null);
+  const [tableFiltersResetToken, setTableFiltersResetToken] = useState(0);
 
   // Auth State
   const [currentUser, setCurrentUser] = useState<{ profile: UserProfile, name: string } | null>(() => {
@@ -561,6 +562,10 @@ const App: React.FC = () => {
     startTransition(() => setSelectedDateKeys(next));
   }, []);
 
+  const handleClearTableFilters = useCallback(() => {
+    setTableFiltersResetToken((prev) => prev + 1);
+  }, []);
+
   const consolidatedData = useMemo(
     () =>
       buildConsolidatedData(orders, stock, shelfFicha, '', allDateColumns, todayStart, {
@@ -760,6 +765,7 @@ const App: React.FC = () => {
                 onSelectedDateKeysChange={handleProjectionDatesChange}
                 ignorePreviousConsumptions={ignorePreviousConsumptions}
                 onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
+                onClearTableFilters={handleClearTableFilters}
                 onGeneratePdf={() => setIsPdfModalOpen(true)}
                 portalContainerRef={projectionFullscreenRefPadrao}
               />
@@ -777,6 +783,7 @@ const App: React.FC = () => {
                   selectedRotas={projectionFilterRotas}
                   selectedSetores={projectionFilterSetores}
                   ignorePreviousConsumptions={ignorePreviousConsumptions}
+                  tableFiltersResetToken={tableFiltersResetToken}
                 />
               </div>
             </div>
@@ -837,6 +844,7 @@ const App: React.FC = () => {
                   onSelectedDateKeysChange={handleProjectionDatesChange}
                   ignorePreviousConsumptions={ignorePreviousConsumptions}
                   onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
+                  onClearTableFilters={handleClearTableFilters}
                   onGeneratePdf={() => setIsPdfModalOpen(true)}
                   portalContainerRef={projectionFullscreenRefSimulado}
                 />
@@ -854,6 +862,7 @@ const App: React.FC = () => {
                     selectedRotas={projectionFilterRotas}
                     selectedSetores={projectionFilterSetores}
                     ignorePreviousConsumptions={ignorePreviousConsumptions}
+                    tableFiltersResetToken={tableFiltersResetToken}
                   />
                 </div>
               </div>
