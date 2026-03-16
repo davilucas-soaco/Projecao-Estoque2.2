@@ -1888,7 +1888,7 @@ const ProjectionTable: React.FC<Props> = ({
                           <td
                             data-tooltip-cell
                             onClick={undefined}
-                            className={`print-route-col px-2 py-1.5 text-center font-bold text-[11px] ${
+                            className={`print-route-col print-f-col px-2 py-1.5 text-center font-bold text-[11px] ${
                               faltaCell < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'
                             }`}
                             style={{ width: `${Math.max(40, (vCol.size || 96) / 2)}px` }}
