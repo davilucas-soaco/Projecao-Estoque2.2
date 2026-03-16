@@ -1337,11 +1337,57 @@ const ProjectionTable: React.FC<Props> = ({
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
+    const itemRows: Omit<FlatRow, 'rowBgClass'>[] = [];
+    const componentRows: Omit<FlatRow, 'rowBgClass'>[] = [];
+    const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
+    const fichaComponentCodes = new Set<string>();
+    for (const prod of data) {
+      if (!prod.isShelf || !prod.components?.length) continue;
+      for (const comp of prod.components) {
+        fichaComponentCodes.add((comp.codigo ?? '').trim().toUpperCase());
+      }
+    }
+    const sortByDescricaoThenCodigo = (a: { descricao: string; codigo: string }, b: { descricao: string; codigo: string }) => {
+      const byDescricao = collator.compare(a.descricao ?? '', b.descricao ?? '');
+      if (byDescricao !== 0) return byDescricao;
+      return collator.compare(a.codigo ?? '', b.codigo ?? '');
+    };
+    const compareRowsByCriteria = (
+      a: Omit<FlatRow, 'rowBgClass'>,
+      b: Omit<FlatRow, 'rowBgClass'>
+    ) => {
+      for (const criterion of sortCriteria) {
+        let valA: unknown;
+        let valB: unknown;
+        if (criterion.column.startsWith('route:')) {
+          const parts = criterion.column.split(':');
+          const routeName = parts[1];
+          const field = parts[2] as 'pedido' | 'falta';
+          valA = a.routeData?.[routeName]?.[field] || 0;
+          valB = b.routeData?.[routeName]?.[field] || 0;
+        } else {
+          const mapColumn = criterion.column === 'pendenteProducao' ? 'falta' : criterion.column;
+          valA = (a as unknown as Record<string, unknown>)[mapColumn] ?? '';
+          valB = (b as unknown as Record<string, unknown>)[mapColumn] ?? '';
+        }
+        const isAsc = criterion.direction === 'asc';
+        if (typeof valA === 'string' && typeof valB === 'string') {
+          const cmp = collator.compare(valA, valB);
+          if (cmp !== 0) return isAsc ? cmp : -cmp;
+          continue;
+        }
+        const numA = Number(valA);
+        const numB = Number(valB);
+        if (valA === valB) continue;
+        if (numA < numB) return isAsc ? -1 : 1;
+        if (numA > numB) return isAsc ? 1 : -1;
+      }
+      return sortByDescricaoThenCodigo(a, b);
+    };
     let rowIndex = 0;
     for (const item of sortedData) {
       const isExpanded = expandedShelves.has(item.codigo) || autoExpandedShelves.has(item.codigo);
-      const rowBgClass = rowIndex % 2 === 0 ? 'bg-[#FFFFFF] dark:bg-[#252525]' : 'bg-[#F6F8FC] dark:bg-[#2A2A2A]';
-      rows.push({
+      const itemRow: Omit<FlatRow, 'rowBgClass'> = {
         key: item.codigo,
         kind: 'item',
         isShelf: !!item.isShelf,
@@ -1352,31 +1398,41 @@ const ProjectionTable: React.FC<Props> = ({
         totalPedido: item.totalPedido,
         falta: item.isShelf ? '-' : item.pendenteProducao,
         routeData: item.routeData,
-        rowBgClass,
-      });
-      rowIndex += 1;
-      if (isExpanded) {
-        const comps = filteredComponentsByParent.get(item.codigo) ?? [];
-        for (const comp of comps) {
-          const compBg = rowIndex % 2 === 0 ? 'bg-[#FFFFFF] dark:bg-[#252525]' : 'bg-[#F6F8FC] dark:bg-[#2A2A2A]';
-          rows.push({
-            key: `${item.codigo}-${comp.codigo}`,
-            kind: 'component',
-            parentCodigo: item.codigo,
-            codigo: comp.codigo,
-            descricao: comp.descricao,
-            estoqueAtual: comp.estoqueAtual,
-            totalPedido: comp.totalPedido,
-            falta: comp.falta,
-            routeData: comp.routeData,
-            rowBgClass: compBg,
-          });
-          rowIndex += 1;
-        }
+      };
+      const isFichaComponentCode = fichaComponentCodes.has((item.codigo ?? '').trim().toUpperCase());
+      if (isFichaComponentCode) componentRows.push(itemRow);
+      else itemRows.push(itemRow);
+      const comps = filteredComponentsByParent.get(item.codigo) ?? [];
+      for (const comp of comps) {
+        componentRows.push({
+          key: `${item.codigo}-${comp.codigo}`,
+          kind: 'component',
+          parentCodigo: item.codigo,
+          codigo: comp.codigo,
+          descricao: comp.descricao,
+          estoqueAtual: comp.estoqueAtual,
+          totalPedido: comp.totalPedido,
+          falta: comp.falta,
+          routeData: comp.routeData,
+        });
       }
     }
+
+    if (sortCriteria.length > 0) {
+      itemRows.sort(compareRowsByCriteria);
+      componentRows.sort(compareRowsByCriteria);
+    } else {
+      itemRows.sort(sortByDescricaoThenCodigo);
+      componentRows.sort(sortByDescricaoThenCodigo);
+    }
+
+    for (const row of [...itemRows, ...componentRows]) {
+      const rowBgClass = rowIndex % 2 === 0 ? 'bg-[#FFFFFF] dark:bg-[#252525]' : 'bg-[#F6F8FC] dark:bg-[#2A2A2A]';
+      rows.push({ ...row, rowBgClass });
+      rowIndex += 1;
+    }
     return rows;
-  }, [sortedData, expandedShelves, autoExpandedShelves, filteredComponentsByParent]);
+  }, [sortedData, data, expandedShelves, autoExpandedShelves, filteredComponentsByParent, sortCriteria]);
 
   const rowVirtualizer = useVirtualizer({
     count: flatRows.length,
@@ -2018,382 +2074,6 @@ const ProjectionTable: React.FC<Props> = ({
         </div>
       )}
 
-      {descricaoFilterMenu && (
-        <div
-          ref={descricaoFilterMenuRef}
-          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
-          style={descricaoFilterPosition ?? getTooltipInitialPosition(descricaoFilterMenu.anchorRect)}
-        >
-          <div
-            onMouseDown={(e) => {
-              if (!descricaoFilterMenuRef.current) return;
-              const rect = descricaoFilterMenuRef.current.getBoundingClientRect();
-              descricaoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
-              document.body.style.userSelect = 'none';
-              document.body.style.cursor = 'move';
-            }}
-            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
-            title="Arraste para mover"
-          >
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Descrição</p>
-          </div>
-          <div className="p-3 space-y-2">
-            <input
-              type="text"
-              placeholder="Buscar valor..."
-              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
-              value={descricaoFilterSearch}
-              onChange={(e) => setDescricaoFilterSearch(e.target.value)}
-            />
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'asc' }])}
-              >
-                Ordenar ASC
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'desc' }])}
-              >
-                Ordenar DESC
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => {
-                  if (filteredDescricaoValues.length > 0 && descricaoColumnFilter.size === filteredDescricaoValues.length) {
-                    setDescricaoColumnFilter(new Set());
-                  } else {
-                    setDescricaoColumnFilter(new Set(filteredDescricaoValues));
-                  }
-                }}
-              >
-                {filteredDescricaoValues.length > 0 && descricaoColumnFilter.size === filteredDescricaoValues.length ? 'Desmarcar todos' : 'Selecionar todos'}
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-neutral hover:underline"
-                onClick={() => setDescricaoColumnFilter(new Set())}
-              >
-                Limpar
-              </button>
-            </div>
-            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
-              {filteredDescricaoValues.map((value) => (
-                <label
-                  key={value}
-                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={descricaoColumnFilter.has(value)}
-                    onChange={(e) => {
-                      setDescricaoColumnFilter((prev) => {
-                        const next = new Set(prev);
-                        if (e.target.checked) next.add(value);
-                        else next.delete(value);
-                        return next;
-                      });
-                    }}
-                  />
-                  <span className="break-words whitespace-normal flex-1 min-w-0">{value}</span>
-                </label>
-              ))}
-              {filteredDescricaoValues.length === 0 && (
-                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {codigoFilterMenu && (
-        <div
-          ref={codigoFilterMenuRef}
-          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
-          style={codigoFilterPosition ?? getTooltipInitialPosition(codigoFilterMenu.anchorRect)}
-        >
-          <div
-            onMouseDown={(e) => {
-              if (!codigoFilterMenuRef.current) return;
-              const rect = codigoFilterMenuRef.current.getBoundingClientRect();
-              codigoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
-              document.body.style.userSelect = 'none';
-              document.body.style.cursor = 'move';
-            }}
-            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
-            title="Arraste para mover"
-          >
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Código</p>
-          </div>
-          <div className="p-3 space-y-2">
-            <input
-              type="text"
-              placeholder="Buscar valor..."
-              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
-              value={codigoFilterSearch}
-              onChange={(e) => setCodigoFilterSearch(e.target.value)}
-            />
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'asc' }])}
-              >
-                Ordenar ASC
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'desc' }])}
-              >
-                Ordenar DESC
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => {
-                  if (filteredCodigoValues.length === uniqueCodigos.length) {
-                    setCodigoColumnFilter(new Set());
-                  } else {
-                    setCodigoColumnFilter(new Set(uniqueCodigos));
-                  }
-                }}
-              >
-                {codigoColumnFilter.size === uniqueCodigos.length ? 'Desmarcar todos' : 'Selecionar todos'}
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-neutral hover:underline"
-                onClick={() => setCodigoColumnFilter(new Set())}
-              >
-                Limpar
-              </button>
-            </div>
-            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
-              {filteredCodigoValues.map((value) => (
-                <label
-                  key={value}
-                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={codigoColumnFilter.size === 0 || codigoColumnFilter.has(value)}
-                    onChange={(e) => {
-                      setCodigoColumnFilter((prev) => {
-                        const next = new Set(prev);
-                        if (e.target.checked) {
-                          next.add(value);
-                        } else {
-                          next.delete(value);
-                        }
-                        return next;
-                      });
-                    }}
-                  />
-                  <span>{value}</span>
-                </label>
-              ))}
-              {filteredCodigoValues.length === 0 && (
-                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {descricaoFilterMenu && (
-        <div
-          ref={descricaoFilterMenuRef}
-          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
-          style={descricaoFilterPosition ?? getTooltipInitialPosition(descricaoFilterMenu.anchorRect)}
-        >
-          <div
-            onMouseDown={(e) => {
-              if (!descricaoFilterMenuRef.current) return;
-              const rect = descricaoFilterMenuRef.current.getBoundingClientRect();
-              descricaoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
-              document.body.style.userSelect = 'none';
-              document.body.style.cursor = 'move';
-            }}
-            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
-            title="Arraste para mover"
-          >
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Descrição</p>
-          </div>
-          <div className="p-3 space-y-2">
-            <input
-              type="text"
-              placeholder="Buscar valor..."
-              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
-              value={descricaoFilterSearch}
-              onChange={(e) => setDescricaoFilterSearch(e.target.value)}
-            />
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'asc' }])}
-              >
-                Ordenar ASC
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'desc' }])}
-              >
-                Ordenar DESC
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => {
-                  if (filteredDescricaoValues.length === uniqueDescricoes.length) {
-                    setDescricaoColumnFilter(new Set());
-                  } else {
-                    setDescricaoColumnFilter(new Set(uniqueDescricoes));
-                  }
-                }}
-              >
-                {descricaoColumnFilter.size === uniqueDescricoes.length ? 'Desmarcar todos' : 'Selecionar todos'}
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-neutral hover:underline"
-                onClick={() => setDescricaoColumnFilter(new Set())}
-              >
-                Limpar
-              </button>
-            </div>
-            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
-              {filteredDescricaoValues.map((value) => (
-                <label
-                  key={value}
-                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={descricaoColumnFilter.size === 0 || descricaoColumnFilter.has(value)}
-                    onChange={(e) => {
-                      setDescricaoColumnFilter((prev) => {
-                        const next = new Set(prev);
-                        if (e.target.checked) {
-                          next.add(value);
-                        } else {
-                          next.delete(value);
-                        }
-                        return next;
-                      });
-                    }}
-                  />
-                  <span className="truncate block max-w-[260px]" title={value}>{value}</span>
-                </label>
-              ))}
-              {filteredDescricaoValues.length === 0 && (
-                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {codigoFilterMenu && (
-        <div
-          ref={codigoFilterMenuRef}
-          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
-          style={codigoFilterPosition ?? getTooltipInitialPosition(codigoFilterMenu.anchorRect)}
-        >
-          <div
-            onMouseDown={(e) => {
-              if (!codigoFilterMenuRef.current) return;
-              const rect = codigoFilterMenuRef.current.getBoundingClientRect();
-              codigoFilterDragRef.current = { dragging: true, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
-              document.body.style.userSelect = 'none';
-              document.body.style.cursor = 'move';
-            }}
-            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move"
-            title="Arraste para mover"
-          >
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Código</p>
-          </div>
-          <div className="p-3 space-y-2">
-            <input
-              type="text"
-              placeholder="Buscar valor..."
-              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
-              value={codigoFilterSearch}
-              onChange={(e) => setCodigoFilterSearch(e.target.value)}
-            />
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'asc' }])}
-              >
-                Ordenar ASC
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'desc' }])}
-              >
-                Ordenar DESC
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => {
-                  if (filteredCodigoValues.length === 0) return;
-                  const allSelected = filteredCodigoValues.every((v) => codigoColumnFilter.has(v));
-                  setCodigoColumnFilter(allSelected ? new Set() : new Set(filteredCodigoValues));
-                }}
-              >
-                {filteredCodigoValues.every((v) => codigoColumnFilter.has(v)) && filteredCodigoValues.length > 0 ? 'Desmarcar todos' : 'Selecionar todos'}
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-neutral hover:underline"
-                onClick={() => setCodigoColumnFilter(new Set())}
-              >
-                Limpar
-              </button>
-            </div>
-            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
-              {filteredCodigoValues.map((value) => (
-                <label key={value} className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={codigoColumnFilter.has(value)}
-                    onChange={(e) => {
-                      setCodigoColumnFilter((prev) => {
-                        const next = new Set(prev);
-                        if (e.target.checked) next.add(value);
-                        else next.delete(value);
-                        return next;
-                      });
-                    }}
-                  />
-                  <span className="break-words whitespace-normal flex-1 min-w-0">{value}</span>
-                </label>
-              ))}
-              {filteredCodigoValues.length === 0 && (
-                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {descricaoFilterMenu && (
         <div
@@ -2623,202 +2303,6 @@ const ProjectionTable: React.FC<Props> = ({
                 </label>
               ))}
               {filteredActiveMenuValues.length === 0 && (
-                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {codigoFilterMenu && (
-        <div
-          ref={codigoFilterMenuRef}
-          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
-          style={codigoFilterPosition ?? getTooltipInitialPosition(codigoFilterMenu.anchorRect)}
-        >
-          <div
-            onMouseDown={(e) => {
-              if (!codigoFilterMenuRef.current) return;
-              const rect = codigoFilterMenuRef.current.getBoundingClientRect();
-              codigoFilterDragRef.current = {
-                dragging: true,
-                offsetX: e.clientX - rect.left,
-                offsetY: e.clientY - rect.top,
-              };
-              document.body.style.userSelect = 'none';
-              document.body.style.cursor = 'move';
-            }}
-            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move flex items-center justify-between"
-            title="Arraste para mover"
-          >
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro CÓDIGO</p>
-            <button
-              onClick={() => {
-                setCodigoFilterMenu(null);
-                setCodigoFilterPosition(null);
-                codigoFilterAnchorRef.current = null;
-              }}
-              className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="p-3 space-y-2">
-            <input
-              type="text"
-              placeholder="Buscar valor..."
-              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
-              value={codigoFilterSearch}
-              onChange={(e) => setCodigoFilterSearch(e.target.value)}
-            />
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'asc' }])}
-              >
-                Ordenar ASC
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'codigo', direction: 'desc' }])}
-              >
-                Ordenar DESC
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => {
-                  setCodigoColumnFilter(
-                    filteredCodigoValues.length > 0 && codigoColumnFilter.size === filteredCodigoValues.length
-                      ? new Set()
-                      : new Set(filteredCodigoValues)
-                  );
-                }}
-              >
-                {filteredCodigoValues.length > 0 && codigoColumnFilter.size === filteredCodigoValues.length
-                  ? 'Desmarcar todos'
-                  : 'Selecionar todos'}
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-neutral hover:underline"
-                onClick={() => setCodigoColumnFilter(new Set())}
-              >
-                Limpar
-              </button>
-            </div>
-            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
-              {filteredCodigoValues.map((value) => (
-                <label
-                  key={value}
-                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={codigoColumnFilter.has(value)}
-                    onChange={(e) => {
-                      setCodigoColumnFilter((prev) => {
-                        const next = new Set(prev);
-                        if (e.target.checked) next.add(value);
-                        else next.delete(value);
-                        return next;
-                      });
-                    }}
-                  />
-                  <span>{value}</span>
-                </label>
-              ))}
-              {filteredCodigoValues.length === 0 && (
-                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {descricaoFilterMenu && (
-        <div
-          ref={descricaoFilterMenuRef}
-          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden w-[320px] max-w-[90vw]"
-          style={getTooltipInitialPosition(descricaoFilterMenu.anchorRect)}
-        >
-          <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933]">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro DESCRIÇÃO</p>
-          </div>
-          <div className="p-3 space-y-2">
-            <input
-              type="text"
-              placeholder="Buscar valor..."
-              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
-              value={descricaoFilterSearch}
-              onChange={(e) => setDescricaoFilterSearch(e.target.value)}
-            />
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'asc' }])}
-              >
-                Ordenar ASC
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => setSortCriteria([{ column: 'descricao', direction: 'desc' }])}
-              >
-                Ordenar DESC
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                className="text-[10px] font-bold text-secondary hover:underline"
-                onClick={() => {
-                  setDescricaoColumnFilter(
-                    filteredDescricaoValues.length > 0 && descricaoColumnFilter.size === filteredDescricaoValues.length
-                      ? new Set()
-                      : new Set(filteredDescricaoValues)
-                  );
-                }}
-              >
-                {filteredDescricaoValues.length > 0 && descricaoColumnFilter.size === filteredDescricaoValues.length
-                  ? 'Desmarcar todos'
-                  : 'Selecionar todos'}
-              </button>
-              <button
-                type="button"
-                className="text-[10px] font-bold text-neutral hover:underline"
-                onClick={() => setDescricaoColumnFilter(new Set())}
-              >
-                Limpar
-              </button>
-            </div>
-            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
-              {filteredDescricaoValues.map((value) => (
-                <label
-                  key={value}
-                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer truncate"
-                >
-                  <input
-                    type="checkbox"
-                    checked={descricaoColumnFilter.has(value)}
-                    onChange={(e) => {
-                      setDescricaoColumnFilter((prev) => {
-                        const next = new Set(prev);
-                        if (e.target.checked) next.add(value);
-                        else next.delete(value);
-                        return next;
-                      });
-                    }}
-                  />
-                  <span className="truncate" title={value}>{value}</span>
-                </label>
-              ))}
-              {filteredDescricaoValues.length === 0 && (
                 <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
               )}
             </div>
