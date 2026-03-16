@@ -1491,6 +1491,7 @@ const ProjectionTable: React.FC<Props> = ({
   }, [uniqueDescricoes, descricaoFilterSearch]);
 
   const exportProjectionExcel = () => {
+    const excelColCount = 5 + columnsToRender.length * 2;
     const colGroup = [
       `<col style="width:140px">`,
       `<col style="width:520px">`,
@@ -1531,7 +1532,7 @@ const ProjectionTable: React.FC<Props> = ({
         const rowBg = idx % 2 === 0 ? '#ffffff' : '#f6f8fc';
         const baseCells = [
           `<td style="border:1px solid #d8e0ef;padding:6px 8px;background:${rowBg};font-weight:700;text-align:center;vertical-align:middle;">${escapeHtml(item.codigo)}</td>`,
-          `<td style="border:1px solid #d8e0ef;padding:6px 8px;background:${rowBg};text-align:center;vertical-align:middle;">${escapeHtml(item.descricao)}</td>`,
+          `<td style="border:1px solid #d8e0ef;padding:6px 8px;background:${rowBg};text-align:left;vertical-align:middle;">${escapeHtml(item.descricao)}</td>`,
           `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;">${escapeHtml(
             item.isShelf ? '-' : item.estoqueAtual
           )}</td>`,
@@ -1571,6 +1572,7 @@ const ProjectionTable: React.FC<Props> = ({
 <x:ExcelWorksheets>
 <x:ExcelWorksheet>
 <x:Name>Projeção</x:Name>
+<x:AutoFilter x:Range="R2C1:R2C${excelColCount}" xmlns:x="urn:schemas-microsoft-com:office:excel"/>
 <x:WorksheetOptions>
 <x:FreezePanes/>
 <x:FrozenNoSplit/>
