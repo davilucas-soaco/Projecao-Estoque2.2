@@ -172,6 +172,7 @@ const ProjectionTable: React.FC<Props> = ({
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const tableWrapperRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPrintMode, setIsPrintMode] = useState(false);
   const [tooltip, setTooltip] = useState<{
     codigo: string;
     colKey: string;
@@ -204,6 +205,17 @@ const ProjectionTable: React.FC<Props> = ({
   const codigoFilterDraggedRef = useRef(false);
   const descricaoFilterDraggedRef = useRef(false);
   const valueFilterDraggedRef = useRef(false);
+
+  useEffect(() => {
+    const onBeforePrint = () => setIsPrintMode(true);
+    const onAfterPrint = () => setIsPrintMode(false);
+    window.addEventListener('beforeprint', onBeforePrint);
+    window.addEventListener('afterprint', onAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', onBeforePrint);
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+  }, []);
 
   useEffect(() => {
     setRouteValueFilters({});
@@ -1366,14 +1378,22 @@ const ProjectionTable: React.FC<Props> = ({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const virtualColumns = columnVirtualizer.getVirtualItems();
-  const topRowPadding = virtualRows.length > 0 ? virtualRows[0].start : 0;
-  const bottomRowPadding =
-    virtualRows.length > 0 ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end : 0;
-  const leftColPadding = virtualColumns.length > 0 ? virtualColumns[0].start : 0;
-  const rightColPadding =
-    virtualColumns.length > 0
+  const rowsToRender = isPrintMode
+    ? flatRows.map((_, index) => ({ index, size: 0 }))
+    : virtualRows.map((v) => ({ index: v.index, size: v.size }));
+  const colsToRender = isPrintMode
+    ? columnsToRender.map((_, index) => ({ index, size: 96 }))
+    : virtualColumns.map((v) => ({ index: v.index, size: v.size }));
+  const topRowPadding = isPrintMode ? 0 : (virtualRows.length > 0 ? virtualRows[0].start : 0);
+  const bottomRowPadding = isPrintMode
+    ? 0
+    : (virtualRows.length > 0 ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end : 0);
+  const leftColPadding = isPrintMode ? 0 : (virtualColumns.length > 0 ? virtualColumns[0].start : 0);
+  const rightColPadding = isPrintMode
+    ? 0
+    : (virtualColumns.length > 0
       ? columnVirtualizer.getTotalSize() - virtualColumns[virtualColumns.length - 1].end
-      : 0;
+      : 0);
 
   useEffect(() => {
     onVisibleProductsCountChange?.(sortedData.length);
@@ -1621,9 +1641,10 @@ const ProjectionTable: React.FC<Props> = ({
                 </th>
                 <th
                   data-descricao-filter-head
+                  data-print-desc-col
                   onClick={(e) => handleSort('descricao', e.ctrlKey)}
                   style={{ width: `${descriptionWidth}px`, minWidth: `${descriptionWidth}px` }}
-                  className="px-2 py-1 sticky left-[110px] top-0 z-[80] bg-primary border-b border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors relative"
+                  className="print-desc-col px-2 py-1 sticky left-[110px] top-0 z-[80] bg-primary border-b border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors relative"
                 >
                   <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold pr-2 mb-0.5">
                     <span className="truncate">Descrição</span>
@@ -1685,7 +1706,7 @@ const ProjectionTable: React.FC<Props> = ({
                   </div>
                 </th>
                 {leftColPadding > 0 && <th colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
-                {virtualColumns.map((vCol) => {
+                {colsToRender.map((vCol) => {
                   const col = columnsToRender[vCol.index];
                   return (
                   <th
@@ -1752,7 +1773,7 @@ const ProjectionTable: React.FC<Props> = ({
                   <td colSpan={totalColSpan} style={{ height: `${topRowPadding}px`, padding: 0, border: 0 }} />
                 </tr>
               )}
-              {virtualRows.map((vRow) => {
+              {rowsToRender.map((vRow) => {
                 const row = flatRows[vRow.index];
                 const isSelected = selectedRowCodigo === row.key || selectedRowCodigo === row.parentCodigo;
                 const isItem = row.kind === 'item';
@@ -1760,7 +1781,7 @@ const ProjectionTable: React.FC<Props> = ({
                   <tr
                     key={row.key}
                     data-index={vRow.index}
-                    ref={rowVirtualizer.measureElement}
+                    ref={isPrintMode ? undefined : rowVirtualizer.measureElement}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (tooltip) return;
@@ -1793,7 +1814,7 @@ const ProjectionTable: React.FC<Props> = ({
                     </td>
                     <td
                       style={{ width: `${descriptionWidth}px`, maxWidth: `${descriptionWidth}px` }}
-                      className={`px-3 py-1.5 sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate ${
+                      className={`print-desc-col px-3 py-1.5 sticky left-[110px] z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate ${
                         row.kind === 'component' ? 'text-[10px] italic text-neutral' : 'text-[11px]'
                       }`}
                     >
@@ -1820,7 +1841,7 @@ const ProjectionTable: React.FC<Props> = ({
                       {row.kind === 'item' ? (Number(row.falta) < 0 ? formatCellNum(row.falta) : '-') : formatCellNum(row.falta)}
                     </td>
                     {leftColPadding > 0 && <td colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
-                    {virtualColumns.map((vCol) => {
+                    {colsToRender.map((vCol) => {
                       const col = columnsToRender[vCol.index];
                       const rd = getRouteDataForColumn(row as unknown as ProductConsolidated | ComponentData, col.key);
                       const pedidoCell = Math.max(0, Number(rd.pedido ?? 0));
@@ -1842,7 +1863,7 @@ const ProjectionTable: React.FC<Props> = ({
                               )
                             }
                             className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
-                            style={{ width: `${Math.max(40, vCol.size / 2)}px` }}
+                            style={{ width: `${Math.max(40, (vCol.size || 96) / 2)}px` }}
                           >
                             {formatCellNum(pedidoCell)}
                           </td>
@@ -1852,7 +1873,7 @@ const ProjectionTable: React.FC<Props> = ({
                             className={`px-2 py-1.5 text-center font-bold text-[11px] ${
                               faltaCell < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'
                             }`}
-                            style={{ width: `${Math.max(40, vCol.size / 2)}px` }}
+                            style={{ width: `${Math.max(40, (vCol.size || 96) / 2)}px` }}
                           >
                             {row.kind === 'item' && row.isShelf ? '-' : formatCellNum(faltaCell)}
                           </td>
