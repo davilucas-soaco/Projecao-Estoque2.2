@@ -208,7 +208,7 @@ const PdfReportModal: React.FC<Props> = ({
           : filtroResultado === 'estoque'
             ? 'apenas em estoque'
             : 'todos';
-      const pdfConfigText = `Configurações do PDF: Gerar relatório de supervisão? -${isV2Supervisao ? 'sim' : 'não'}; Colunas a incluir -${colCount}; Tipo de resultado: -${filtroLabel} .`;
+      const pdfConfigText = `Configurações do PDF: Deseja considerar apenas itens de carradas? -${isV2Supervisao ? 'sim' : 'não'}; Colunas a incluir -${colCount}; Tipo de resultado: -${filtroLabel} .`;
       if (isV2Supervisao) {
         const colOpts = visibleSupervisaoColumns.map((c) => ({ key: c.key, label: c.label }));
         const visibleRouteDateKeys = visibleSupervisaoColumns
@@ -275,7 +275,7 @@ const PdfReportModal: React.FC<Props> = ({
         <div className="px-6 py-4 overflow-auto flex-1 space-y-5">
           <div>
               <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">
-                Gerar relatório de supervisão?
+                Deseja considerar apenas itens de carradas?
               </p>
               <div className="flex gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
