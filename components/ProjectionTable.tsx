@@ -12,6 +12,7 @@ import {
   normalizeText,
   getCategoriaFromObservacoes,
   parseOrderDate,
+  getSupervisaoCellForItem,
 } from '../utils';
 import {
   AlertTriangle,
@@ -283,6 +284,90 @@ const ProjectionTable: React.FC<Props> = ({
     resizeRef.current = e.pageX;
   };
 
+  const parseRotaScopedColKey = (colKey: string): { routeName: string; dateKey: string } | null => {
+    const overdueMatch = colKey.match(/^rotaScopedOverdue\|(.*)$/);
+    if (overdueMatch) {
+      return { routeName: overdueMatch[1], dateKey: 'ATRASADOS' };
+    }
+    const m = colKey.match(/^rotaScoped\|(.*)\|(\d{4}-\d{2}-\d{2})$/);
+    if (!m) return null;
+    return { routeName: m[1], dateKey: m[2] };
+  };
+
+  const normalizeRotaForMatch = (v: string): string =>
+    (v ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s*-\s*\d{2}\/\d{2}\/\d{4}\s*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+  const rotaDestinoMatches = (destino: string, routeName: string): boolean => {
+    const dNorm = normalizeRotaForMatch(destino);
+    const rNorm = normalizeRotaForMatch(routeName);
+    return !!dNorm && !!rNorm && (dNorm === rNorm || dNorm.includes(rNorm) || rNorm.includes(dNorm));
+  };
+
+  const getRouteDataForColumn = (
+    item: ProductConsolidated | ComponentData,
+    colKey: string
+  ): { pedido: number; falta: number; breakdown?: { destino: string; qty: number; numeroPedido?: string }[]; breakdownFalta?: { destino: string; qty: number; numeroPedido?: string }[] } => {
+    const scoped = parseRotaScopedColKey(colKey);
+    if (!scoped) {
+      const rd = item.routeData[colKey] || { pedido: 0, falta: 0 };
+      // Quando filtro de rota está ativo, evita duplicidade:
+      // colunas normais exibem apenas o que NÃO pertence às rotas selecionadas.
+      if (selectedRotaNames.size === 0) return rd;
+
+      const breakdown = (rd.breakdown ?? []).filter(
+        (b) => !selectedRotaEntries.some((route) => rotaDestinoMatches(b.destino ?? '', route.routeName))
+      );
+      const pedido = Math.round(
+        breakdown.reduce((acc, b) => acc + Math.max(0, Number(b.qty) || 0), 0)
+      );
+
+      const rawBreakdownFalta = (rd as any).breakdownFalta as
+        | { destino: string; qty: number; numeroPedido?: string }[]
+        | undefined;
+      const breakdownFalta = (rawBreakdownFalta ?? []).filter(
+        (b) => !selectedRotaEntries.some((route) => rotaDestinoMatches(b.destino ?? '', route.routeName))
+      );
+      const faltaFromBreakdown = breakdownFalta.reduce(
+        (acc, b) => acc + Math.max(0, Number(b.qty) || 0),
+        0
+      );
+      const falta =
+        breakdownFalta.length > 0
+          ? (faltaFromBreakdown === 0 ? 0 : -Math.round(faltaFromBreakdown))
+          : Number(rd.falta ?? 0);
+
+      return { ...rd, pedido, falta, breakdown, breakdownFalta };
+    }
+
+    const rdDate = item.routeData[scoped.dateKey] || { pedido: 0, falta: 0 };
+    const breakdown = (rdDate.breakdown ?? []).filter((b) => rotaDestinoMatches(b.destino ?? '', scoped.routeName));
+    const breakdownFalta = ((rdDate as any).breakdownFalta ?? []).filter((b: { destino?: string }) =>
+      rotaDestinoMatches(b.destino ?? '', scoped.routeName)
+    );
+
+    const cell = getSupervisaoCellForItem(
+      item as {
+        routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }>;
+        estoqueAtual?: number;
+      },
+      `rota|${scoped.routeName}`,
+      { visibleColKeysForConsumption: [scoped.dateKey] }
+    );
+
+    return {
+      pedido: cell.pedido,
+      falta: cell.falta,
+      breakdown,
+      breakdownFalta,
+    };
+  };
+
   const handlePClick = (
     e: React.MouseEvent,
     item: ProductConsolidated | ComponentData,
@@ -291,7 +376,7 @@ const ProjectionTable: React.FC<Props> = ({
     highlightCodigo: string
   ) => {
     e.stopPropagation();
-    const rd = item.routeData[colKey];
+    const rd = getRouteDataForColumn(item, colKey);
     if (!rd || rd.pedido === 0) return;
     const breakdown = rd.breakdown && rd.breakdown.length > 0 ? rd.breakdown : [{ destino: 'Total', qty: rd.pedido } as { destino: string; qty: number; numeroPedido?: string }];
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -315,7 +400,7 @@ const ProjectionTable: React.FC<Props> = ({
     highlightCodigo: string
   ) => {
     e.stopPropagation();
-    const rd = item.routeData[colKey];
+    const rd = getRouteDataForColumn(item, colKey);
     const falta = rd?.falta ?? 0;
     if (!rd || falta >= 0) return;
     const breakdown = (rd.breakdownFalta && rd.breakdownFalta.length > 0)
@@ -339,7 +424,7 @@ const ProjectionTable: React.FC<Props> = ({
     colKey: string,
     field: RouteValueField
   ): string => {
-    const rd = item.routeData[colKey] || { pedido: 0, falta: 0 };
+    const rd = getRouteDataForColumn(item, colKey);
     let raw = Number(rd.pedido ?? 0);
     if (field === 'falta') {
       if (ignorePreviousConsumptions) {
@@ -353,7 +438,19 @@ const ProjectionTable: React.FC<Props> = ({
     return String(formatCellNum(raw));
   };
 
-  const getRouteFilterKey = (colKey: string, field: RouteValueField) => `${colKey}|${field}`;
+  const getRouteFilterKey = (colKey: string, field: RouteValueField) =>
+    `${encodeURIComponent(colKey)}::${field}`;
+  const parseRouteFilterKey = (key: string): { colKey: string; field: RouteValueField } | null => {
+    const sepIdx = key.lastIndexOf('::');
+    if (sepIdx <= 0 || sepIdx >= key.length - 2) return null;
+    const rawCol = key.slice(0, sepIdx);
+    const fieldRaw = key.slice(sepIdx + 2);
+    if (fieldRaw !== 'pedido' && fieldRaw !== 'falta') return null;
+    return {
+      colKey: decodeURIComponent(rawCol),
+      field: fieldRaw,
+    };
+  };
 
   const rotasCompletas = useMemo(() => extractRotasFromProjection(projectionSource), [projectionSource]);
   const allRouteNames = useMemo(() => new Set(rotasCompletas.map((r) => r.routeName)), [rotasCompletas]);
@@ -835,31 +932,126 @@ const ProjectionTable: React.FC<Props> = ({
     isSoMoveis: c.key === ROUTE_SO_MOVEIS,
   }));
   const rotaFilterActive = selectedRotaNames.size > 0;
+  const selectedRotaEntries = useMemo(
+    () => rotasCompletas.filter((r) => selectedRotaNames.has(r.routeName)),
+    [rotasCompletas, selectedRotaNames]
+  );
 
   const rotaScopedColumns = useMemo(() => {
     if (!rotaFilterActive) return null;
     const cols: { key: string; label: string; isSoMoveis: false }[] = [];
-    const overdueDates = Array.from(dateKeysForSelectedRotas?.overdueDates ?? []);
-    if (overdueDates.length > 0) {
-      const label =
-        overdueDates.length <= 2
-          ? overdueDates.join(' • ')
-          : `${overdueDates[0]} +${overdueDates.length - 1}`;
-      cols.push({ key: 'ATRASADOS', label, isSoMoveis: false });
-    }
+    const sortOverdue = (arr: string[]) =>
+      arr.sort((a, b) => {
+        const parseOverdue = (s: string) => {
+          const [dd, mm, yy] = s.split('/');
+          return new Date(`20${yy}-${mm}-${dd}T00:00:00`).getTime();
+        };
+        return parseOverdue(a) - parseOverdue(b);
+      });
+    const formatOverdueLabel = (dates: string[]) =>
+      dates.length <= 2 ? dates.join(' • ') : `${dates[0]} +${dates.length - 1}`;
+
     const formatDateKey = (key: string) => {
       const [yy, mm, dd] = key.split('-');
       return `${dd}/${mm}/${yy.slice(-2)}`;
     };
-    for (const key of dateKeysForSelectedRotas?.keys ?? []) {
-      const col = dateColumns.find((c) => c.key === key);
-      cols.push({ key, label: col?.label ?? formatDateKey(key), isSoMoveis: false });
+
+    const routeOrder = new Map<string, number>();
+    selectedRotaEntries.forEach((r, idx) => routeOrder.set(r.routeName, idx));
+
+    const routeDatePairs: Array<{ routeName: string; dateKey: string }> = [];
+    const routeOverdueDates = new Map<string, Set<string>>();
+    const seenPairs = new Set<string>();
+
+    const rotaNameMatches = (base: string, routeName: string): boolean => {
+      const baseNorm = normalizeText(base);
+      const routeNorm = normalizeText(routeName);
+      if (baseNorm === routeNorm) return true;
+      if (base.toUpperCase().startsWith('ROTA') && routeName.toUpperCase().startsWith('ROTA')) {
+        const core = (s: string) =>
+          s
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s*-\s*[A-Za-zÀ-ÿ\s]+$/, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+        return core(base) === core(routeName);
+      }
+      return false;
+    };
+
+    for (const route of selectedRotaEntries) {
+      for (const row of projectionSource) {
+        const obs = (row.observacoes ?? '').toString().trim();
+        const prefixMatch = obs.match(/^\d+\s*[-–]\s*(.*)$/);
+        const base = (prefixMatch ? prefixMatch[1] : obs).trim();
+        if (!base || !rotaNameMatches(base, route.routeName)) continue;
+        const d = parseOrderDate((row.previsaoAtual ?? '').toString().trim());
+        if (!d) continue;
+        d.setHours(0, 0, 0, 0);
+        if (d < todayStart) continue;
+        const dateKey = dateToKey(d);
+        const pairKey = `${route.routeName}|${dateKey}`;
+        if (seenPairs.has(pairKey)) continue;
+        seenPairs.add(pairKey);
+        routeDatePairs.push({ routeName: route.routeName, dateKey });
+      }
+    }
+
+    for (const route of selectedRotaEntries) {
+      for (const row of projectionSource) {
+        const obs = (row.observacoes ?? '').toString().trim();
+        const prefixMatch = obs.match(/^\d+\s*[-–]\s*(.*)$/);
+        const base = (prefixMatch ? prefixMatch[1] : obs).trim();
+        if (!base || !rotaNameMatches(base, route.routeName)) continue;
+        const d = parseOrderDate((row.previsaoAtual ?? '').toString().trim());
+        if (!d) continue;
+        d.setHours(0, 0, 0, 0);
+        if (d >= todayStart) continue;
+        const overdueLabel = d.toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: '2-digit',
+        });
+        if (!routeOverdueDates.has(route.routeName)) routeOverdueDates.set(route.routeName, new Set());
+        routeOverdueDates.get(route.routeName)!.add(overdueLabel);
+      }
+    }
+
+    selectedRotaEntries.forEach((route) => {
+      const dates = Array.from(routeOverdueDates.get(route.routeName) ?? []);
+      if (dates.length === 0) return;
+      const sorted = sortOverdue(dates);
+      cols.push({
+        key: `rotaScopedOverdue|${route.routeName}`,
+        label: `${route.routeName} - ${formatOverdueLabel(sorted)}`,
+        isSoMoveis: false,
+      });
+    });
+
+    routeDatePairs.sort((a, b) => {
+      const byDate = a.dateKey.localeCompare(b.dateKey);
+      if (byDate !== 0) return byDate;
+      return (routeOrder.get(a.routeName) ?? 9999) - (routeOrder.get(b.routeName) ?? 9999);
+    });
+
+    for (const pair of routeDatePairs) {
+      cols.push({
+        key: `rotaScoped|${pair.routeName}|${pair.dateKey}`,
+        label: `${pair.routeName} - ${formatDateKey(pair.dateKey)}`,
+        isSoMoveis: false,
+      });
     }
     return cols;
-  }, [rotaFilterActive, dateKeysForSelectedRotas, dateColumns]);
+  }, [rotaFilterActive, dateKeysForSelectedRotas, selectedRotaEntries, projectionSource, todayStart]);
 
   const visibleColumns = useMemo(() => {
-    const baseColumns = rotaScopedColumns ?? allColumns;
+    const hasCategoriasFixasSelecionadas = selectedRotaCategoriasNorm.size > 0;
+    const baseColumns =
+      rotaFilterActive && hasCategoriasFixasSelecionadas && rotaScopedColumns
+        ? [...rotaScopedColumns, ...allColumns]
+        : (rotaScopedColumns ?? allColumns);
 
     // Filtro de colunas por categoria só é aplicado para categorias de destino (Requisição, GT, Retirada).
     if (!dateKeysForSelectedCategorias || dateKeysForSelectedCategorias.size === 0) return baseColumns;
@@ -868,7 +1060,7 @@ const ProjectionTable: React.FC<Props> = ({
 
     // Fallback seguro para não ocultar dados por inconsistência entre tipoF x destino consolidado.
     return filtered.length > 0 ? filtered : baseColumns;
-  }, [rotaScopedColumns, allColumns, dateKeysForSelectedCategorias]);
+  }, [rotaScopedColumns, allColumns, dateKeysForSelectedCategorias, rotaFilterActive, selectedRotaCategoriasNorm]);
 
   /** Quando há colunas de data visíveis (YYYY-MM-DD), exibe apenas itens com pedido em pelo menos uma delas. */
   const dataFilteredByVisibleDateColumns = useMemo(() => {
@@ -981,8 +1173,9 @@ const ProjectionTable: React.FC<Props> = ({
   const rowMatchesRouteValueFilters = (row: ProductConsolidated | ComponentData): boolean => {
     if (activeRouteValueFilterKeys.length === 0) return true;
     for (const key of activeRouteValueFilterKeys) {
-      const [colKey, fieldRaw] = key.split('|');
-      const field = fieldRaw as RouteValueField;
+      const parsed = parseRouteFilterKey(key);
+      if (!parsed) continue;
+      const { colKey, field } = parsed;
       const allowed = routeValueFilters[key];
       if (!allowed || allowed.size === 0) continue;
       const val = getRouteDisplayValue(row, colKey, field);
@@ -1313,7 +1506,7 @@ const ProjectionTable: React.FC<Props> = ({
         ];
 
         const routeCells = columnsToRender.flatMap((col) => {
-          const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
+          const rd = getRouteDataForColumn(item, col.key);
           const pedidoDisplay = Math.max(0, Number(rd.pedido ?? 0));
           const faltaDisplay = ignorePreviousConsumptions
             ? (pedidoDisplay > Math.max(0, Number(item.estoqueAtual ?? 0))
@@ -1369,7 +1562,7 @@ const ProjectionTable: React.FC<Props> = ({
         ref={tableWrapperRef}
         className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0 transition-all duration-300"
       >
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+        <div className="no-print px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-end gap-2">
           <button
             type="button"
             onClick={toggleFullscreen}
@@ -1629,7 +1822,7 @@ const ProjectionTable: React.FC<Props> = ({
                     {leftColPadding > 0 && <td colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
                     {virtualColumns.map((vCol) => {
                       const col = columnsToRender[vCol.index];
-                      const rd = row.routeData[col.key] || { pedido: 0, falta: 0 };
+                      const rd = getRouteDataForColumn(row as unknown as ProductConsolidated | ComponentData, col.key);
                       const pedidoCell = Math.max(0, Number(rd.pedido ?? 0));
                       const estoqueCell = Math.max(0, Number((row as { estoqueAtual?: number }).estoqueAtual ?? 0));
                       const faltaCell = ignorePreviousConsumptions

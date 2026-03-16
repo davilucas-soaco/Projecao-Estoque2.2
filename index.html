@@ -92,6 +92,75 @@
         /* Estilos de texto para modo claro */
         .text-main { color: #1a1a1a; }
         .dark .text-main { color: #f1f1f1; }
+
+        /* Impressão: snapshot da área de projeção (filtros + tabela), preservando cores */
+        @media print {
+          @page {
+            size: landscape;
+            margin: 8mm;
+          }
+
+          html, body {
+            width: 100% !important;
+            height: auto !important;
+            overflow: visible !important;
+            background: #1a1a1a !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .projection-print-area,
+          .projection-print-area * {
+            visibility: visible !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          .projection-print-area {
+            position: static !important;
+            inset: auto !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #1a1a1a !important;
+            box-shadow: none !important;
+            border: none !important;
+            zoom: 0.72;
+            transform-origin: top left;
+          }
+
+          .projection-print-area .no-print {
+            display: none !important;
+          }
+
+          .projection-print-area .overflow-auto,
+          .projection-print-area .max-h-\[calc\(100vh-215px\)\] {
+            max-height: none !important;
+            overflow: visible !important;
+          }
+
+          .projection-print-area table {
+            font-size: 8px !important;
+          }
+
+          .projection-print-area th,
+          .projection-print-area td {
+            padding-top: 2px !important;
+            padding-bottom: 2px !important;
+            padding-left: 3px !important;
+            padding-right: 3px !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
     </style>
     <script>
         tailwind.config = {

@@ -106,10 +106,13 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
     const excludeInserirRomaneio = (name: string) =>
       !/inserir\s*em\s*romaneio/i.test(name);
     const dynamic = extractRotasFromProjection(projectionSource)
-      .map((r) => r.routeName)
-      .filter(excludeInserirRomaneio)
-      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }))
-      .map((name) => ({ value: name, label: name }));
+      .filter((r) => excludeInserirRomaneio(r.routeName))
+      .map((r) => ({
+        // Mantém routeName como value para não quebrar a lógica atual de filtro.
+        value: r.routeName,
+        // Exibe "ROTA X - dd/mm/aaaa", usando a data de "Previsão atual".
+        label: r.label,
+      }));
     return [...fixed, ...dynamic];
   }, [projectionSource]);
 
@@ -181,7 +184,7 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
               <button
                 type="button"
                 onClick={() => setCollapsed(true)}
-                className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-[10px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
+                className="no-print ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-[10px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
               >
                 <ChevronsUpDown className="w-3 h-3" />
                 Esconder filtros
@@ -191,7 +194,7 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
             <button
               type="button"
               onClick={() => setCollapsed(false)}
-              className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-[10px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
+              className="no-print ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-[10px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/30"
             >
               <ChevronsUpDown className="w-3 h-3" />
               Mostrar filtros
@@ -201,7 +204,7 @@ const ProjectionFiltersBar: React.FC<ProjectionFiltersBarProps> = ({
       </div>
 
       {/* Botões de ação — abaixo do container */}
-      <div className="flex items-center gap-2">
+      <div className="no-print flex items-center gap-2">
         <button
           type="button"
           onClick={openApplyPrompt}

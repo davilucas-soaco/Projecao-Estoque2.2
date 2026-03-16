@@ -752,23 +752,25 @@ const App: React.FC = () => {
           <div className="w-full rounded-2xl border border-[#cfd8ea] dark:border-gray-700 bg-[#f7f9fd] dark:bg-[#1f1f1f] p-4 shadow-sm">
             <div
               ref={projectionFullscreenRefPadrao}
-              className="projection-fullscreen-container flex w-full flex-col flex-1 min-h-0 min-w-0 gap-4 bg-[#f7f9fd] dark:bg-[#1a1a1a] p-4"
+                className="projection-fullscreen-container projection-print-area flex w-full flex-col flex-1 min-h-0 min-w-0 gap-4 bg-[#f7f9fd] dark:bg-[#1a1a1a] p-4"
             >
-              <ProjectionFiltersBar
-                projectionSource={projection}
-                selectedRotas={projectionFilterRotas}
-                onSelectedRotasChange={handleProjectionRotasChange}
-                selectedSetores={projectionFilterSetores}
-                onSelectedSetoresChange={handleProjectionSetoresChange}
-                dateOptions={selectableDateOptions}
-                selectedDateKeys={selectedDateKeys}
-                onSelectedDateKeysChange={handleProjectionDatesChange}
-                ignorePreviousConsumptions={ignorePreviousConsumptions}
-                onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
-                onClearTableFilters={handleClearTableFilters}
-                onGeneratePdf={() => setIsPdfModalOpen(true)}
-                portalContainerRef={projectionFullscreenRefPadrao}
-              />
+              <div className="no-print">
+                <ProjectionFiltersBar
+                  projectionSource={projection}
+                  selectedRotas={projectionFilterRotas}
+                  onSelectedRotasChange={handleProjectionRotasChange}
+                  selectedSetores={projectionFilterSetores}
+                  onSelectedSetoresChange={handleProjectionSetoresChange}
+                  dateOptions={selectableDateOptions}
+                  selectedDateKeys={selectedDateKeys}
+                  onSelectedDateKeysChange={handleProjectionDatesChange}
+                  ignorePreviousConsumptions={ignorePreviousConsumptions}
+                  onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
+                  onClearTableFilters={handleClearTableFilters}
+                  onGeneratePdf={() => setIsPdfModalOpen(true)}
+                  portalContainerRef={projectionFullscreenRefPadrao}
+                />
+              </div>
               <div className="flex-1 min-h-0">
                 <ProjectionTable
                   fullscreenContainerRef={projectionFullscreenRefPadrao}
@@ -831,23 +833,25 @@ const App: React.FC = () => {
             ) : (
               <div
                 ref={projectionFullscreenRefSimulado}
-                className="projection-fullscreen-container flex w-full flex-col flex-1 min-h-0 min-w-0 gap-4 bg-[#f7f9fd] dark:bg-[#1a1a1a] p-4"
+                className="projection-fullscreen-container projection-print-area flex w-full flex-col flex-1 min-h-0 min-w-0 gap-4 bg-[#f7f9fd] dark:bg-[#1a1a1a] p-4"
               >
-                <ProjectionFiltersBar
-                  projectionSource={simulationState.data}
-                  selectedRotas={projectionFilterRotas}
-                  onSelectedRotasChange={handleProjectionRotasChange}
-                  selectedSetores={projectionFilterSetores}
-                  onSelectedSetoresChange={handleProjectionSetoresChange}
-                  dateOptions={selectableDateOptions}
-                  selectedDateKeys={selectedDateKeys}
-                  onSelectedDateKeysChange={handleProjectionDatesChange}
-                  ignorePreviousConsumptions={ignorePreviousConsumptions}
-                  onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
-                  onClearTableFilters={handleClearTableFilters}
-                  onGeneratePdf={() => setIsPdfModalOpen(true)}
-                  portalContainerRef={projectionFullscreenRefSimulado}
-                />
+                <div className="no-print">
+                  <ProjectionFiltersBar
+                    projectionSource={simulationState.data}
+                    selectedRotas={projectionFilterRotas}
+                    onSelectedRotasChange={handleProjectionRotasChange}
+                    selectedSetores={projectionFilterSetores}
+                    onSelectedSetoresChange={handleProjectionSetoresChange}
+                    dateOptions={selectableDateOptions}
+                    selectedDateKeys={selectedDateKeys}
+                    onSelectedDateKeysChange={handleProjectionDatesChange}
+                    ignorePreviousConsumptions={ignorePreviousConsumptions}
+                    onIgnorePreviousConsumptionsChange={setIgnorePreviousConsumptions}
+                    onClearTableFilters={handleClearTableFilters}
+                    onGeneratePdf={() => setIsPdfModalOpen(true)}
+                    portalContainerRef={projectionFullscreenRefSimulado}
+                  />
+                </div>
                 <div className="flex-1 min-h-0">
                   <ProjectionTable
                     fullscreenContainerRef={projectionFullscreenRefSimulado}
