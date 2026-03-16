@@ -1323,7 +1323,7 @@ const ProjectionTable: React.FC<Props> = ({
     let rowIndex = 0;
     for (const item of sortedData) {
       const isExpanded = expandedShelves.has(item.codigo) || autoExpandedShelves.has(item.codigo);
-      const rowBgClass = rowIndex % 2 === 0 ? 'bg-white dark:bg-[#252525]' : 'bg-gray-50/50 dark:bg-[#2a2a2a]';
+      const rowBgClass = rowIndex % 2 === 0 ? 'bg-[#FFFFFF] dark:bg-[#252525]' : 'bg-[#F6F8FC] dark:bg-[#2A2A2A]';
       rows.push({
         key: item.codigo,
         kind: 'item',
@@ -1341,7 +1341,7 @@ const ProjectionTable: React.FC<Props> = ({
       if (isExpanded) {
         const comps = filteredComponentsByParent.get(item.codigo) ?? [];
         for (const comp of comps) {
-          const compBg = rowIndex % 2 === 0 ? 'bg-gray-100/30 dark:bg-gray-800/20' : 'bg-gray-100/30 dark:bg-gray-800/20';
+          const compBg = rowIndex % 2 === 0 ? 'bg-[#FFFFFF] dark:bg-[#252525]' : 'bg-[#F6F8FC] dark:bg-[#2A2A2A]';
           rows.push({
             key: `${item.codigo}-${comp.codigo}`,
             kind: 'component',
@@ -1791,7 +1791,7 @@ const ProjectionTable: React.FC<Props> = ({
                         setSelectedRowCodigo((prev) => (prev === parentCodigo ? null : parentCodigo));
                       }
                     }}
-                    className={`${row.rowBgClass} hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors group cursor-pointer ${
+                    className={`${row.rowBgClass} hover:bg-blue-100/70 dark:hover:bg-blue-900/25 transition-colors group cursor-pointer ${
                       isSelected ? 'ring-1 ring-secondary/40 bg-blue-50/70 dark:bg-blue-900/20' : ''
                     } ${row.kind === 'component' ? 'border-l-4 border-secondary' : ''}`}
                   >
