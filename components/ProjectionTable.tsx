@@ -173,6 +173,7 @@ const ProjectionTable: React.FC<Props> = ({
   const tableWrapperRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPrintMode, setIsPrintMode] = useState(false);
+  const prePrintScrollRef = useRef<{ top: number; left: number }>({ top: 0, left: 0 });
   const [tooltip, setTooltip] = useState<{
     codigo: string;
     colKey: string;
@@ -207,8 +208,24 @@ const ProjectionTable: React.FC<Props> = ({
   const valueFilterDraggedRef = useRef(false);
 
   useEffect(() => {
-    const onBeforePrint = () => setIsPrintMode(true);
-    const onAfterPrint = () => setIsPrintMode(false);
+    const onBeforePrint = () => {
+      const el = tableContainerRef.current;
+      if (el) {
+        prePrintScrollRef.current = { top: el.scrollTop, left: el.scrollLeft };
+        // Garante que a impressão comece no primeiro item da tabela.
+        el.scrollTop = 0;
+        el.scrollLeft = 0;
+      }
+      setIsPrintMode(true);
+    };
+    const onAfterPrint = () => {
+      setIsPrintMode(false);
+      const el = tableContainerRef.current;
+      if (el) {
+        el.scrollTop = prePrintScrollRef.current.top;
+        el.scrollLeft = prePrintScrollRef.current.left;
+      }
+    };
     window.addEventListener('beforeprint', onBeforePrint);
     window.addEventListener('afterprint', onAfterPrint);
     return () => {
@@ -1412,6 +1429,7 @@ const ProjectionTable: React.FC<Props> = ({
   };
 
   const totalColSpan = 5 + columnsToRender.length * 2;
+  const shouldCompactPrint = columnsToRender.length > 10 || flatRows.length > 55;
   const activeMenuKey = routeValueFilterMenu
     ? getRouteFilterKey(routeValueFilterMenu.colKey, routeValueFilterMenu.field)
     : null;
@@ -1577,10 +1595,10 @@ const ProjectionTable: React.FC<Props> = ({
   };
 
   return (
-    <div className="space-y-4 h-full flex flex-col">
+    <div className={`projection-table-shell ${shouldCompactPrint ? 'print-compact' : 'print-comfort'} space-y-4 h-full flex flex-col`}>
       <div
         ref={tableWrapperRef}
-        className="bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0 transition-all duration-300"
+        className="projection-table-wrapper bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0 transition-all duration-300"
       >
         <div className="no-print px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-end gap-2">
           <button
@@ -1606,7 +1624,7 @@ const ProjectionTable: React.FC<Props> = ({
         </div>
         <div
           ref={tableContainerRef}
-          className={`overflow-auto flex-1 relative scroll-smooth min-h-0 ${isFullscreen ? '' : 'max-h-[calc(100vh-215px)]'}`}
+          className={`projection-table-scroll overflow-auto flex-1 relative scroll-smooth min-h-0 ${isFullscreen ? '' : 'max-h-[calc(100vh-215px)]'}`}
         >
           <table className="w-full text-left text-sm border-separate border-spacing-0 min-w-max">
             <thead className="sticky top-0 z-[70]">
@@ -1614,7 +1632,7 @@ const ProjectionTable: React.FC<Props> = ({
                 <th
                   data-codigo-filter-head
                   onClick={(e) => handleSort('codigo', e.ctrlKey)}
-                  className="px-2 py-1 sticky left-0 top-0 z-[80] bg-primary border-b border-white/10 w-[110px] shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors"
+                  className="print-code-col px-2 py-1 sticky left-0 top-0 z-[80] bg-primary border-b border-white/10 w-[110px] shadow-[2px_0_5px_rgba(0,0,0,0.2)] cursor-pointer group hover:bg-[#0b2b58] transition-colors"
                   style={{ width: `${CODE_COL_W}px`, minWidth: `${CODE_COL_W}px` }}
                 >
                   <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold mb-0.5">
@@ -1677,7 +1695,7 @@ const ProjectionTable: React.FC<Props> = ({
                 </th>
                 <th
                   onClick={(e) => handleSort('estoqueAtual', e.ctrlKey)}
-                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-l border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  className="print-num-col px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-l border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
                   style={{ left: `${CODE_COL_W + descriptionWidth}px`, width: `${STOCK_COL_W}px`, minWidth: `${STOCK_COL_W}px` }}
                 >
                   <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
@@ -1687,7 +1705,7 @@ const ProjectionTable: React.FC<Props> = ({
                 </th>
                 <th
                   onClick={(e) => handleSort('totalPedido', e.ctrlKey)}
-                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  className="print-num-col px-3 py-2 text-center bg-[#062c61] border-b border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
                   style={{ left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W}px`, width: `${PEDIDO_COL_W}px`, minWidth: `${PEDIDO_COL_W}px` }}
                 >
                   <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
@@ -1697,7 +1715,7 @@ const ProjectionTable: React.FC<Props> = ({
                 </th>
                 <th
                   onClick={(e) => handleSort('pendenteProducao', e.ctrlKey)}
-                  className="px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-r border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  className="print-num-col px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-r border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
                   style={{ left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W + PEDIDO_COL_W}px`, width: `${FALTA_COL_W}px`, minWidth: `${FALTA_COL_W}px` }}
                 >
                   <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
@@ -1712,7 +1730,7 @@ const ProjectionTable: React.FC<Props> = ({
                   <th
                     key={col.key}
                     data-route-filter-head
-                    className="px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 sticky top-0 z-[70]"
+                    className="print-route-head px-2 py-1 text-center bg-blue-800 border-b border-white/10 border-l border-white/10 sticky top-0 z-[70]"
                     style={{ width: `${vCol.size}px`, minWidth: `${vCol.size}px` }}
                     colSpan={2}
                   >
@@ -1795,7 +1813,7 @@ const ProjectionTable: React.FC<Props> = ({
                       isSelected ? 'ring-1 ring-secondary/40 bg-blue-50/70 dark:bg-blue-900/20' : ''
                     } ${row.kind === 'component' ? 'border-l-4 border-secondary' : ''}`}
                   >
-                    <td className="px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                    <td className="print-code-col px-3 py-1.5 font-mono font-bold text-[11px] sticky left-0 z-[40] bg-inherit border-r border-gray-100 dark:border-gray-800 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                       <div className={`flex items-center gap-2 ${row.kind === 'component' ? 'pl-4' : ''}`}>
                         {isItem && row.isShelf && (
                           <button
@@ -1821,7 +1839,7 @@ const ProjectionTable: React.FC<Props> = ({
                       {row.descricao}
                     </td>
                     <td
-                      className={`px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${
+                      className={`print-num-col px-3 py-1.5 text-center font-semibold text-[11px] border-l border-gray-100 dark:border-gray-800 ${
                         Number(row.estoqueAtual) < 0 ? 'text-[#B06A66]' : ''
                       }`}
                       style={{ position: 'sticky', left: `${CODE_COL_W + descriptionWidth}px`, zIndex: 38, background: 'inherit', width: `${STOCK_COL_W}px`, minWidth: `${STOCK_COL_W}px` }}
@@ -1829,13 +1847,13 @@ const ProjectionTable: React.FC<Props> = ({
                       {row.estoqueAtual}
                     </td>
                     <td
-                      className="px-3 py-1.5 text-center font-medium text-[11px]"
+                      className="print-num-col px-3 py-1.5 text-center font-medium text-[11px]"
                       style={{ position: 'sticky', left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W}px`, zIndex: 38, background: 'inherit', width: `${PEDIDO_COL_W}px`, minWidth: `${PEDIDO_COL_W}px` }}
                     >
                       {row.totalPedido === 0 ? '-' : row.totalPedido}
                     </td>
                     <td
-                      className="px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800"
+                      className="print-num-col px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800"
                       style={{ position: 'sticky', left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W + PEDIDO_COL_W}px`, zIndex: 38, background: 'inherit', width: `${FALTA_COL_W}px`, minWidth: `${FALTA_COL_W}px` }}
                     >
                       {row.kind === 'item' ? (Number(row.falta) < 0 ? formatCellNum(row.falta) : '-') : formatCellNum(row.falta)}
@@ -1862,7 +1880,7 @@ const ProjectionTable: React.FC<Props> = ({
                                 row.kind === 'item' ? row.key : (row.parentCodigo ?? row.key)
                               )
                             }
-                            className="px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
+                            className="print-route-col px-2 py-1.5 text-center border-l border-gray-100 dark:border-gray-800 text-blue-600 dark:text-emerald-400 font-bold text-[11px] cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors"
                             style={{ width: `${Math.max(40, (vCol.size || 96) / 2)}px` }}
                           >
                             {formatCellNum(pedidoCell)}
@@ -1870,7 +1888,7 @@ const ProjectionTable: React.FC<Props> = ({
                           <td
                             data-tooltip-cell
                             onClick={undefined}
-                            className={`px-2 py-1.5 text-center font-bold text-[11px] ${
+                            className={`print-route-col px-2 py-1.5 text-center font-bold text-[11px] ${
                               faltaCell < 0 ? 'bg-orange-50 dark:bg-orange-900/10 text-highlight' : 'text-gray-300 dark:text-gray-600'
                             }`}
                             style={{ width: `${Math.max(40, (vCol.size || 96) / 2)}px` }}
@@ -2881,7 +2899,7 @@ const ProjectionTable: React.FC<Props> = ({
         </div>
       )}
 
-      <div className="bg-white dark:bg-[#252525] p-2 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-3 text-[10px] text-neutral italic shrink-0">
+      <div className="no-print bg-white dark:bg-[#252525] p-2 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-3 text-[10px] text-neutral italic shrink-0">
         <Info className="w-3.5 h-3.5 text-secondary" />
         <span>
           <strong>Dica Operacional:</strong>{' '}
