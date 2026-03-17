@@ -376,7 +376,13 @@ const ProjectionTable: React.FC<Props> = ({
 
     const rdDate = item.routeData[scoped.dateKey] || { pedido: 0, falta: 0 };
     const breakdown = (rdDate.breakdown ?? []).filter((b) => rotaDestinoMatches(b.destino ?? '', scoped.routeName));
-    const breakdownFalta = ((rdDate as any).breakdownFalta ?? []).filter((b: { destino?: string }) =>
+    const rawBreakdownFalta =
+      (
+        rdDate as {
+          breakdownFalta?: { destino: string; qty: number; numeroPedido?: string }[];
+        }
+      ).breakdownFalta ?? [];
+    const breakdownFalta = rawBreakdownFalta.filter((b) =>
       rotaDestinoMatches(b.destino ?? '', scoped.routeName)
     );
 
@@ -387,7 +393,7 @@ const ProjectionTable: React.FC<Props> = ({
         breakdown.reduce((acc, b) => acc + Math.max(0, Number(b.qty) || 0), 0)
       );
       const faltaFromBreakdown = Math.round(
-        breakdownFalta.reduce((acc, b) => acc + Math.max(0, Number((b as { qty?: number }).qty) || 0), 0)
+        breakdownFalta.reduce((acc: number, b) => acc + Math.max(0, Number(b.qty) || 0), 0)
       );
       const falta = faltaFromBreakdown > 0 ? -faltaFromBreakdown : 0;
       return {
