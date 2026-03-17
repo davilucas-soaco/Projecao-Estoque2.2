@@ -380,6 +380,24 @@ const ProjectionTable: React.FC<Props> = ({
       rotaDestinoMatches(b.destino ?? '', scoped.routeName)
     );
 
+    // Regra padrão: seguir consumo cronológico já consolidado no sistema (inclui consumos anteriores).
+    // Regra especial: só quando usuário marcar "Desconsiderar consumos anteriores".
+    if (!ignorePreviousConsumptions) {
+      const pedidoFromBreakdown = Math.round(
+        breakdown.reduce((acc, b) => acc + Math.max(0, Number(b.qty) || 0), 0)
+      );
+      const faltaFromBreakdown = Math.round(
+        breakdownFalta.reduce((acc, b) => acc + Math.max(0, Number((b as { qty?: number }).qty) || 0), 0)
+      );
+      const falta = faltaFromBreakdown > 0 ? -faltaFromBreakdown : 0;
+      return {
+        pedido: pedidoFromBreakdown,
+        falta,
+        breakdown,
+        breakdownFalta,
+      };
+    }
+
     const cell = getSupervisaoCellForItem(
       item as {
         routeData: Record<string, { pedido: number; falta: number; breakdown?: { destino: string; qty: number }[] }>;
