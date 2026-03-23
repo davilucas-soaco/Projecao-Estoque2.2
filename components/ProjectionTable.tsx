@@ -1564,10 +1564,30 @@ const ProjectionTable: React.FC<Props> = ({
     if (!term) return uniqueCodigos;
     return uniqueCodigos.filter((v) => v.toLowerCase().includes(term));
   }, [uniqueCodigos, codigoFilterSearch]);
+  const matchesSqlLikePercentSearch = (value: string, rawSearch: string): boolean => {
+    const search = rawSearch.trim().toLowerCase();
+    if (!search) return true;
+    const candidate = value.toLowerCase();
+
+    // Sem %, mantém comportamento atual (contains simples).
+    if (!search.includes('%')) return candidate.includes(search);
+
+    // Com %, busca cada bloco em sequência (LIKE '%a%b%c%').
+    const parts = search.split('%').map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 0) return true;
+
+    let startFrom = 0;
+    for (const part of parts) {
+      const idx = candidate.indexOf(part, startFrom);
+      if (idx === -1) return false;
+      startFrom = idx + part.length;
+    }
+    return true;
+  };
   const filteredDescricaoValues = useMemo(() => {
-    const term = descricaoFilterSearch.trim().toLowerCase();
+    const term = descricaoFilterSearch.trim();
     if (!term) return uniqueDescricoes;
-    return uniqueDescricoes.filter((v) => v.toLowerCase().includes(term));
+    return uniqueDescricoes.filter((v) => matchesSqlLikePercentSearch(v, term));
   }, [uniqueDescricoes, descricaoFilterSearch]);
 
   const exportProjectionExcel = () => {
