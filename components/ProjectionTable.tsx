@@ -98,6 +98,57 @@ const formatCellNum = (v: unknown): string | number => {
   return Math.round(n);
 };
 
+/** Valores de filtro alinhados ao texto exibido nas colunas Estoque / Pedido / Falta. */
+const sortFilterKeysNumericLike = (values: string[]): string[] =>
+  [...values].sort((a, b) => {
+    if (a === '-') return 1;
+    if (b === '-') return -1;
+    return Number(a) - Number(b);
+  });
+
+const estoqueFilterKey = (item: ProductConsolidated | ComponentData): string => {
+  if ('isShelf' in item && (item as ProductConsolidated).isShelf) return '-';
+  return String((item as ProductConsolidated).estoqueAtual ?? '');
+};
+
+const pedidoFilterKey = (item: ProductConsolidated | ComponentData): string => {
+  const t = item.totalPedido ?? 0;
+  return Number(t) === 0 ? '-' : String(t);
+};
+
+const faltaFilterKey = (item: ProductConsolidated | ComponentData): string => {
+  if ('isShelf' in item && (item as ProductConsolidated).isShelf) return '-';
+  if ('pendenteProducao' in item) {
+    const p = (item as ProductConsolidated).pendenteProducao;
+    return Number(p) < 0 ? String(formatCellNum(p)) : '-';
+  }
+  return String(formatCellNum((item as ComponentData).falta));
+};
+
+const filterProductsByNumericColumnFilters = (
+  base: ProductConsolidated[],
+  estoqueColumnFilter: Set<string>,
+  pedidoColumnFilter: Set<string>,
+  faltaColumnFilter: Set<string>
+): ProductConsolidated[] => {
+  if (estoqueColumnFilter.size === 0 && pedidoColumnFilter.size === 0 && faltaColumnFilter.size === 0) return base;
+  return base.filter((item) => {
+    const eOk = estoqueColumnFilter.size === 0 || estoqueColumnFilter.has(estoqueFilterKey(item));
+    const pOk = pedidoColumnFilter.size === 0 || pedidoColumnFilter.has(pedidoFilterKey(item));
+    const fOk = faltaColumnFilter.size === 0 || faltaColumnFilter.has(faltaFilterKey(item));
+    if (eOk && pOk && fOk) return true;
+    if (item.isShelf && item.components?.length) {
+      return item.components.some((comp) => {
+        const ceOk = estoqueColumnFilter.size === 0 || estoqueColumnFilter.has(estoqueFilterKey(comp));
+        const cpOk = pedidoColumnFilter.size === 0 || pedidoColumnFilter.has(pedidoFilterKey(comp));
+        const cfOk = faltaColumnFilter.size === 0 || faltaColumnFilter.has(faltaFilterKey(comp));
+        return ceOk && cpOk && cfOk;
+      });
+    }
+    return false;
+  });
+};
+
 const HEADER_SAFE_TOP = 140;
 
 const getTooltipInitialPosition = (anchorRect: DOMRect) => {
@@ -169,6 +220,15 @@ const ProjectionTable: React.FC<Props> = ({
   const [descricaoFilterMenu, setDescricaoFilterMenu] = useState<{ anchorRect: DOMRect } | null>(null);
   const [codigoFilterSearch, setCodigoFilterSearch] = useState('');
   const [descricaoFilterSearch, setDescricaoFilterSearch] = useState('');
+  const [estoqueColumnFilter, setEstoqueColumnFilter] = useState<Set<string>>(new Set());
+  const [pedidoColumnFilter, setPedidoColumnFilter] = useState<Set<string>>(new Set());
+  const [faltaColumnFilter, setFaltaColumnFilter] = useState<Set<string>>(new Set());
+  const [estoqueFilterMenu, setEstoqueFilterMenu] = useState<{ anchorRect: DOMRect } | null>(null);
+  const [pedidoFilterMenu, setPedidoFilterMenu] = useState<{ anchorRect: DOMRect } | null>(null);
+  const [faltaFilterMenu, setFaltaFilterMenu] = useState<{ anchorRect: DOMRect } | null>(null);
+  const [estoqueFilterSearch, setEstoqueFilterSearch] = useState('');
+  const [pedidoFilterSearch, setPedidoFilterSearch] = useState('');
+  const [faltaFilterSearch, setFaltaFilterSearch] = useState('');
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const tableWrapperRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -189,6 +249,9 @@ const ProjectionTable: React.FC<Props> = ({
   const valueFilterMenuRef = useRef<HTMLDivElement>(null);
   const codigoFilterMenuRef = useRef<HTMLDivElement>(null);
   const descricaoFilterMenuRef = useRef<HTMLDivElement>(null);
+  const estoqueFilterMenuRef = useRef<HTMLDivElement>(null);
+  const pedidoFilterMenuRef = useRef<HTMLDivElement>(null);
+  const faltaFilterMenuRef = useRef<HTMLDivElement>(null);
   const tooltipDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({
     dragging: false,
     offsetX: 0,
@@ -197,15 +260,27 @@ const ProjectionTable: React.FC<Props> = ({
   const codigoFilterAnchorRef = useRef<HTMLElement | null>(null);
   const descricaoFilterAnchorRef = useRef<HTMLElement | null>(null);
   const valueFilterAnchorRef = useRef<HTMLElement | null>(null);
+  const estoqueFilterAnchorRef = useRef<HTMLElement | null>(null);
+  const pedidoFilterAnchorRef = useRef<HTMLElement | null>(null);
+  const faltaFilterAnchorRef = useRef<HTMLElement | null>(null);
   const [codigoFilterPosition, setCodigoFilterPosition] = useState<{ left: number; top: number } | null>(null);
   const [descricaoFilterPosition, setDescricaoFilterPosition] = useState<{ left: number; top: number } | null>(null);
   const [valueFilterPosition, setValueFilterPosition] = useState<{ left: number; top: number } | null>(null);
+  const [estoqueFilterPosition, setEstoqueFilterPosition] = useState<{ left: number; top: number } | null>(null);
+  const [pedidoFilterPosition, setPedidoFilterPosition] = useState<{ left: number; top: number } | null>(null);
+  const [faltaFilterPosition, setFaltaFilterPosition] = useState<{ left: number; top: number } | null>(null);
   const codigoFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
   const descricaoFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
   const valueFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
+  const estoqueFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
+  const pedidoFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
+  const faltaFilterDragRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({ dragging: false, offsetX: 0, offsetY: 0 });
   const codigoFilterDraggedRef = useRef(false);
   const descricaoFilterDraggedRef = useRef(false);
   const valueFilterDraggedRef = useRef(false);
+  const estoqueFilterDraggedRef = useRef(false);
+  const pedidoFilterDraggedRef = useRef(false);
+  const faltaFilterDraggedRef = useRef(false);
 
   useEffect(() => {
     const onBeforePrint = () => {
@@ -238,15 +313,27 @@ const ProjectionTable: React.FC<Props> = ({
     setRouteValueFilters({});
     setCodigoColumnFilter(new Set());
     setDescricaoColumnFilter(new Set());
+    setEstoqueColumnFilter(new Set());
+    setPedidoColumnFilter(new Set());
+    setFaltaColumnFilter(new Set());
     setRouteValueFilterSearch('');
     setCodigoFilterSearch('');
     setDescricaoFilterSearch('');
+    setEstoqueFilterSearch('');
+    setPedidoFilterSearch('');
+    setFaltaFilterSearch('');
     setRouteValueFilterMenu(null);
     setCodigoFilterMenu(null);
     setDescricaoFilterMenu(null);
+    setEstoqueFilterMenu(null);
+    setPedidoFilterMenu(null);
+    setFaltaFilterMenu(null);
     setValueFilterPosition(null);
     setCodigoFilterPosition(null);
     setDescricaoFilterPosition(null);
+    setEstoqueFilterPosition(null);
+    setPedidoFilterPosition(null);
+    setFaltaFilterPosition(null);
   }, [tableFiltersResetToken]);
 
   const tooltipPedidoGroups = useMemo<TooltipPedidoGroup[]>(() => {
@@ -807,12 +894,39 @@ const ProjectionTable: React.FC<Props> = ({
           setDescricaoFilterMenu(null);
         }
       }
+      if (estoqueFilterMenu && estoqueFilterMenuRef.current && !estoqueFilterMenuRef.current.contains(e.target as Node)) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('th[data-estoque-filter-head]')) {
+          setEstoqueFilterMenu(null);
+        }
+      }
+      if (pedidoFilterMenu && pedidoFilterMenuRef.current && !pedidoFilterMenuRef.current.contains(e.target as Node)) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('th[data-pedido-filter-head]')) {
+          setPedidoFilterMenu(null);
+        }
+      }
+      if (faltaFilterMenu && faltaFilterMenuRef.current && !faltaFilterMenuRef.current.contains(e.target as Node)) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('th[data-falta-filter-head]')) {
+          setFaltaFilterMenu(null);
+        }
+      }
     };
     document.addEventListener('pointerdown', handleClickOutside, true);
     return () => {
       document.removeEventListener('pointerdown', handleClickOutside, true);
     };
-  }, [tooltip, selectedRowCodigo, routeValueFilterMenu, codigoFilterMenu, descricaoFilterMenu]);
+  }, [
+    tooltip,
+    selectedRowCodigo,
+    routeValueFilterMenu,
+    codigoFilterMenu,
+    descricaoFilterMenu,
+    estoqueFilterMenu,
+    pedidoFilterMenu,
+    faltaFilterMenu,
+  ]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -866,7 +980,13 @@ const ProjectionTable: React.FC<Props> = ({
   }, [routeValueFilterMenu?.colKey, routeValueFilterMenu?.field]);
 
   useEffect(() => {
-    const anyOpen = codigoFilterMenu || descricaoFilterMenu || routeValueFilterMenu;
+    const anyOpen =
+      codigoFilterMenu ||
+      descricaoFilterMenu ||
+      routeValueFilterMenu ||
+      estoqueFilterMenu ||
+      pedidoFilterMenu ||
+      faltaFilterMenu;
     if (!anyOpen) return;
     const updateFilterPositions = () => {
       if (codigoFilterMenu && codigoFilterAnchorRef.current && !codigoFilterDragRef.current.dragging && !codigoFilterDraggedRef.current) {
@@ -881,6 +1001,18 @@ const ProjectionTable: React.FC<Props> = ({
         const rect = valueFilterAnchorRef.current.getBoundingClientRect();
         setValueFilterPosition(getTooltipInitialPosition(rect));
       }
+      if (estoqueFilterMenu && estoqueFilterAnchorRef.current && !estoqueFilterDragRef.current.dragging && !estoqueFilterDraggedRef.current) {
+        const rect = estoqueFilterAnchorRef.current.getBoundingClientRect();
+        setEstoqueFilterPosition(getTooltipInitialPosition(rect));
+      }
+      if (pedidoFilterMenu && pedidoFilterAnchorRef.current && !pedidoFilterDragRef.current.dragging && !pedidoFilterDraggedRef.current) {
+        const rect = pedidoFilterAnchorRef.current.getBoundingClientRect();
+        setPedidoFilterPosition(getTooltipInitialPosition(rect));
+      }
+      if (faltaFilterMenu && faltaFilterAnchorRef.current && !faltaFilterDragRef.current.dragging && !faltaFilterDraggedRef.current) {
+        const rect = faltaFilterAnchorRef.current.getBoundingClientRect();
+        setFaltaFilterPosition(getTooltipInitialPosition(rect));
+      }
     };
     const interval = setInterval(updateFilterPositions, 150);
     const onScroll = () => updateFilterPositions();
@@ -894,7 +1026,7 @@ const ProjectionTable: React.FC<Props> = ({
       tableEl?.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', updateFilterPositions);
     };
-  }, [codigoFilterMenu, descricaoFilterMenu, routeValueFilterMenu]);
+  }, [codigoFilterMenu, descricaoFilterMenu, routeValueFilterMenu, estoqueFilterMenu, pedidoFilterMenu, faltaFilterMenu]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -902,6 +1034,9 @@ const ProjectionTable: React.FC<Props> = ({
         { ref: codigoFilterDragRef, elRef: codigoFilterMenuRef },
         { ref: descricaoFilterDragRef, elRef: descricaoFilterMenuRef },
         { ref: valueFilterDragRef, elRef: valueFilterMenuRef },
+        { ref: estoqueFilterDragRef, elRef: estoqueFilterMenuRef },
+        { ref: pedidoFilterDragRef, elRef: pedidoFilterMenuRef },
+        { ref: faltaFilterDragRef, elRef: faltaFilterMenuRef },
       ];
       for (const { ref: dragRef, elRef } of dragHandlers) {
         if (dragRef.current.dragging && elRef.current) {
@@ -933,6 +1068,21 @@ const ProjectionTable: React.FC<Props> = ({
         const s = valueFilterMenuRef.current.style;
         setValueFilterPosition({ left: parseFloat(s.left) || 0, top: parseFloat(s.top) || 0 });
         valueFilterDraggedRef.current = true;
+      } else if (estoqueFilterDragRef.current.dragging && estoqueFilterMenuRef.current) {
+        estoqueFilterDragRef.current.dragging = false;
+        const s = estoqueFilterMenuRef.current.style;
+        setEstoqueFilterPosition({ left: parseFloat(s.left) || 0, top: parseFloat(s.top) || 0 });
+        estoqueFilterDraggedRef.current = true;
+      } else if (pedidoFilterDragRef.current.dragging && pedidoFilterMenuRef.current) {
+        pedidoFilterDragRef.current.dragging = false;
+        const s = pedidoFilterMenuRef.current.style;
+        setPedidoFilterPosition({ left: parseFloat(s.left) || 0, top: parseFloat(s.top) || 0 });
+        pedidoFilterDraggedRef.current = true;
+      } else if (faltaFilterDragRef.current.dragging && faltaFilterMenuRef.current) {
+        faltaFilterDragRef.current.dragging = false;
+        const s = faltaFilterMenuRef.current.style;
+        setFaltaFilterPosition({ left: parseFloat(s.left) || 0, top: parseFloat(s.top) || 0 });
+        faltaFilterDraggedRef.current = true;
       }
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
@@ -1150,8 +1300,19 @@ const ProjectionTable: React.FC<Props> = ({
     });
   }, [dataFilteredByVisibleDateColumns, codigoColumnFilter, descricaoColumnFilter]);
 
+  const dataFilteredByNumericColumns = useMemo(
+    () =>
+      filterProductsByNumericColumnFilters(
+        dataFilteredByCodigoDescricao,
+        estoqueColumnFilter,
+        pedidoColumnFilter,
+        faltaColumnFilter
+      ),
+    [dataFilteredByCodigoDescricao, estoqueColumnFilter, pedidoColumnFilter, faltaColumnFilter]
+  );
+
   const dataFilteredByColumns = useMemo(() => {
-    let result = dataFilteredByCodigoDescricao;
+    let result = dataFilteredByNumericColumns;
     if (selectedRotas.size > 0) {
       result = result.filter((item) => {
         const routeMatch =
@@ -1204,7 +1365,7 @@ const ProjectionTable: React.FC<Props> = ({
     }
     return result;
   }, [
-    dataFilteredByCodigoDescricao,
+    dataFilteredByNumericColumns,
     selectedRotas,
     selectedSetores,
     selectedCategorias,
@@ -1248,6 +1409,102 @@ const ProjectionTable: React.FC<Props> = ({
     });
   }, [dataFilteredByColumns, activeRouteValueFilterKeys, routeValueFilters]);
 
+  /** Base para listas dos filtros Estoque/Pedido/Falta: demais filtros aplicados, exceto o da própria coluna. */
+  const dataForNumericColumnFilterOptions = useMemo(() => {
+    const empty = new Set<string>();
+    const applySidebarAndRoute = (afterNumeric: ProductConsolidated[]): ProductConsolidated[] => {
+      let result = afterNumeric;
+      if (selectedRotas.size > 0) {
+        result = result.filter((item) => {
+          const routeMatch =
+            (selectedRotaNames.size > 0 &&
+              (productHasRota(item.codigo, selectedRotaNames) ||
+                productHasSelectedRotaInBreakdown(item, selectedRotasNorm))) ||
+            false;
+          const categoriaMatch =
+            (selectedRotaCategoriasNorm.size > 0 &&
+              (productHasCategoriaNormalized(item.codigo, selectedRotaCategoriasNorm) ||
+                rowHasSelectedCategoriaInRouteData(item, selectedRotaCategoriasNorm))) ||
+            false;
+          if (routeMatch || categoriaMatch) return true;
+          if (item.isShelf && item.components?.length) {
+            return item.components.some(
+              (comp) =>
+                (selectedRotaNames.size > 0 &&
+                  (productHasRota(comp.codigo, selectedRotaNames) ||
+                    productHasSelectedRotaInBreakdown(comp, selectedRotasNorm))) ||
+                (selectedRotaCategoriasNorm.size > 0 &&
+                  (productHasCategoriaNormalized(comp.codigo, selectedRotaCategoriasNorm) ||
+                    rowHasSelectedCategoriaInRouteData(comp, selectedRotaCategoriasNorm)))
+            );
+          }
+          return false;
+        });
+      }
+      if (selectedSetores.size > 0) {
+        result = result.filter((item) => {
+          if (productHasSetor(item.codigo, selectedSetores)) return true;
+          if (item.isShelf && item.components?.length) {
+            return item.components.some((comp) => productHasSetor(comp.codigo, selectedSetores));
+          }
+          return false;
+        });
+      }
+      if (selectedCategorias.size > 0) {
+        result = result.filter((item) => {
+          if (productHasCategoria(item.codigo, selectedCategorias)) return true;
+          if (rowHasSelectedCategoriaInRouteData(item, selectedDestinoCategoriasNorm)) return true;
+          if (item.isShelf && item.components?.length) {
+            return item.components.some(
+              (comp) =>
+                productHasCategoria(comp.codigo, selectedCategorias) ||
+                rowHasSelectedCategoriaInRouteData(comp, selectedDestinoCategoriasNorm)
+            );
+          }
+          return false;
+        });
+      }
+      if (activeRouteValueFilterKeys.length === 0) return result;
+      return result.filter((item) => {
+        if (rowMatchesRouteValueFilters(item)) return true;
+        if (item.isShelf && item.components?.length) {
+          return item.components.some((comp) => rowMatchesRouteValueFilters(comp));
+        }
+        return false;
+      });
+    };
+
+    return {
+      estoque: applySidebarAndRoute(
+        filterProductsByNumericColumnFilters(dataFilteredByCodigoDescricao, empty, pedidoColumnFilter, faltaColumnFilter)
+      ),
+      pedido: applySidebarAndRoute(
+        filterProductsByNumericColumnFilters(dataFilteredByCodigoDescricao, estoqueColumnFilter, empty, faltaColumnFilter)
+      ),
+      falta: applySidebarAndRoute(
+        filterProductsByNumericColumnFilters(dataFilteredByCodigoDescricao, estoqueColumnFilter, pedidoColumnFilter, empty)
+      ),
+    };
+  }, [
+    dataFilteredByCodigoDescricao,
+    estoqueColumnFilter,
+    pedidoColumnFilter,
+    faltaColumnFilter,
+    selectedRotas,
+    selectedSetores,
+    selectedCategorias,
+    selectedRotaNames,
+    selectedRotaCategoriasNorm,
+    selectedRotasNorm,
+    selectedDestinoCategoriasNorm,
+    codigoToSetores,
+    codigoToRotas,
+    codigoToCategorias,
+    codigoToCategoriasNorm,
+    activeRouteValueFilterKeys,
+    routeValueFilters,
+  ]);
+
   /**
    * Oculta colunas de data (YYYY-MM-DD) sem nenhuma unidade pedida no conjunto atualmente exibido.
    * Colunas especiais (ex.: Só Móveis / Atrasados) permanecem visíveis.
@@ -1274,7 +1531,10 @@ const ProjectionTable: React.FC<Props> = ({
       selectedRotas.size > 0 ||
       selectedSetores.size > 0 ||
       selectedCategorias.size > 0 ||
-      activeRouteValueFilterKeys.length > 0;
+      activeRouteValueFilterKeys.length > 0 ||
+      estoqueColumnFilter.size > 0 ||
+      pedidoColumnFilter.size > 0 ||
+      faltaColumnFilter.size > 0;
     if (!hasFilter) return new Set<string>();
     const set = new Set<string>();
     for (const item of dataFilteredByValues) {
@@ -1294,12 +1554,29 @@ const ProjectionTable: React.FC<Props> = ({
           selectedCategorias.size === 0 ||
           parentMatchesCategoria ||
           productHasCategoria(comp.codigo, selectedCategorias);
-        return okRota && okSetor && okCategoria && rowMatchesRouteValueFilters(comp);
+        const okNumeric =
+          (estoqueColumnFilter.size === 0 || estoqueColumnFilter.has(estoqueFilterKey(comp))) &&
+          (pedidoColumnFilter.size === 0 || pedidoColumnFilter.has(pedidoFilterKey(comp))) &&
+          (faltaColumnFilter.size === 0 || faltaColumnFilter.has(faltaFilterKey(comp)));
+        return okRota && okSetor && okCategoria && rowMatchesRouteValueFilters(comp) && okNumeric;
       });
       if (hasMatchingComponent) set.add(item.codigo);
     }
     return set;
-  }, [dataFilteredByValues, selectedRotas, selectedRotaNames, selectedRotaCategoriasNorm, selectedRotasNorm, selectedSetores, selectedCategorias, activeRouteValueFilterKeys, routeValueFilters]);
+  }, [
+    dataFilteredByValues,
+    selectedRotas,
+    selectedRotaNames,
+    selectedRotaCategoriasNorm,
+    selectedRotasNorm,
+    selectedSetores,
+    selectedCategorias,
+    activeRouteValueFilterKeys,
+    routeValueFilters,
+    estoqueColumnFilter,
+    pedidoColumnFilter,
+    faltaColumnFilter,
+  ]);
 
   const sortedData = useMemo(() => {
     if (sortCriteria.length === 0) return dataFilteredByValues;
@@ -1590,6 +1867,52 @@ const ProjectionTable: React.FC<Props> = ({
     return uniqueDescricoes.filter((v) => matchesSqlLikePercentSearch(v, term));
   }, [uniqueDescricoes, descricaoFilterSearch]);
 
+  const uniqueEstoqueKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const item of dataForNumericColumnFilterOptions.estoque) {
+      s.add(estoqueFilterKey(item));
+      if (item.isShelf && item.components?.length) {
+        for (const comp of item.components) s.add(estoqueFilterKey(comp));
+      }
+    }
+    return sortFilterKeysNumericLike(Array.from(s));
+  }, [dataForNumericColumnFilterOptions]);
+  const uniquePedidoKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of dataForNumericColumnFilterOptions.pedido) {
+      set.add(pedidoFilterKey(item));
+      if (item.isShelf && item.components?.length) {
+        for (const comp of item.components) set.add(pedidoFilterKey(comp));
+      }
+    }
+    return sortFilterKeysNumericLike(Array.from(set));
+  }, [dataForNumericColumnFilterOptions]);
+  const uniqueFaltaKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of dataForNumericColumnFilterOptions.falta) {
+      set.add(faltaFilterKey(item));
+      if (item.isShelf && item.components?.length) {
+        for (const comp of item.components) set.add(faltaFilterKey(comp));
+      }
+    }
+    return sortFilterKeysNumericLike(Array.from(set));
+  }, [dataForNumericColumnFilterOptions]);
+  const filteredEstoqueValues = useMemo(() => {
+    const term = estoqueFilterSearch.trim().toLowerCase();
+    if (!term) return uniqueEstoqueKeys;
+    return uniqueEstoqueKeys.filter((v) => v.toLowerCase().includes(term));
+  }, [uniqueEstoqueKeys, estoqueFilterSearch]);
+  const filteredPedidoValues = useMemo(() => {
+    const term = pedidoFilterSearch.trim().toLowerCase();
+    if (!term) return uniquePedidoKeys;
+    return uniquePedidoKeys.filter((v) => v.toLowerCase().includes(term));
+  }, [uniquePedidoKeys, pedidoFilterSearch]);
+  const filteredFaltaValues = useMemo(() => {
+    const term = faltaFilterSearch.trim().toLowerCase();
+    if (!term) return uniqueFaltaKeys;
+    return uniqueFaltaKeys.filter((v) => v.toLowerCase().includes(term));
+  }, [uniqueFaltaKeys, faltaFilterSearch]);
+
   const exportProjectionExcel = () => {
     const excelColCount = 5 + columnsToRender.length * 2;
     const colGroup = [
@@ -1752,6 +2075,9 @@ const ProjectionTable: React.FC<Props> = ({
                       setCodigoFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
                       setCodigoFilterMenu((prev) => (prev ? null : { anchorRect: rect }));
                       setDescricaoFilterMenu(null);
+                      setEstoqueFilterMenu(null);
+                      setPedidoFilterMenu(null);
+                      setFaltaFilterMenu(null);
                     }}
                     className="flex items-center justify-end gap-0.5 border-t border-white/20 pt-1 pr-1 text-[8px] font-bold cursor-pointer hover:bg-white/10 rounded"
                   >
@@ -1781,6 +2107,9 @@ const ProjectionTable: React.FC<Props> = ({
                       setDescricaoFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
                       setDescricaoFilterMenu((prev) => (prev ? null : { anchorRect: rect }));
                       setCodigoFilterMenu(null);
+                      setEstoqueFilterMenu(null);
+                      setPedidoFilterMenu(null);
+                      setFaltaFilterMenu(null);
                     }}
                     className="flex items-center justify-end gap-0.5 border-t border-white/20 pt-1 pr-1 text-[8px] font-bold cursor-pointer hover:bg-white/10 rounded"
                   >
@@ -1796,33 +2125,109 @@ const ProjectionTable: React.FC<Props> = ({
                   </div>
                 </th>
                 <th
+                  data-estoque-filter-head
                   onClick={(e) => handleSort('estoqueAtual', e.ctrlKey)}
-                  className="print-num-col px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-l border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  className="print-num-col px-2 py-1 text-center bg-[#062c61] border-b border-white/10 border-l border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
                   style={{ left: `${CODE_COL_W + descriptionWidth}px`, width: `${STOCK_COL_W}px`, minWidth: `${STOCK_COL_W}px` }}
                 >
-                  <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
+                  <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold mb-0.5">
                     <span>Estoque</span>
                     {renderSortIndicator('estoqueAtual')}
                   </div>
-                </th>
-                <th
-                  onClick={(e) => handleSort('totalPedido', e.ctrlKey)}
-                  className="print-num-col px-3 py-2 text-center bg-[#062c61] border-b border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
-                  style={{ left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W}px`, width: `${PEDIDO_COL_W}px`, minWidth: `${PEDIDO_COL_W}px` }}
-                >
-                  <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
-                    <span>Pedido</span>
-                    {renderSortIndicator('totalPedido')}
+                  <div
+                    ref={(el) => {
+                      if (estoqueFilterMenu) estoqueFilterAnchorRef.current = el;
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const willOpen = !estoqueFilterMenu;
+                      estoqueFilterAnchorRef.current = willOpen ? (e.currentTarget as HTMLElement) : null;
+                      if (willOpen) estoqueFilterDraggedRef.current = false;
+                      setEstoqueFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
+                      setEstoqueFilterMenu((prev) => (prev ? null : { anchorRect: rect }));
+                      setCodigoFilterMenu(null);
+                      setDescricaoFilterMenu(null);
+                      setPedidoFilterMenu(null);
+                      setFaltaFilterMenu(null);
+                      setRouteValueFilterMenu(null);
+                    }}
+                    className="flex items-center justify-end gap-0.5 border-t border-white/20 pt-1 pr-1 text-[8px] font-bold cursor-pointer hover:bg-white/10 rounded"
+                  >
+                    <Filter className="w-2.5 h-2.5 opacity-80" />
+                    {estoqueColumnFilter.size > 0 ? ' ●' : ''}
                   </div>
                 </th>
                 <th
-                  onClick={(e) => handleSort('pendenteProducao', e.ctrlKey)}
-                  className="print-num-col px-3 py-2 text-center bg-[#062c61] border-b border-white/10 border-r border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
-                  style={{ left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W + PEDIDO_COL_W}px`, width: `${FALTA_COL_W}px`, minWidth: `${FALTA_COL_W}px` }}
+                  data-pedido-filter-head
+                  onClick={(e) => handleSort('totalPedido', e.ctrlKey)}
+                  className="print-num-col px-2 py-1 text-center bg-[#062c61] border-b border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  style={{ left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W}px`, width: `${PEDIDO_COL_W}px`, minWidth: `${PEDIDO_COL_W}px` }}
                 >
-                  <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold">
+                  <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold mb-0.5">
+                    <span>Pedido</span>
+                    {renderSortIndicator('totalPedido')}
+                  </div>
+                  <div
+                    ref={(el) => {
+                      if (pedidoFilterMenu) pedidoFilterAnchorRef.current = el;
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const willOpen = !pedidoFilterMenu;
+                      pedidoFilterAnchorRef.current = willOpen ? (e.currentTarget as HTMLElement) : null;
+                      if (willOpen) pedidoFilterDraggedRef.current = false;
+                      setPedidoFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
+                      setPedidoFilterMenu((prev) => (prev ? null : { anchorRect: rect }));
+                      setCodigoFilterMenu(null);
+                      setDescricaoFilterMenu(null);
+                      setEstoqueFilterMenu(null);
+                      setFaltaFilterMenu(null);
+                      setRouteValueFilterMenu(null);
+                    }}
+                    className="flex items-center justify-end gap-0.5 border-t border-white/20 pt-1 pr-1 text-[8px] font-bold cursor-pointer hover:bg-white/10 rounded"
+                  >
+                    <Filter className="w-2.5 h-2.5 opacity-80" />
+                    {pedidoColumnFilter.size > 0 ? ' ●' : ''}
+                  </div>
+                </th>
+                <th
+                  data-falta-filter-head
+                  onClick={(e) => handleSort('pendenteProducao', e.ctrlKey)}
+                  className="print-num-col px-2 py-1 text-center bg-[#062c61] border-b border-white/10 border-r border-white/10 sticky top-0 z-[78] cursor-pointer hover:bg-[#083a80] transition-colors"
+                  style={{
+                    left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W + PEDIDO_COL_W}px`,
+                    width: `${FALTA_COL_W}px`,
+                    minWidth: `${FALTA_COL_W}px`,
+                  }}
+                >
+                  <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold mb-0.5">
                     <span>Falta</span>
                     {renderSortIndicator('pendenteProducao')}
+                  </div>
+                  <div
+                    ref={(el) => {
+                      if (faltaFilterMenu) faltaFilterAnchorRef.current = el;
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const willOpen = !faltaFilterMenu;
+                      faltaFilterAnchorRef.current = willOpen ? (e.currentTarget as HTMLElement) : null;
+                      if (willOpen) faltaFilterDraggedRef.current = false;
+                      setFaltaFilterPosition(willOpen ? getTooltipInitialPosition(rect) : null);
+                      setFaltaFilterMenu((prev) => (prev ? null : { anchorRect: rect }));
+                      setCodigoFilterMenu(null);
+                      setDescricaoFilterMenu(null);
+                      setEstoqueFilterMenu(null);
+                      setPedidoFilterMenu(null);
+                      setRouteValueFilterMenu(null);
+                    }}
+                    className="flex items-center justify-end gap-0.5 border-t border-white/20 pt-1 pr-1 text-[8px] font-bold cursor-pointer hover:bg-white/10 rounded"
+                  >
+                    <Filter className="w-2.5 h-2.5 opacity-80" />
+                    {faltaColumnFilter.size > 0 ? ' ●' : ''}
                   </div>
                 </th>
                 {leftColPadding > 0 && <th colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
@@ -1856,6 +2261,11 @@ const ProjectionTable: React.FC<Props> = ({
                             if (prev?.colKey === col.key && prev.field === 'pedido') return null;
                             return { colKey: col.key, field: 'pedido', anchorRect: rect };
                           });
+                          setCodigoFilterMenu(null);
+                          setDescricaoFilterMenu(null);
+                          setEstoqueFilterMenu(null);
+                          setPedidoFilterMenu(null);
+                          setFaltaFilterMenu(null);
                         }}
                         className="flex-1 border-r border-white/20 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
@@ -1875,6 +2285,11 @@ const ProjectionTable: React.FC<Props> = ({
                             if (prev?.colKey === col.key && prev.field === 'falta') return null;
                             return { colKey: col.key, field: 'falta', anchorRect: rect };
                           });
+                          setCodigoFilterMenu(null);
+                          setDescricaoFilterMenu(null);
+                          setEstoqueFilterMenu(null);
+                          setPedidoFilterMenu(null);
+                          setFaltaFilterMenu(null);
                         }}
                         className="flex-1 cursor-pointer hover:bg-white/10 p-0.5 rounded transition-colors flex items-center justify-center gap-0.5"
                       >
@@ -2215,6 +2630,339 @@ const ProjectionTable: React.FC<Props> = ({
                 </label>
               ))}
               {filteredDescricaoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {estoqueFilterMenu && (
+        <div
+          ref={estoqueFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={estoqueFilterPosition ?? getTooltipInitialPosition(estoqueFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!estoqueFilterMenuRef.current) return;
+              const rect = estoqueFilterMenuRef.current.getBoundingClientRect();
+              estoqueFilterDragRef.current = {
+                dragging: true,
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+              };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move flex items-center justify-between"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Estoque</p>
+            <button
+              type="button"
+              onClick={() => {
+                setEstoqueFilterMenu(null);
+                setEstoqueFilterPosition(null);
+                estoqueFilterAnchorRef.current = null;
+              }}
+              className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={estoqueFilterSearch}
+              onChange={(e) => setEstoqueFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'estoqueAtual', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'estoqueAtual', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredEstoqueValues.length > 0 && estoqueColumnFilter.size === filteredEstoqueValues.length) {
+                    setEstoqueColumnFilter(new Set());
+                  } else {
+                    setEstoqueColumnFilter(new Set(filteredEstoqueValues));
+                  }
+                }}
+              >
+                {filteredEstoqueValues.length > 0 && estoqueColumnFilter.size === filteredEstoqueValues.length
+                  ? 'Desmarcar todos'
+                  : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setEstoqueColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredEstoqueValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={estoqueColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setEstoqueColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-words whitespace-normal flex-1 min-w-0">{value}</span>
+                </label>
+              ))}
+              {filteredEstoqueValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pedidoFilterMenu && (
+        <div
+          ref={pedidoFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={pedidoFilterPosition ?? getTooltipInitialPosition(pedidoFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!pedidoFilterMenuRef.current) return;
+              const rect = pedidoFilterMenuRef.current.getBoundingClientRect();
+              pedidoFilterDragRef.current = {
+                dragging: true,
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+              };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move flex items-center justify-between"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Pedido</p>
+            <button
+              type="button"
+              onClick={() => {
+                setPedidoFilterMenu(null);
+                setPedidoFilterPosition(null);
+                pedidoFilterAnchorRef.current = null;
+              }}
+              className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={pedidoFilterSearch}
+              onChange={(e) => setPedidoFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'totalPedido', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'totalPedido', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredPedidoValues.length > 0 && pedidoColumnFilter.size === filteredPedidoValues.length) {
+                    setPedidoColumnFilter(new Set());
+                  } else {
+                    setPedidoColumnFilter(new Set(filteredPedidoValues));
+                  }
+                }}
+              >
+                {filteredPedidoValues.length > 0 && pedidoColumnFilter.size === filteredPedidoValues.length
+                  ? 'Desmarcar todos'
+                  : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setPedidoColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredPedidoValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={pedidoColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setPedidoColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-words whitespace-normal flex-1 min-w-0">{value}</span>
+                </label>
+              ))}
+              {filteredPedidoValues.length === 0 && (
+                <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {faltaFilterMenu && (
+        <div
+          ref={faltaFilterMenuRef}
+          className="fixed z-[110] bg-white dark:bg-[#252525] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] max-w-[420px]"
+          style={faltaFilterPosition ?? getTooltipInitialPosition(faltaFilterMenu.anchorRect)}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!faltaFilterMenuRef.current) return;
+              const rect = faltaFilterMenuRef.current.getBoundingClientRect();
+              faltaFilterDragRef.current = {
+                dragging: true,
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+              };
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'move';
+            }}
+            className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move flex items-center justify-between"
+            title="Arraste para mover"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Falta</p>
+            <button
+              type="button"
+              onClick={() => {
+                setFaltaFilterMenu(null);
+                setFaltaFilterPosition(null);
+                faltaFilterAnchorRef.current = null;
+              }}
+              className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar valor..."
+              className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1f1f1f]"
+              value={faltaFilterSearch}
+              onChange={(e) => setFaltaFilterSearch(e.target.value)}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'pendenteProducao', direction: 'asc' }])}
+              >
+                Ordenar ASC
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => setSortCriteria([{ column: 'pendenteProducao', direction: 'desc' }])}
+              >
+                Ordenar DESC
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-[10px] font-bold text-secondary hover:underline"
+                onClick={() => {
+                  if (filteredFaltaValues.length > 0 && faltaColumnFilter.size === filteredFaltaValues.length) {
+                    setFaltaColumnFilter(new Set());
+                  } else {
+                    setFaltaColumnFilter(new Set(filteredFaltaValues));
+                  }
+                }}
+              >
+                {filteredFaltaValues.length > 0 && faltaColumnFilter.size === filteredFaltaValues.length
+                  ? 'Desmarcar todos'
+                  : 'Selecionar todos'}
+              </button>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-neutral hover:underline"
+                onClick={() => setFaltaColumnFilter(new Set())}
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto space-y-1 border border-gray-200 dark:border-gray-700 rounded p-1">
+              {filteredFaltaValues.map((value) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={faltaColumnFilter.has(value)}
+                    onChange={(e) => {
+                      setFaltaColumnFilter((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(value);
+                        else next.delete(value);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="break-words whitespace-normal flex-1 min-w-0">{value}</span>
+                </label>
+              ))}
+              {filteredFaltaValues.length === 0 && (
                 <p className="text-[11px] text-neutral px-1 py-2">Sem valores para filtrar.</p>
               )}
             </div>
