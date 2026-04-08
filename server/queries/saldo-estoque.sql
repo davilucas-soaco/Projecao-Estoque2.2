@@ -39,8 +39,7 @@ FROM (
     LEFT JOIN tipomovimentacao tm ON tm.id = mp.idTipoMovimentacao
     WHERE se.consideraComoSaldoDisponivel = 1
       AND p.ativo = 1
-      AND p.idTipoProduto IN (8,15)
-      AND se.id IN (5,24)
+      AND se.nome in ('PRODUTOS ACABADOS','INTERMEDIÁRIOS CONT')
       AND se.idEmpresa = 1
 
 ) AS ultimos_saldos
@@ -52,4 +51,4 @@ sep.nome
 FROM produtoempresa p
 LEFT JOIN setorestoque sep ON sep.id = p.idSetorEstoquePadrao
 WHERE p.idEmpresa = 1) setpad ON ultimos_saldos.idProduto = setpad.idProduto
-WHERE rn = 1;
+WHERE rn = 1

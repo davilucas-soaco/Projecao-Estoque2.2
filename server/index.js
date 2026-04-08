@@ -69,7 +69,18 @@ function getQueriesDir() {
 
 async function loadQuery(filename) {
   const filePath = path.join(getQueriesDir(), filename);
-  return fs.promises.readFile(filePath, 'utf8');
+  let sql = await fs.promises.readFile(filePath, 'utf8');
+
+  // Tokens seguros (evita SQL injection via .env)
+  if (filename === 'saldo-estoque.sql') {
+    const rawSectorIds = String(process.env.STOCK_SECTOR_IDS || '5,24').trim();
+    if (!/^\d+(,\d+)*$/.test(rawSectorIds)) {
+      throw new Error('STOCK_SECTOR_IDS inválido. Use apenas números separados por vírgula, ex: 5,24');
+    }
+    sql = sql.replace(/\{\{STOCK_SECTOR_IDS\}\}/g, rawSectorIds);
+  }
+
+  return sql;
 }
 
 async function getConnection() {
