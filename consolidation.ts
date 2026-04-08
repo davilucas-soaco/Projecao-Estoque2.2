@@ -272,15 +272,21 @@ export function buildConsolidatedData(
     }
   });
 
+  const stockKey = (v: unknown): string => String(v ?? '').trim().toUpperCase();
   const stockMap = new Map<string, number>();
-  stock.forEach((s) => stockMap.set(s.codigo, s.saldoSetorFinal));
+  // A API pode retornar múltiplas linhas por produto (uma por setor). Consolidamos por código.
+  stock.forEach((s) => {
+    const key = stockKey(s.codigo);
+    const prev = stockMap.get(key) ?? 0;
+    stockMap.set(key, prev + Number(s.saldoSetorFinal ?? 0));
+  });
 
   productMap.forEach((prod) => {
     if (!prod.isShelf) {
-      prod.estoqueAtual = stockMap.get(prod.codigo) || 0;
+      prod.estoqueAtual = stockMap.get(stockKey(prod.codigo)) || 0;
     } else if (prod.components) {
       prod.components.forEach((comp) => {
-        comp.estoqueAtual = stockMap.get(comp.codigo) || 0;
+        comp.estoqueAtual = stockMap.get(stockKey(comp.codigo)) || 0;
       });
     }
   });
