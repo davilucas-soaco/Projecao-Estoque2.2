@@ -60,6 +60,9 @@ interface Props {
   tableFiltersResetToken?: number;
   /** Ref do container para fullscreen (inclui filtros + tabela). Se não informado, usa o wrapper interno. */
   fullscreenContainerRef?: React.RefObject<HTMLDivElement | null>;
+  /** Metadados compartilhados (mesmo exibido no modal de importação). */
+  lastProjectionUploadAt?: string | null;
+  lastProjectionUploadUser?: string | null;
 }
 
 type RouteValueField = 'pedido' | 'falta';
@@ -204,6 +207,8 @@ const ProjectionTable: React.FC<Props> = ({
   ignorePreviousConsumptions = false,
   tableFiltersResetToken = 0,
   fullscreenContainerRef,
+  lastProjectionUploadAt,
+  lastProjectionUploadUser,
 }) => {
   const selectedCategorias = new Set<string>();
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>([]);
@@ -2025,7 +2030,19 @@ const ProjectionTable: React.FC<Props> = ({
         ref={tableWrapperRef}
         className="projection-table-wrapper bg-white dark:bg-[#252525] rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col flex-1 relative min-h-0 transition-all duration-300"
       >
-        <div className="no-print px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+        <div className="no-print px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            {lastProjectionUploadAt && (
+              <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-gray-50 dark:bg-[#1f2933] border border-gray-200 dark:border-gray-700">
+                <Info className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                <p className="text-[11px] text-gray-700 dark:text-gray-200 truncate">
+                  <strong>Último upload de projeção:</strong> {lastProjectionUploadAt}
+                  {lastProjectionUploadUser ? ` por ${lastProjectionUploadUser}` : ''}
+                </p>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
           <button
             type="button"
             onClick={toggleFullscreen}
@@ -2046,6 +2063,7 @@ const ProjectionTable: React.FC<Props> = ({
             <Download className="w-3.5 h-3.5" />
             Exportar Excel
           </button>
+          </div>
         </div>
         <div
           ref={tableContainerRef}

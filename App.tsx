@@ -786,6 +786,8 @@ const App: React.FC = () => {
                   selectedSetores={projectionFilterSetores}
                   ignorePreviousConsumptions={ignorePreviousConsumptions}
                   tableFiltersResetToken={tableFiltersResetToken}
+                  lastProjectionUploadAt={projectionMeta?.lastUploadAt ?? null}
+                  lastProjectionUploadUser={projectionMeta?.lastUploadUser ?? null}
                 />
               </div>
             </div>
@@ -867,6 +869,8 @@ const App: React.FC = () => {
                     selectedSetores={projectionFilterSetores}
                     ignorePreviousConsumptions={ignorePreviousConsumptions}
                     tableFiltersResetToken={tableFiltersResetToken}
+                    lastProjectionUploadAt={projectionMeta?.lastUploadAt ?? null}
+                    lastProjectionUploadUser={projectionMeta?.lastUploadUser ?? null}
                   />
                 </div>
               </div>
