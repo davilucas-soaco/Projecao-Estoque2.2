@@ -13,7 +13,9 @@ const envPath = path.resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 
 const app = express();
-const PORT = process.env.PORT || 3535;
+/** SERVER_PORT tem prioridade sobre PORT (evita conflito quando PORT=3000 já está em uso por outro processo). */
+let PORT = parseInt(String(process.env.SERVER_PORT || process.env.PORT || '3535'), 10);
+if (!Number.isFinite(PORT) || PORT < 1) PORT = 3535;
 
 const dbConfig = {
   host: process.env.DB_HOST,
@@ -59,7 +61,7 @@ app.get('/', (_req, res) => {
   res.json({
     ok: true,
     message: 'API Projeção de Estoque',
-    endpoints: { stock: 'GET /api/stock' },
+    endpoints: { stock: 'GET /api/stock', shelfFicha: 'GET /api/shelf-ficha' },
   });
 });
 
@@ -106,6 +108,26 @@ function normalizeStockRow(row) {
   return out;
 }
 
+/** Converte linha MySQL (aliases snake_case) para o formato ShelfFicha do frontend. */
+function rowToShelfFicha(row) {
+  if (!row || typeof row !== 'object') return null;
+  const codigo = row.codigo_estante;
+  if (codigo == null || String(codigo).trim() === '') return null;
+  const descRaw = row.desc_estante;
+  const desc =
+    descRaw != null && String(descRaw).trim() !== '' ? String(descRaw).trim() : undefined;
+  return {
+    codigoEstante: String(codigo).trim(),
+    descEstante: desc,
+    codColuna: String(row.cod_coluna ?? '').trim(),
+    descColuna: String(row.desc_coluna ?? '').trim(),
+    qtdColuna: toNumber(row.qtd_coluna),
+    codBandeja: String(row.cod_bandeja ?? '').trim(),
+    descBandeja: String(row.desc_bandeja ?? '').trim(),
+    qtdBandeja: toNumber(row.qtd_bandeja),
+  };
+}
+
 // GET /api/stock — Saldo estoque
 app.get('/api/stock', async (_req, res) => {
   try {
@@ -120,6 +142,24 @@ app.get('/api/stock', async (_req, res) => {
   } catch (err) {
     console.error('GET /api/stock error:', err.message);
     res.status(500).json({ error: 'Erro ao buscar estoque. Tente novamente.' });
+  }
+});
+
+// GET /api/shelf-ficha — Mini ficha (estante → coluna/bandeja) via ERP
+app.get('/api/shelf-ficha', async (_req, res) => {
+  try {
+    const sql = await loadQuery('mini-ficha.sql');
+    const conn = await getConnection();
+    try {
+      const [rows] = await conn.execute(sql);
+      const list = (rows || []).map(rowToShelfFicha).filter(Boolean);
+      res.json(list);
+    } finally {
+      await conn.end();
+    }
+  } catch (err) {
+    console.error('GET /api/shelf-ficha error:', err.message);
+    res.status(500).json({ error: 'Erro ao buscar ficha de estantes. Tente novamente.' });
   }
 });
 
