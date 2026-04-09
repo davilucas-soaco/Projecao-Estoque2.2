@@ -1,4 +1,4 @@
-import type { StockItem } from './types';
+import type { ShelfFicha, StockItem } from './types';
 
 const CONFIGURED_API_BASE = import.meta.env.VITE_API_URL?.trim();
 
@@ -34,14 +34,34 @@ function shouldSkipCandidate(base: string): boolean {
 
 function getApiBaseCandidates(): string[] {
   const candidates: string[] = [];
+
+  /**
+   * Em desenvolvimento, a origem do Vite vem ANTES de VITE_API_URL.
+   * Assim /api/stock e /api/shelf-ficha batem no mesmo Node (proxy → porta 3535).
+   * Caso contrário: o remoto pode ter só /api/stock (OK) e não ter /api/shelf-ficha (404),
+   * e o front nunca usaria o backend local completo na primeira requisição.
+   */
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    candidates.push(window.location.origin.replace(/\/+$/, ''));
+  }
+
   if (CONFIGURED_API_BASE) candidates.push(CONFIGURED_API_BASE);
 
+  /** Mesmo hostname da página na porta 3000 (ex.: front em :5257 e API em :3000 no mesmo servidor). */
   if (typeof window !== 'undefined') {
     const fromHost = `${window.location.protocol}//${window.location.hostname}:3000`;
     candidates.push(fromHost);
   }
 
-  candidates.push('http://localhost:3000');
+  /**
+   * Em produção NÃO usar localhost/127.0.0.1: no navegador do usuário isso é o PC dele, não o servidor —
+   * gera ERR_CONNECTION_REFUSED quando alguém acessa pelo IP da rede (ex.: 10.80.x.x).
+   */
+  if (import.meta.env.DEV) {
+    candidates.push('http://localhost:3000');
+    candidates.push('http://127.0.0.1:3535');
+    candidates.push('http://localhost:3535');
+  }
 
   // Remove duplicados e barras finais
   return Array.from(new Set(candidates.map((u) => u.replace(/\/+$/, ''))));
@@ -97,6 +117,26 @@ export async function fetchStock(): Promise<StockItem[]> {
 
   throw new Error(
     `Não foi possível conectar à API de estoque. URLs testadas: ${bases.join(', ')}. ` +
+      `Se necessário, ajuste VITE_API_URL no .env e reinicie o Vite.`
+  );
+}
+
+export async function fetchShelfFicha(): Promise<ShelfFicha[]> {
+  const bases = getApiBaseCandidates().filter((base) => !shouldSkipCandidate(base));
+  const errors: string[] = [];
+
+  for (const base of bases) {
+    try {
+      const res = await fetchWithTimeout(`${base}/api/shelf-ficha`);
+      return handleResponse<ShelfFicha[]>(res);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${base} -> ${msg}`);
+    }
+  }
+
+  throw new Error(
+    `Não foi possível conectar à API da ficha de estantes. URLs testadas: ${bases.join(', ')}. ` +
       `Se necessário, ajuste VITE_API_URL no .env e reinicie o Vite.`
   );
 }

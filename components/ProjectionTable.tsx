@@ -154,13 +154,32 @@ const filterProductsByNumericColumnFilters = (
 
 const HEADER_SAFE_TOP = 140;
 
+/** Largura máxima usada para encaixar o painel na viewport (filtros usam ~280–420px). */
+const FILTER_PANEL_MAX_WIDTH = 340;
+const FILTER_PANEL_MAX_HEIGHT = 320;
+const FILTER_PANEL_MARGIN = 8;
+
+/**
+ * Posição inicial do painel de filtro junto ao cabeçalho clicado.
+ * Usa a borda **esquerda** do âncora e limita à viewport — evita o bug de `anchorRect.right` + cap em maxX,
+ * que empurrava o painel para o canto direito quando a coluna estava no meio/fim da área útil.
+ */
 const getTooltipInitialPosition = (anchorRect: DOMRect) => {
-  const maxX = Math.max(16, window.innerWidth - 340);
-  const maxY = Math.max(16, window.innerHeight - 320);
-  return {
-    left: Math.min(Math.max(8, anchorRect.right), maxX),
-    top: Math.min(Math.max(HEADER_SAFE_TOP, anchorRect.bottom + 8), maxY),
-  };
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const minLeft = FILTER_PANEL_MARGIN;
+  const maxLeft = Math.max(minLeft, vw - FILTER_PANEL_MAX_WIDTH - FILTER_PANEL_MARGIN);
+  let left = anchorRect.left;
+  if (left > maxLeft) left = maxLeft;
+  if (left < minLeft) left = minLeft;
+
+  const minTop = HEADER_SAFE_TOP;
+  const maxTop = Math.max(minTop, vh - FILTER_PANEL_MAX_HEIGHT - FILTER_PANEL_MARGIN);
+  let top = anchorRect.bottom + FILTER_PANEL_MARGIN;
+  if (top > maxTop) top = maxTop;
+  if (top < minTop) top = minTop;
+
+  return { left, top };
 };
 
 const escapeHtml = (value: unknown): string =>
@@ -2267,7 +2286,11 @@ const ProjectionTable: React.FC<Props> = ({
                     </div>
                     <div className="flex border-t border-white/20 pt-1 text-[8px] font-bold">
                       <div
-                        ref={(el) => { if (routeValueFilterMenu?.field === 'pedido') valueFilterAnchorRef.current = el; }}
+                        ref={(el) => {
+                          if (routeValueFilterMenu?.field === 'pedido' && routeValueFilterMenu.colKey === col.key) {
+                            valueFilterAnchorRef.current = el;
+                          }
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2291,7 +2314,11 @@ const ProjectionTable: React.FC<Props> = ({
                         P {(routeValueFilters[getRouteFilterKey(col.key, 'pedido')]?.size ?? 0) > 0 ? '●' : ''}
                       </div>
                       <div
-                        ref={(el) => { if (routeValueFilterMenu?.field === 'falta') valueFilterAnchorRef.current = el; }}
+                        ref={(el) => {
+                          if (routeValueFilterMenu?.field === 'falta' && routeValueFilterMenu.colKey === col.key) {
+                            valueFilterAnchorRef.current = el;
+                          }
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();

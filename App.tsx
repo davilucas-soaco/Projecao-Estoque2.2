@@ -10,13 +10,11 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ShelfFicha, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
+import { UserProfile, Order, StockItem, ProductConsolidated, UserAccount, ProjecaoImportada, mapProjecaoImportadaToOrders } from './types';
 import { getDateColumns, getExtendedDateColumns, getTodayStart, getSoMoveisHorizonInfo, ROUTE_SO_MOVEIS } from './utils';
-import { fetchStock } from './api';
+import { fetchStock, fetchShelfFicha } from './api';
 import {
   supabase,
-  fetchShelfFicha,
-  upsertShelfFicha,
   fetchUserAccounts,
   upsertUserAccount,
   deleteUserAccount,
@@ -45,7 +43,6 @@ import { buildConsolidatedData, countEligibleProjectionRows, getEligibleUniqueOr
 
 const STORAGE_KEYS = {
   USERS: 'sa_industrial_accounts_v2',
-  SHELF_FICHA: 'sa_industrial_shelf_ficha_v2',
   USER_SESSION: 'sa_industrial_user_session_v2',
   USER_LAST_ACTIVITY: 'sa_industrial_user_last_activity_v1',
   LOGO: 'sa_industrial_company_logo_v1',
@@ -100,7 +97,6 @@ const App: React.FC = () => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyLogo, setCompanyLogo] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.LOGO));
   const [showErpPanel, setShowErpPanel] = useState(false);
-  const [erpStatus, setErpStatus] = useState<'connected' | 'disconnected' | 'syncing'>('syncing');
   const [logoLoadError, setLogoLoadError] = useState(false);
   const [visibleProductsPadrao, setVisibleProductsPadrao] = useState<number | null>(null);
   const [visibleProductsSimulacao, setVisibleProductsSimulacao] = useState<number | null>(null);
@@ -237,9 +233,8 @@ const App: React.FC = () => {
   const shelfFichaQuery = useQuery({
     queryKey: ['shelf_ficha'],
     queryFn: fetchShelfFicha,
-    enabled: !!supabase,
   });
-  const shelfFichaFromSupabase = shelfFichaQuery.data ?? [];
+  const shelfFicha = shelfFichaQuery.data ?? [];
 
   // Supabase: logo da empresa (com real-time)
   const logoQuery = useQuery({
@@ -249,11 +244,6 @@ const App: React.FC = () => {
     initialData: undefined,
   });
   const logoFromSupabase = logoQuery.data;
-  const [shelfFichaLocal, setShelfFichaLocal] = useState<ShelfFicha[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SHELF_FICHA);
-    return saved ? JSON.parse(saved) : [];
-  });
-  const shelfFicha = supabase ? shelfFichaFromSupabase : shelfFichaLocal;
 
   // Metadados de upload da projeção e sincronização de estoque
   const projectionMetaQuery = useQuery({
@@ -278,9 +268,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!supabase) localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
   }, [supabase, users]);
-  useEffect(() => {
-    if (!supabase) localStorage.setItem(STORAGE_KEYS.SHELF_FICHA, JSON.stringify(shelfFichaLocal));
-  }, [supabase, shelfFichaLocal]);
   useEffect(() => {
     if (!supabase) localStorage.setItem('sa_industrial_projection_v1', JSON.stringify(projectionLocal));
   }, [supabase, projectionLocal]);
@@ -308,20 +295,38 @@ const App: React.FC = () => {
     };
   }, [supabase, queryClient]);
 
-  useEffect(() => {
-    if (erpStatus === 'syncing' && stockQuery.isFetching) return;
-    if (stockQuery.isFetching) {
-      setErpStatus('syncing');
-      return;
-    }
-    if (stockQuery.error) {
-      setErpStatus('disconnected');
-      return;
-    }
-    if (Array.isArray(stockQuery.data)) {
-      setErpStatus('connected');
-    }
-  }, [stockQuery.isFetching, stockQuery.error, stockQuery.data, erpStatus]);
+  const stockApiStatus = useMemo((): 'connected' | 'disconnected' | 'syncing' => {
+    if (stockQuery.isError) return 'disconnected';
+    if (stockQuery.isFetching) return 'syncing';
+    if (stockQuery.isSuccess) return 'connected';
+    return 'syncing';
+  }, [stockQuery.isError, stockQuery.isFetching, stockQuery.isSuccess]);
+
+  const shelfFichaApiStatus = useMemo((): 'connected' | 'disconnected' | 'syncing' => {
+    if (shelfFichaQuery.isError) return 'disconnected';
+    if (shelfFichaQuery.isFetching) return 'syncing';
+    if (shelfFichaQuery.isSuccess) return 'connected';
+    return 'syncing';
+  }, [shelfFichaQuery.isError, shelfFichaQuery.isFetching, shelfFichaQuery.isSuccess]);
+
+  const erpOverallStatus = useMemo((): 'connected' | 'disconnected' | 'syncing' => {
+    if (stockApiStatus === 'syncing' || shelfFichaApiStatus === 'syncing') return 'syncing';
+    if (stockApiStatus === 'disconnected' || shelfFichaApiStatus === 'disconnected') return 'disconnected';
+    return 'connected';
+  }, [stockApiStatus, shelfFichaApiStatus]);
+
+  const erpStatusLabel = (s: 'connected' | 'disconnected' | 'syncing') =>
+    s === 'connected' ? 'Conectado' : s === 'disconnected' ? 'Desconectado' : 'Sincronizando…';
+
+  const erpStatusShort = (s: 'connected' | 'disconnected' | 'syncing') =>
+    s === 'connected' ? 'OK' : s === 'disconnected' ? 'Erro' : '…';
+
+  const erpStatusDotClass = (s: 'connected' | 'disconnected' | 'syncing') =>
+    s === 'connected'
+      ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]'
+      : s === 'disconnected'
+      ? 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)]'
+      : 'bg-amber-300 animate-pulse';
 
   const handleLogin = (profile: UserProfile, name: string) => {
     const user = { profile, name };
@@ -443,20 +448,6 @@ const App: React.FC = () => {
     localStorage.removeItem(STORAGE_KEYS.SIMULATION);
   };
 
-  const handleImportShelfFicha = async (newFicha: ShelfFicha[]) => {
-    if (supabase) {
-      try {
-        await upsertShelfFicha(newFicha);
-        await queryClient.invalidateQueries({ queryKey: ['shelf_ficha'] });
-      } catch (err) {
-        console.error('Erro ao enviar ficha para Supabase:', err);
-        throw err;
-      }
-    } else {
-      setShelfFichaLocal(newFicha);
-    }
-  };
-
   const handleExportData = () => {
     const backup = { users: effectiveUsers, stock, shelfFicha, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
@@ -478,10 +469,6 @@ const App: React.FC = () => {
       }
     }
     if (json.stock) setStockOverlay(json.stock);
-    if (json.shelfFicha && !supabase) setShelfFichaLocal(json.shelfFicha);
-    if (json.shelfFicha && supabase) {
-      upsertShelfFicha(json.shelfFicha).then(() => queryClient.invalidateQueries({ queryKey: ['shelf_ficha'] })).catch(console.error);
-    }
     alert('Sistema restaurado com sucesso!');
   };
 
@@ -908,7 +895,6 @@ const App: React.FC = () => {
       {isImportModalOpen && (
         <ImportModal
           onClose={() => setIsImportModalOpen(false)}
-          onImportShelfFicha={handleImportShelfFicha}
           shelfFicha={shelfFicha}
           onImportProjection={handleImportProjection}
           lastProjectionUploadAt={projectionMeta?.lastUploadAt ?? null}
@@ -944,26 +930,29 @@ const App: React.FC = () => {
 
       {/* Conexão API / ERP */}
       {showErpPanel && (
-        <div className="fixed bottom-20 right-4 z-[70] w-80 bg-white dark:bg-[#252525] rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div
+          className="fixed bottom-20 right-4 z-[70] w-[22rem] max-w-[calc(100vw-2rem)] bg-white dark:bg-[#252525] rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+          data-erp-panel="v2-dual-status"
+        >
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] flex items-center justify-between">
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-0.5">
               <span className="text-[11px] font-bold text-neutral uppercase tracking-widest">
                 Conexão com API / ERP
               </span>
+              <span className="text-[10px] font-bold text-secondary dark:text-blue-400">
+                Painel com 2 APIs (estoque + lista de materiais)
+              </span>
+              <span className="text-[10px] text-neutral opacity-80">Mesmo servidor Node, rotas diferentes</span>
               <span
                 className={`text-xs font-bold ${
-                  erpStatus === 'connected'
+                  erpOverallStatus === 'connected'
                     ? 'text-emerald-500'
-                    : erpStatus === 'disconnected'
+                    : erpOverallStatus === 'disconnected'
                     ? 'text-red-500'
                     : 'text-yellow-500'
                 }`}
               >
-                {erpStatus === 'connected'
-                  ? 'Conectado'
-                  : erpStatus === 'disconnected'
-                  ? 'Desconectado'
-                  : 'Sincronizando'}
+                Resumo: {erpStatusLabel(erpOverallStatus)}
               </span>
             </div>
             <button
@@ -973,17 +962,53 @@ const App: React.FC = () => {
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="px-4 py-3 text-[11px] text-neutral space-y-1">
+          <div className="px-4 py-3 text-[11px] text-neutral space-y-3">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-[#1a1f26] p-2.5 space-y-1">
+              <div className="flex justify-between gap-2 items-start">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${erpStatusDotClass(stockApiStatus)}`} aria-hidden />
+                    <span className="font-bold leading-tight">1 — Estoque (saldo)</span>
+                  </div>
+                  <code className="text-[9px] text-neutral/70 block mt-0.5 pl-4">GET /api/stock</code>
+                </div>
+                <span
+                  className={`shrink-0 text-[10px] font-bold ${
+                    stockApiStatus === 'connected'
+                      ? 'text-emerald-500'
+                      : stockApiStatus === 'disconnected'
+                      ? 'text-red-500'
+                      : 'text-yellow-500'
+                  }`}
+                >
+                  {erpStatusLabel(stockApiStatus)}
+                </span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-[#1a1f26] p-2.5 space-y-1">
+              <div className="flex justify-between gap-2 items-start">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${erpStatusDotClass(shelfFichaApiStatus)}`} aria-hidden />
+                    <span className="font-bold leading-tight">2 — Lista de materiais (MiniFicha)</span>
+                  </div>
+                  <code className="text-[9px] text-neutral/70 block mt-0.5 pl-4">GET /api/shelf-ficha</code>
+                </div>
+                <span
+                  className={`shrink-0 text-[10px] font-bold ${
+                    shelfFichaApiStatus === 'connected'
+                      ? 'text-emerald-500'
+                      : shelfFichaApiStatus === 'disconnected'
+                      ? 'text-red-500'
+                      : 'text-yellow-500'
+                  }`}
+                >
+                  {erpStatusLabel(shelfFichaApiStatus)}
+                </span>
+              </div>
+            </div>
             <p>
-              <span className="font-bold">Status da API:</span>{' '}
-              {erpStatus === 'connected'
-                ? 'Conectado'
-                : erpStatus === 'disconnected'
-                ? 'Desconectado'
-                : 'Sincronizando'}
-            </p>
-            <p className="mt-2">
-              <span className="font-bold block">Última sincronização com ERP:</span>
+              <span className="font-bold block">Última sincronização registrada (estoque):</span>
               <span>{lastStockSyncAt || 'Nunca sincronizado'}</span>
             </p>
           </div>
@@ -992,30 +1017,33 @@ const App: React.FC = () => {
               type="button"
               onClick={async () => {
                 try {
-                  setErpStatus('syncing');
-                  const result = await stockQuery.refetch();
-                  if (result.error) {
-                    throw result.error;
+                  const [stockResult, shelfResult] = await Promise.all([
+                    stockQuery.refetch(),
+                    shelfFichaQuery.refetch(),
+                  ]);
+                  if (stockResult.error) {
+                    throw stockResult.error;
+                  }
+                  if (shelfResult.error) {
+                    throw shelfResult.error;
                   }
                   if (supabase) {
                     const at = new Date().toLocaleString('pt-BR');
                     await upsertStockSyncMeta(at);
                     await queryClient.invalidateQueries({ queryKey: ['stock_sync_meta'] });
                   }
-                  setErpStatus('connected');
                 } catch (err) {
                   console.error(err);
-                  setErpStatus('disconnected');
                 }
               }}
-              disabled={stockQuery.isFetching}
+              disabled={stockQuery.isFetching || shelfFichaQuery.isFetching}
               className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white shadow-md transition-all ${
-                stockQuery.isFetching
+                stockQuery.isFetching || shelfFichaQuery.isFetching
                   ? 'bg-gray-400 cursor-not-allowed'
                   : 'bg-secondary hover:bg-blue-700 active:scale-95'
               }`}
             >
-              {stockQuery.isFetching ? 'Sincronizando...' : 'Sincronizar'}
+              {stockQuery.isFetching || shelfFichaQuery.isFetching ? 'Sincronizando...' : 'Sincronizar'}
             </button>
           </div>
         </div>
@@ -1024,10 +1052,44 @@ const App: React.FC = () => {
       <button
         type="button"
         onClick={() => setShowErpPanel((prev) => !prev)}
-        className="fixed bottom-4 right-4 z-[60] flex items-center gap-2 px-4 py-2 rounded-full bg-secondary hover:bg-blue-700 text-white text-xs font-bold shadow-xl active:scale-95 transition-all"
+        title="Estoque: GET /api/stock · Lista de materiais: GET /api/shelf-ficha"
+        data-erp-fab="v2-dual-status"
+        aria-expanded={showErpPanel}
+        className={`fixed bottom-4 right-4 z-[60] flex items-center gap-2.5 pl-3 pr-4 py-2.5 rounded-2xl text-left active:scale-[0.98] transition-all duration-200 min-w-[13rem] max-w-[14.5rem] ${
+          showErpPanel
+            ? erpOverallStatus === 'connected'
+              ? 'text-white shadow-xl bg-emerald-700 hover:bg-emerald-600 ring-2 ring-emerald-400/50'
+              : erpOverallStatus === 'disconnected'
+              ? 'text-white shadow-xl bg-red-800 hover:bg-red-700 ring-2 ring-red-400/50'
+              : 'text-white shadow-xl bg-secondary hover:bg-blue-700 ring-2 ring-amber-300/60'
+            : erpOverallStatus === 'connected'
+            ? 'text-gray-200 dark:text-gray-200 shadow-md shadow-black/20 bg-emerald-950/35 dark:bg-emerald-950/45 backdrop-blur-md border border-emerald-500/20 hover:bg-emerald-900/45 hover:border-emerald-400/35'
+            : erpOverallStatus === 'disconnected'
+            ? 'text-gray-200 dark:text-gray-200 shadow-md shadow-black/20 bg-red-950/40 dark:bg-red-950/50 backdrop-blur-md border border-red-500/25 hover:bg-red-900/50 hover:border-red-400/40'
+            : 'text-gray-200 dark:text-gray-200 shadow-md shadow-black/20 bg-primary/55 dark:bg-[#0a1628]/70 backdrop-blur-md border border-secondary/30 hover:bg-primary/70 hover:border-secondary/50'
+        }`}
       >
-        <ArrowRightLeft className="w-4 h-4" />
-        <span>Conexão API / ERP</span>
+        <ArrowRightLeft className={`w-4 h-4 shrink-0 ${showErpPanel ? 'opacity-90' : 'opacity-70'}`} />
+        <div className="flex flex-col gap-1 leading-tight">
+          <span
+            className={`text-[10px] font-black uppercase tracking-wide ${showErpPanel ? 'opacity-95' : 'opacity-80'}`}
+          >
+            Conexão API / ERP
+          </span>
+          <span
+            className={`text-[9px] font-semibold pt-1 border-t ${showErpPanel ? 'opacity-90 border-white/25' : 'opacity-75 border-white/15 dark:border-white/10'}`}
+          >
+            Status separado (2 rotas)
+          </span>
+          <span className={`flex items-center gap-1.5 text-[10px] font-bold ${showErpPanel ? '' : 'opacity-90'}`}>
+            <span className={`h-2 w-2 rounded-full shrink-0 ${erpStatusDotClass(stockApiStatus)}`} aria-hidden />
+            Estoque: {erpStatusShort(stockApiStatus)}
+          </span>
+          <span className={`flex items-center gap-1.5 text-[10px] font-bold ${showErpPanel ? '' : 'opacity-90'}`}>
+            <span className={`h-2 w-2 rounded-full shrink-0 ${erpStatusDotClass(shelfFichaApiStatus)}`} aria-hidden />
+            Lista mat.: {erpStatusShort(shelfFichaApiStatus)}
+          </span>
+        </div>
       </button>
     </div>
   );
