@@ -40,7 +40,19 @@ LEFT JOIN produto p2
 LEFT JOIN listamateriais l
     ON pq.idListaMateriais = l.id
 
-WHERE l.descricao LIKE '%produ%'
+WHERE 
+(
+	-- 1 tudo da lista produção.
+	l.descricao LIKE '%produ%'
+	
+	OR 
+	
+	-- 2 alguns itens da lista padrão (validados pela engenharia)
+	(        l.descricao LIKE '%padrao%'
+        AND p.nome IN ('PA 7204', 'PA 7054') -- 👈 itens permitidos
+    )
+)
+  -- and p.nome = 'PA 7054'
   AND p.descricao LIKE '%estante%de%'
   AND (
         p2.descricao LIKE '%bandeja%estante%'
