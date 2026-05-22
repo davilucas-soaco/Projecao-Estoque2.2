@@ -1,5 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProductConsolidated, Order, ComponentData, ProjecaoImportada } from '../types';
+import {
+  computeSaldoProjetado,
+  formatSaldoProjetadoCell,
+  saldoProjetadoFilterKey,
+} from '../utils/saldoProjetado';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ROUTE_SO_MOVEIS,
@@ -101,7 +106,7 @@ const formatCellNum = (v: unknown): string | number => {
   return Math.round(n);
 };
 
-/** Valores de filtro alinhados ao texto exibido nas colunas Estoque / Pedido / Falta. */
+/** Valores de filtro alinhados ao texto exibido nas colunas Estoque / Pedido / Saldo projetado. */
 const sortFilterKeysNumericLike = (values: string[]): string[] =>
   [...values].sort((a, b) => {
     if (a === '-') return 1;
@@ -119,14 +124,7 @@ const pedidoFilterKey = (item: ProductConsolidated | ComponentData): string => {
   return Number(t) === 0 ? '-' : String(t);
 };
 
-const faltaFilterKey = (item: ProductConsolidated | ComponentData): string => {
-  if ('isShelf' in item && (item as ProductConsolidated).isShelf) return '-';
-  if ('pendenteProducao' in item) {
-    const p = (item as ProductConsolidated).pendenteProducao;
-    return Number(p) < 0 ? String(formatCellNum(p)) : '-';
-  }
-  return String(formatCellNum((item as ComponentData).falta));
-};
+const faltaFilterKey = saldoProjetadoFilterKey;
 
 const filterProductsByNumericColumnFilters = (
   base: ProductConsolidated[],
@@ -1721,7 +1719,7 @@ const ProjectionTable: React.FC<Props> = ({
         descricao: item.descricao,
         estoqueAtual: item.isShelf ? '-' : item.estoqueAtual,
         totalPedido: item.totalPedido,
-        falta: item.isShelf ? '-' : item.pendenteProducao,
+        falta: item.isShelf ? '-' : computeSaldoProjetado(item),
         routeData: item.routeData,
       };
       const isFichaComponentCode = fichaComponentCodes.has((item.codigo ?? '').trim().toUpperCase());
@@ -1737,7 +1735,7 @@ const ProjectionTable: React.FC<Props> = ({
           descricao: comp.descricao,
           estoqueAtual: comp.estoqueAtual,
           totalPedido: comp.totalPedido,
-          falta: comp.falta,
+          falta: computeSaldoProjetado(comp),
           routeData: comp.routeData,
         });
       }
@@ -1967,7 +1965,7 @@ const ProjectionTable: React.FC<Props> = ({
       `<th style="background:#041E42;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">DESCRIÇÃO</th>`,
       `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">ESTOQUE</th>`,
       `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">PEDIDO</th>`,
-      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">FALTA</th>`,
+      `<th style="background:#062c61;color:#fff;border:1px solid #203f77;padding:10px 10px;height:32px;text-align:center;">SALDO PROJETADO</th>`,
       ...columnsToRender.flatMap(() => [
         `<th style="background:#1d6f2f;color:#fff;border:1px solid #203f77;padding:8px 8px;height:32px;">P</th>`,
         `<th style="background:#9b0f0f;color:#fff;border:1px solid #203f77;padding:8px 8px;height:32px;">F</th>`,
@@ -1987,7 +1985,7 @@ const ProjectionTable: React.FC<Props> = ({
             item.totalPedido === 0 ? '-' : item.totalPedido
           )}</td>`,
           `<td style="border:1px solid #d8e0ef;padding:4px 8px;background:${rowBg};text-align:center;">${escapeHtml(
-            item.isShelf ? '-' : formatCellNum(item.pendenteProducao)
+            item.isShelf ? '-' : formatSaldoProjetadoCell(computeSaldoProjetado(item))
           )}</td>`,
         ];
 
@@ -2240,7 +2238,7 @@ const ProjectionTable: React.FC<Props> = ({
                   }}
                 >
                   <div className="flex items-center justify-center text-[11px] uppercase tracking-wider font-bold mb-0.5">
-                    <span>Falta</span>
+                    <span>Saldo projetado</span>
                     {renderSortIndicator('pendenteProducao')}
                   </div>
                   <div
@@ -2415,10 +2413,12 @@ const ProjectionTable: React.FC<Props> = ({
                       {row.totalPedido === 0 ? '-' : row.totalPedido}
                     </td>
                     <td
-                      className="print-num-col px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800"
+                      className={`print-num-col px-3 py-1.5 text-center font-bold text-[11px] border-r border-gray-100 dark:border-gray-800 ${
+                        typeof row.falta === 'number' && row.falta < 0 ? 'text-[#F59E0B]' : ''
+                      }`}
                       style={{ position: 'sticky', left: `${CODE_COL_W + descriptionWidth + STOCK_COL_W + PEDIDO_COL_W}px`, zIndex: 38, background: 'inherit', width: `${FALTA_COL_W}px`, minWidth: `${FALTA_COL_W}px` }}
                     >
-                      {row.kind === 'item' ? (Number(row.falta) < 0 ? formatCellNum(row.falta) : '-') : formatCellNum(row.falta)}
+                      {formatSaldoProjetadoCell(row.falta)}
                     </td>
                     {leftColPadding > 0 && <td colSpan={2} style={{ width: `${leftColPadding}px`, minWidth: `${leftColPadding}px` }} />}
                     {colsToRender.map((vCol) => {
@@ -2925,7 +2925,7 @@ const ProjectionTable: React.FC<Props> = ({
             className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#1f2933] cursor-move flex items-center justify-between"
             title="Arraste para mover"
           >
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Falta</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral">Filtro Saldo projetado</p>
             <button
               type="button"
               onClick={() => {

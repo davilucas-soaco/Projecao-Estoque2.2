@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { ProductConsolidated, ComponentData, DateColumn } from '../types';
+import { computeSaldoProjetado, formatSaldoProjetadoCell } from './saldoProjetado';
 import {
   itemHasPedidoInSupervisaoCategorias,
   getSupervisaoCellForItem,
@@ -378,7 +379,7 @@ export async function generateProjectionPdf(options: GeneratePdfOptions): Promis
         'Descrição',
         'Estoque',
         'Pedido',
-        'Falta',
+        'Saldo projetado',
         ...cols.map((c) => ({ content: c.label, colSpan: 2 })),
       ],
       [
@@ -400,15 +401,11 @@ export async function generateProjectionPdf(options: GeneratePdfOptions): Promis
       const isShelf = 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
       const estoque = isShelf ? '-' : String(item.estoqueAtual);
       const pedido = item.totalPedido === 0 ? '-' : String(item.totalPedido);
-      const pendente =
-        isShelf
-          ? '-'
-          : 'pendenteProducao' in item
-            ? (item as ProductConsolidated).pendenteProducao
-            : (item as ComponentData).falta;
-      const falta = pendente !== '-' && pendente < 0 ? String(pendente) : '-';
+      const saldoProjetado = isShelf
+        ? '-'
+        : String(formatSaldoProjetadoCell(computeSaldoProjetado(item)));
 
-      const row: string[] = [codigo, descCell, estoque, pedido, falta];
+      const row: string[] = [codigo, descCell, estoque, pedido, saldoProjetado];
       for (const col of cols) {
         const rd = item.routeData[col.key] || { pedido: 0, falta: 0 };
         row.push(formatCellNum(rd.pedido), formatCellNum(rd.falta));
@@ -465,11 +462,8 @@ export async function generateProjectionPdf(options: GeneratePdfOptions): Promis
             cellData.cell.styles.textColor = [220, 38, 38];
           }
           if (item && !isShelf && colIndex === 4) {
-            const pend =
-              'pendenteProducao' in item
-                ? (item as ProductConsolidated).pendenteProducao
-                : (item as ComponentData).falta;
-            if (pend < 0) {
+            const saldo = computeSaldoProjetado(item);
+            if (saldo !== '-' && saldo < 0) {
               cellData.cell.styles.textColor = [245, 158, 11];
             }
           }
@@ -905,7 +899,7 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
       'Descrição',
       'Estoque',
       'Pedido',
-      'Falta',
+      'Saldo projetado',
       ...colsBeforePrincipal.map((c) => ({
         content: isSpecialHorizonColumn(c.key) ? `${c.label}\n${specialHorizon.label}` : c.label,
         colSpan: 2,
@@ -931,20 +925,15 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
       const codigo = isComponent ? `  └ ${item.codigo}` : item.codigo;
       const isShelf = 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
       const estoque = isShelf ? '-' : String(item.estoqueAtual);
-      let pedidoChunk = 0;
-      let faltaChunk = 0;
-      for (const col of orderedChunkCols) {
-        const cell = getCellForColumn(item, col.key);
-        pedidoChunk += cell.pedido ?? 0;
-        faltaChunk += cell.falta ?? 0;
-      }
-      const pedido = pedidoChunk === 0 ? '-' : String(pedidoChunk);
-      const falta = faltaChunk >= 0 ? '-' : String(faltaChunk);
+      const pedido = item.totalPedido === 0 ? '-' : String(item.totalPedido);
+      const saldoProjetado = isShelf
+        ? '-'
+        : String(formatSaldoProjetadoCell(computeSaldoProjetado(item)));
 
       const cellPrincipal = getCellForColumn(item, principalCol.key);
       const status = getStatusFromMetrics(getCellMetrics(cellPrincipal));
 
-      const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
+      const row: string[] = [codigo, item.descricao, estoque, pedido, saldoProjetado];
       for (const col of colsBeforePrincipal) {
         const cell = getCellForColumn(item, col.key);
         row.push(...formatSupervisaoPF(cell.pedido, cell.falta));
@@ -1061,12 +1050,8 @@ export async function generateProjectionPdfV3(options: GeneratePdfV3Options): Pr
             cellData.cell.styles.textColor = [220, 38, 38];
           }
           if (item && !isShelf && colIndex === 4) {
-            let faltaChunk = 0;
-            for (const col of orderedChunkCols) {
-              const c = getCellForColumn(item, col.key);
-              faltaChunk += c.falta ?? 0;
-            }
-            if (faltaChunk < 0) cellData.cell.styles.textColor = FONT_AMARELO;
+            const saldo = computeSaldoProjetado(item);
+            if (saldo !== '-' && saldo < 0) cellData.cell.styles.textColor = FONT_AMARELO;
           }
           if (colIndex >= 5 && colIndex < 5 + pairCount * 2) {
             const routeIdx = Math.floor((colIndex - 5) / 2);
@@ -1282,7 +1267,7 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       'Descrição',
       'Estoque',
       'Pedido',
-      'Falta',
+      'Saldo projetado',
       ...colsBeforePrincipal.map((c) => ({
         content: isSpecialHorizonColumn(c.key) ? `${c.label}\n${specialHorizon.label}` : c.label,
         colSpan: 2,
@@ -1309,21 +1294,16 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
       const codigo = isComponent ? `  └ ${item.codigo}` : item.codigo;
       const isShelf = 'isShelf' in item && (item as ProductConsolidated).isShelf === true;
       const estoque = isShelf ? '-' : String(item.estoqueAtual);
-      let pedidoChunk = 0;
-      let faltaChunk = 0;
-      for (const col of orderedChunkCols) {
-        const cell = getDisplayedCell(getSupervisaoCell(item, col.key));
-        pedidoChunk += cell.pedido ?? 0;
-        faltaChunk += cell.falta ?? 0;
-      }
-      const pedido = pedidoChunk === 0 ? '-' : String(pedidoChunk);
-      const falta = faltaChunk >= 0 ? '-' : String(faltaChunk);
+      const pedido = item.totalPedido === 0 ? '-' : String(item.totalPedido);
+      const saldoProjetado = isShelf
+        ? '-'
+        : String(formatSaldoProjetadoCell(computeSaldoProjetado(item)));
 
       const cellPrincipal = getSupervisaoCell(item, principalCol.key);
       const principalCellDisplayed = getDisplayedCell(cellPrincipal);
       const status = getStatusFromMetrics(getCellMetrics(principalCellDisplayed));
 
-      const row: string[] = [codigo, item.descricao, estoque, pedido, falta];
+      const row: string[] = [codigo, item.descricao, estoque, pedido, saldoProjetado];
 
       for (const col of colsBeforePrincipal) {
         const cell = getDisplayedCell(getSupervisaoCell(item, col.key));
@@ -1478,12 +1458,8 @@ export async function generateProjectionPdfV2Supervisao(options: GeneratePdfV3Su
             }
           }
           if (item && !isShelf && colIndex === 4) {
-            let faltaChunk = 0;
-            for (const col of orderedChunkCols) {
-              const c = getDisplayedCell(getSupervisaoCell(item, col.key));
-              faltaChunk += c.falta ?? 0;
-            }
-            if (faltaChunk < 0) cellData.cell.styles.textColor = FONT_AMARELO;
+            const saldo = computeSaldoProjetado(item);
+            if (saldo !== '-' && saldo < 0) cellData.cell.styles.textColor = FONT_AMARELO;
           }
           if (colIndex >= routeStartIndex && item) {
             const colKey = colIndexToKey[colIndex];
